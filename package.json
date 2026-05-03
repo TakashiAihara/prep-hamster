@@ -1,0 +1,23 @@
+{
+  "name": "prep-hamster",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "備蓄管理アプリ",
+  "workspaces": [
+    "apps/administrator/client/*",
+    "apps/user/client/*",
+    "apps/core/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "bun run --filter '*' typecheck",
+    "format": "bun run --filter '*' format",
+    "lint": "bun run --filter '*' lint",
+    "test": "bun run --filter '*' test"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/bun": "latest"
+  }
+}
