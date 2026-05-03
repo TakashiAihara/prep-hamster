@@ -4,6 +4,7 @@
   "type": "module",
   "version": "0.0.0",
   "description": "備蓄管理アプリ",
+  "packageManager": "bun@1.3.13",
   "workspaces": [
     "apps/administrator/client/*",
     "apps/user/client/*",
@@ -11,14 +12,19 @@
     "packages/*"
   ],
   "scripts": {
-    "typecheck": "bun run --filter '*' typecheck",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "build": "turbo run build",
+    "dev": "turbo run dev",
     "format": "bun run --filter '*' format",
     "lint": "bun run --filter '*' lint",
-    "test": "bun run --filter '*' test"
+    "typecheck:bun": "bun run --filter '*' typecheck",
+    "test:bun": "bun run --filter '*' test"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "supabase": "^2.98.0",
+    "turbo": "^2.9.8",
     "typescript": "^5.7.0"
   }
 }
