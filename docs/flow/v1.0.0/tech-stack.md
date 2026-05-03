@@ -14,12 +14,15 @@
 
 ## 2. apps/core/api（バックエンド）
 
-| 項目                 | 採用                          | 理由                                                              |
-| -------------------- | ----------------------------- | ----------------------------------------------------------------- |
-| HTTP フレームワーク  | Hono on Bun                   | Bun 親和性が高い・型推論が強い・軽量                              |
-| ORM                  | Drizzle                       | Bun ネイティブサポート・SQL ファースト・型推論                    |
-| バリデーション       | Zod                           | エコシステム最大・`packages/schema` と共有                        |
-| 認証                 | 未確定                        | バックエンド選定（Supabase / Firebase / 自前）に依存              |
+| 項目                 | 採用                          | 理由                                                                |
+| -------------------- | ----------------------------- | ------------------------------------------------------------------- |
+| HTTP フレームワーク  | Hono on Bun                   | Bun 親和性が高い・型推論が強い・軽量                                |
+| ORM                  | Drizzle (postgres-js)         | Bun ネイティブサポート・SQL ファースト・型推論                      |
+| バリデーション       | Zod                           | エコシステム最大・`packages/schema` と共有                          |
+| バックエンド基盤     | Supabase                      | Postgres + Auth + Storage + Realtime をマネージドで利用             |
+| ローカル開発環境     | Supabase CLI（Docker）        | 本番と同じスタックをローカルでも起動。`supabase start` で立ち上がる |
+| マイグレーション管理 | Drizzle (`drizzle-kit`)       | スキーマ → SQL 生成 → ローカル/本番に適用。`packages/db/drizzle/`   |
+| 認証                 | Supabase Auth                 | パスワード + OAuth + magic link を提供                              |
 
 ## 3. apps/administrator/client/web（管理者向け Web）
 
@@ -77,7 +80,8 @@
 
 ## 8. 未確定事項
 
-- バックエンド選定（Supabase / Firebase / 自前 API）— 認証・RLS / セキュリティ・暗号化に直結。
+- Supabase Auth と `users` テーブルの統合方針（`auth.users` を直接参照するか、`public.users` でミラーするか）。
+- RLS ポリシー設計（グループ単位の論理分離をどう Postgres レベルで強制するか）。
 - CLI フレームワーク（commander vs citty）の最終決定。
 - NativeWind 採用可否（モバイルの DX は良いが導入トラブルの実績次第）。
 - Lint/Format に Biome を採用するか Prettier+ESLint のままか。
@@ -87,3 +91,4 @@
 ## ステータス・更新履歴
 - 2026-05-03: 初版作成。Expo / TanStack Start + shadcn + TanStack Query + Zustand / Hono on Bun / Drizzle / Zod を確定。
 - 2026-05-03: CLI を `apps/administrator/client/cli` と `apps/user/client/cli` の 2 系統に確定。
+- 2026-05-03: バックエンド基盤を Supabase に確定。ローカル開発は Supabase CLI（Docker）。マイグレーションは Drizzle が管理。

@@ -45,3 +45,21 @@ packages/
 mise install
 bun install
 ```
+
+## ローカル DB（Supabase + Drizzle）
+
+ローカル環境では Supabase CLI で Postgres / Auth / Storage を Docker で立て、Drizzle がスキーママイグレーションを管理する。
+
+```sh
+# Supabase ローカルスタックを起動（postgres は :54322）
+bunx supabase start
+
+# Drizzle スキーマからマイグレーション SQL を生成
+bun run --filter @prep-hamster/db db:generate
+
+# 生成済みマイグレーションをローカル Postgres に適用
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+  bun run --filter @prep-hamster/db db:migrate
+```
+
+Supabase ローカルスタックの停止: `bunx supabase stop`
