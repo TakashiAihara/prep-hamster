@@ -1,0 +1,18 @@
+{
+  "name": "@prep-hamster/cli-user",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "prep-hamster": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@prep-hamster/api-client": "workspace:*",
+    "citty": "^0.1.6"
+  }
+}
