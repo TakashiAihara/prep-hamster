@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.expo/
+.expo-shared/
+.tanstack/
+.output/
+.vinxi/
+
+# Native build outputs
+ios/build/
+android/build/
+android/app/build/
+android/.gradle/
+
+# Caches
+.cache/
+.turbo/
+.parcel-cache/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# Testing
+coverage/
