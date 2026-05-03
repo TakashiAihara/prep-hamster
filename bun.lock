@@ -10,6 +10,16 @@
         "typescript": "^5.7.0",
       },
     },
+    "apps/administrator/client/cli": {
+      "name": "@prep-hamster/cli-admin",
+      "version": "0.0.0",
+      "bin": {
+        "prep-hamster-admin": "./src/index.ts",
+      },
+      "dependencies": {
+        "citty": "^0.1.6",
+      },
+    },
     "apps/core/api": {
       "name": "@prep-hamster/api",
       "version": "0.0.0",
@@ -20,6 +30,17 @@
         "drizzle-orm": "^0.36.0",
         "hono": "^4.6.0",
         "zod": "^3.24.0",
+      },
+    },
+    "apps/user/client/cli": {
+      "name": "@prep-hamster/cli-user",
+      "version": "0.0.0",
+      "bin": {
+        "prep-hamster": "./src/index.ts",
+      },
+      "dependencies": {
+        "@prep-hamster/api-client": "workspace:*",
+        "citty": "^0.1.6",
       },
     },
     "packages/api-client": {
@@ -113,6 +134,10 @@
 
     "@prep-hamster/api-client": ["@prep-hamster/api-client@workspace:packages/api-client"],
 
+    "@prep-hamster/cli-admin": ["@prep-hamster/cli-admin@workspace:apps/administrator/client/cli"],
+
+    "@prep-hamster/cli-user": ["@prep-hamster/cli-user@workspace:apps/user/client/cli"],
+
     "@prep-hamster/db": ["@prep-hamster/db@workspace:packages/db"],
 
     "@prep-hamster/schema": ["@prep-hamster/schema@workspace:packages/schema"],
@@ -131,7 +156,11 @@
 
     "chownr": ["chownr@3.0.0", "", {}, "sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g=="],
 
+    "citty": ["citty@0.1.6", "", { "dependencies": { "consola": "^3.2.3" } }, "sha512-tskPPKEs8D2KPafUypv2gxwJP8h/OaJmC82QQGGDQcHvXX43xF2VDACcJVmZ0EuSxkpO9Kc4MlrA3q0+FG58AQ=="],
+
     "cmd-shim": ["cmd-shim@8.0.0", "", {}, "sha512-Jk/BK6NCapZ58BKUxlSI+ouKRbjH1NLZCgJkYoab+vEHUY3f6OzpNBN9u7HFSv9J6TRDGs4PLOHezoKGaFRSCA=="],
+
+    "consola": ["consola@3.4.2", "", {}, "sha512-5IKcdX0nnYavi6G7TtOhwkYzyjfJlatbjMjuLSfE2kYT5pMDOilZ4OvMhi637CcDICTmz3wARPoyhqyX1Y+XvA=="],
 
     "data-uri-to-buffer": ["data-uri-to-buffer@4.0.1", "", {}, "sha512-0R9ikRb668HB7QDxT1vkpuUBtqc53YyAwMwGeUFKRojY/NWKvdZ+9UYtRfGmhqNbRkTSVpMbmyhXipFFv2cb/A=="],
 
