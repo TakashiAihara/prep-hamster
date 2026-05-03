@@ -1,0 +1,20 @@
+* text=auto eol=lf
+
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.woff  binary
+*.woff2 binary
+
+bun.lock          linguist-generated=true
+package-lock.json linguist-generated=true
+pnpm-lock.yaml    linguist-generated=true
+yarn.lock         linguist-generated=true
+
+packages/db/drizzle/** linguist-generated=true
