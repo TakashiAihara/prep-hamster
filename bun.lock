@@ -22,6 +22,17 @@
         "zod": "^3.24.0",
       },
     },
+    "packages/api-client": {
+      "name": "@prep-hamster/api-client",
+      "version": "0.0.0",
+      "dependencies": {
+        "@prep-hamster/api": "workspace:*",
+        "hono": "^4.6.0",
+      },
+      "devDependencies": {
+        "@prep-hamster/db": "workspace:*",
+      },
+    },
     "packages/db": {
       "name": "@prep-hamster/db",
       "version": "0.0.0",
@@ -99,6 +110,8 @@
     "@isaacs/fs-minipass": ["@isaacs/fs-minipass@4.0.1", "", { "dependencies": { "minipass": "^7.0.4" } }, "sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w=="],
 
     "@prep-hamster/api": ["@prep-hamster/api@workspace:apps/core/api"],
+
+    "@prep-hamster/api-client": ["@prep-hamster/api-client@workspace:packages/api-client"],
 
     "@prep-hamster/db": ["@prep-hamster/db@workspace:packages/db"],
 
