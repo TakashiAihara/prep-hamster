@@ -1,8 +1,16 @@
-import { Hono } from "hono"
+import { createDb } from "@prep-hamster/db"
+import { createApp } from "./app"
 
-const app = new Hono()
+const DEFAULT_DB_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
-app.get("/health", (c) => c.json({ ok: true }))
+const db = createDb(process.env.DATABASE_URL ?? DEFAULT_DB_URL)
+const app = createApp({ db })
 
-export type AppType = typeof app
-export default app
+const port = Number(process.env.PORT ?? 3000)
+
+console.log(`[api] listening on http://localhost:${port}`)
+
+export default {
+  port,
+  fetch: app.fetch,
+}
