@@ -1,0 +1,38 @@
+services:
+  # production-like: build the Dockerfile, run as non-root, /health probed
+  # `docker compose --profile prod up --build`
+  api:
+    build:
+      context: .
+      dockerfile: apps/core/api/Dockerfile
+    image: prep-hamster-api:local
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
+      PORT: "3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: ["prod"]
+
+  # dev: bind-mount source, hot reload via `bun --watch`
+  # node_modules は named volume にして host の OS 差分を回避
+  # `docker compose --profile dev up`
+  api-dev:
+    image: oven/bun:1-slim
+    working_dir: /app
+    command: ["sh", "-c", "bun install --frozen-lockfile && bun run --watch apps/core/api/src/index.ts"]
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
+      PORT: "3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app
+      - api_node_modules:/app/node_modules
+    profiles: ["dev"]
+
+volumes:
+  api_node_modules:

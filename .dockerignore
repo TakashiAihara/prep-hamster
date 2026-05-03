@@ -1,0 +1,45 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.cache
+**/.next
+**/.expo
+**/.expo-shared
+**/.tanstack
+**/.output
+**/.vinxi
+**/coverage
+**/.tsbuildinfo
+**/*.tsbuildinfo
+
+.git
+.github
+.vscode
+.idea
+
+.env
+.env.local
+.env.*.local
+
+*.log
+**/*.log
+
+# repository docs / config not needed in image
+docs
+README.md
+.editorconfig
+.gitattributes
+.gitignore
+.coderabbit.yaml
+.sonarcloud.properties
+sonar-project.properties
+.mise.toml
+
+# tests / fixtures (image is runtime only)
+**/__tests__
+**/*.test.ts
+**/*.spec.ts
+
+# supabase local dev artifacts (host-side only)
+supabase/.branches
+supabase/.temp

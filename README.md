@@ -79,3 +79,47 @@ Supabase ローカルスタックの停止: `bunx supabase stop`
 - **IDE 言語サーバー**: 本家 `tsc`（`typescript@^5.7` を devDep に維持）。tsgo は LSP の機能パリティが未完成のため
 
 切替対象は v1.0.0 では `--noEmit` のみ。`declaration` / `declarationMap` / `incremental` などの emit パスは tsgo 側でまだ「進行中」とされているため、必要になったら再評価する。
+
+## ローカルで API を Docker で動かす
+
+API を本番（Cloud Run）に近い環境で確認したい時 / Hot reload で開発したい時の 2 モードを用意している。
+DB は引き続き Supabase CLI（host 上の `:54322`）に接続する前提。
+
+### 前提
+
+- `bunx supabase start` で Postgres が起動済み
+- Linux の素の Docker daemon を使う場合、`host.docker.internal` 解決のため `compose.yaml` の `extra_hosts` を入れている。Docker Desktop / WSL では自動で解決される。
+
+### dev プロファイル（hot reload）
+
+ソースを bind mount し、コンテナ内で `bun install` → `bun --watch` で起動する。
+
+```sh
+docker compose --profile dev up
+```
+
+- `localhost:3000` で API、`/health` が 200 を返せば疎通
+- `node_modules` は named volume (`api_node_modules`) に隔離して host の OS 差分を回避
+
+### prod プロファイル（本番再現）
+
+`apps/core/api/Dockerfile` をビルドして、非 root ユーザーで起動する。
+
+```sh
+docker compose --profile prod up --build
+```
+
+- 同じ Dockerfile が将来 Cloud Run へのデプロイにも使われる
+- `HEALTHCHECK` で `/health` を 30s ごとに監視
+
+### 動作確認
+
+```sh
+# 別ターミナルから
+curl -s http://localhost:3000/health
+# → {"ok":true}
+
+# CLI で叩く（PREP_HAMSTER_USER_ID は stub 認証ヘッダ用）
+PREP_HAMSTER_USER_ID=00000000-0000-0000-0000-000000000001 \
+  bun run --filter @prep-hamster/cli-user start stock list
+```
