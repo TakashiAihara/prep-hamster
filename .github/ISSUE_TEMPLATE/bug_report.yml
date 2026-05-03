@@ -1,0 +1,59 @@
+name: Bug report
+description: 不具合を報告する
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: 何が起きているか、1〜2 行で。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 最小の再現手順を箇条書きで。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待動作
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の動作
+      description: エラーメッセージ・スタックトレース・スクリーンショットがあれば貼る。
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 環境
+      description: OS / ブラウザ / Bun バージョン / commit SHA など、関連するもの。
+      placeholder: |
+        - OS:
+        - Bun:
+        - commit:
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補足
+      description: 関連 Issue / 推定原因 / 回避策などがあれば。
+    validations:
+      required: false
