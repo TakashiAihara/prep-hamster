@@ -1,0 +1,51 @@
+name: Feature request
+description: 機能追加や改善を提案する
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: 何をしたいか、1〜2 行で。
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why（動機・課題）
+      description: なぜ必要か。背景・困っていること・ユーザー影響。
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What（提案する変更）
+      description: どこで何をするか。実装イメージや UI/CLI の動作例があれば。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 代替案
+      description: 検討した他の選択肢と、それを採用しない理由があれば。
+    validations:
+      required: false
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: 関連するが本 Issue では扱わない範囲。後続 Issue があればリンク。
+    validations:
+      required: false
+
+  - type: textarea
+    id: references
+    attributes:
+      label: 関連 Issue / 参考リンク
+    validations:
+      required: false
