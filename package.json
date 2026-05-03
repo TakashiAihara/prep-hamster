@@ -17,7 +17,8 @@
     "test": "bun run --filter '*' test"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "supabase": "^2.98.0",
+    "typescript": "^5.7.0"
   }
 }
