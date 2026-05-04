@@ -1,0 +1,80 @@
+# Label rules for actions/labeler@v5
+# See: .github/labeling-policy.md
+
+# --- Apps ---
+"changed/apps/core/api":
+  - changed-files:
+      - any-glob-to-any-file: "apps/core/api/**"
+
+"changed/apps/user/client/cli":
+  - changed-files:
+      - any-glob-to-any-file: "apps/user/client/cli/**"
+
+"changed/apps/user/client/mobile":
+  - changed-files:
+      - any-glob-to-any-file: "apps/user/client/mobile/**"
+
+"changed/apps/administrator/client/cli":
+  - changed-files:
+      - any-glob-to-any-file: "apps/administrator/client/cli/**"
+
+"changed/apps/administrator/client/web":
+  - changed-files:
+      - any-glob-to-any-file: "apps/administrator/client/web/**"
+
+# --- Packages ---
+"changed/packages/schema":
+  - changed-files:
+      - any-glob-to-any-file: "packages/schema/**"
+
+"changed/packages/db":
+  - changed-files:
+      - any-glob-to-any-file: "packages/db/**"
+
+"changed/packages/api-client":
+  - changed-files:
+      - any-glob-to-any-file: "packages/api-client/**"
+
+"changed/packages/jan-api":
+  - changed-files:
+      - any-glob-to-any-file: "packages/jan-api/**"
+
+"changed/packages/sync":
+  - changed-files:
+      - any-glob-to-any-file: "packages/sync/**"
+
+# --- Docs ---
+"changed/docs":
+  - changed-files:
+      - any-glob-to-any-file: "docs/**"
+
+# --- CI / GitHub config ---
+"changed/ci":
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"
+
+# --- Docker ---
+"changed/docker":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "Dockerfile"
+          - "compose.yaml"
+          - "compose.*.yaml"
+          - ".dockerignore"
+          - "apps/**/Dockerfile"
+          - "apps/**/.dockerignore"
+
+# --- Supabase local stack ---
+"changed/supabase":
+  - changed-files:
+      - any-glob-to-any-file: "supabase/**"
+
+# --- Build / monorepo config (root level) ---
+"changed/build":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "turbo.json"
+          - "tsconfig.base.json"
+          - "package.json"
+          - "bun.lock"
+          - ".mise.toml"
