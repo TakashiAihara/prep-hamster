@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "oxc",
+    "import",
+    "promise",
+    "node",
+    "unicorn"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error",
+    "restriction": "off",
+    "pedantic": "off",
+    "style": "off",
+    "nursery": "off"
+  },
+  "rules": {
+    "no-console": "off",
+    "no-empty-pattern": "error",
+    "import/no-cycle": "warn",
+    "unicorn/no-process-exit": "off",
+    "unicorn/prefer-node-protocol": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["**/__tests__/**", "**/*.test.ts", "**/*.spec.ts"],
+      "rules": {
+        "no-empty": "off"
+      }
+    },
+    {
+      "files": ["packages/db/drizzle.config.ts"],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.turbo/**",
+    "packages/db/drizzle/**",
+    "supabase/.branches/**",
+    "supabase/.temp/**"
+  ]
+}

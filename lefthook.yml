@@ -3,9 +3,16 @@
 # 運用ルール:
 # - CI 中は CI=true により lefthook 側で自動 skip される
 # - 個別 hook を一時 skip したいときは `LEFTHOOK=0 git commit ...`
-# - pre-commit / pre-push は oxfmt / oxlint 導入後（Phase 2-2 / 2-3）に追加する
+# - pre-commit に oxfmt はまだ未導入（Phase 2-3 で追加）
 
 commit-msg:
   jobs:
     - name: commitlint
       run: bash .lefthook/commit-msg/commitlint.sh {1}
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: oxlint
+      glob: "*.{ts,tsx,js,jsx,mjs,cjs}"
+      run: bunx oxlint {staged_files}
