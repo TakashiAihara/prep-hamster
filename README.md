@@ -5,15 +5,15 @@
 ## ドキュメント
 
 - 流動ドキュメント（要件・設計）: [`docs/flow/v1.0.0/`](docs/flow/v1.0.0/)
-    - [requirements.md](docs/flow/v1.0.0/requirements.md) — 要件定義（Why / What）
-    - [screen-flow.md](docs/flow/v1.0.0/screen-flow.md) — 画面・操作フロー
-    - [data-model.md](docs/flow/v1.0.0/data-model.md) — データモデル
-    - [jan-api-candidates.md](docs/flow/v1.0.0/jan-api-candidates.md) — JAN API 候補比較
-    - [tech-stack.md](docs/flow/v1.0.0/tech-stack.md) — 採用技術
+  - [requirements.md](docs/flow/v1.0.0/requirements.md) — 要件定義（Why / What）
+  - [screen-flow.md](docs/flow/v1.0.0/screen-flow.md) — 画面・操作フロー
+  - [data-model.md](docs/flow/v1.0.0/data-model.md) — データモデル
+  - [jan-api-candidates.md](docs/flow/v1.0.0/jan-api-candidates.md) — JAN API 候補比較
+  - [tech-stack.md](docs/flow/v1.0.0/tech-stack.md) — 採用技術
 - 恒久ドキュメント: [`docs/stock/`](docs/stock/)
-    - [glossary.md](docs/stock/glossary.md) — 用語集
-    - [roles.md](docs/stock/roles.md) — ロール定義
-    - [operational-policy.md](docs/stock/operational-policy.md) — 運用ポリシー
+  - [glossary.md](docs/stock/glossary.md) — 用語集
+  - [roles.md](docs/stock/roles.md) — ロール定義
+  - [operational-policy.md](docs/stock/operational-policy.md) — 運用ポリシー
 
 ## ワークスペース構成
 

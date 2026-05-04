@@ -5,34 +5,19 @@
     "typecheck": {
       "description": "型検査 (tsc --noEmit)",
       "dependsOn": ["^typecheck"],
-      "inputs": [
-        "src/**",
-        "tsconfig.json",
-        "tsconfig.*.json",
-        "package.json"
-      ],
+      "inputs": ["src/**", "tsconfig.json", "tsconfig.*.json", "package.json"],
       "outputs": []
     },
     "build": {
       "description": "ビルド成果物を持つ package 用 (現状は枠のみ)",
       "dependsOn": ["^build"],
-      "inputs": [
-        "src/**",
-        "tsconfig.json",
-        "tsconfig.*.json",
-        "package.json"
-      ],
+      "inputs": ["src/**", "tsconfig.json", "tsconfig.*.json", "package.json"],
       "outputs": ["dist/**"]
     },
     "test": {
       "description": "テスト (Bun は TS を直接解決するため ^build ではなく ^typecheck に依存)",
       "dependsOn": ["^typecheck"],
-      "inputs": [
-        "src/**",
-        "tsconfig.json",
-        "tsconfig.*.json",
-        "package.json"
-      ],
+      "inputs": ["src/**", "tsconfig.json", "tsconfig.*.json", "package.json"],
       "outputs": []
     },
     "dev": {

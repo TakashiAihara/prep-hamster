@@ -1,13 +1,7 @@
 import { z } from "zod"
 import { Id, Timestamp } from "../common"
 
-export const StockEventTypeSchema = z.enum([
-  "ADD",
-  "CONSUME",
-  "DISCARD",
-  "MOVE",
-  "EDIT",
-])
+export const StockEventTypeSchema = z.enum(["ADD", "CONSUME", "DISCARD", "MOVE", "EDIT"])
 export type StockEventType = z.infer<typeof StockEventTypeSchema>
 
 export const StockEventSchema = z.object({

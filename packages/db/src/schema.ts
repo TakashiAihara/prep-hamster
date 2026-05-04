@@ -44,10 +44,7 @@ export const stockEventTypeEnum = pgEnum("stock_event_type", [
   "EDIT",
 ])
 
-export const shoppingListSourceEnum = pgEnum("shopping_list_source", [
-  "AUTO",
-  "MANUAL",
-])
+export const shoppingListSourceEnum = pgEnum("shopping_list_source", ["AUTO", "MANUAL"])
 
 export const shoppingListStatusEnum = pgEnum("shopping_list_status", [
   "OPEN",
