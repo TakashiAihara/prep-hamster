@@ -1,5 +1,9 @@
-import { Hono } from "hono"
+import { OpenAPIHono } from "@hono/zod-openapi"
+import { Scalar } from "@scalar/hono-api-reference"
 import type { Db } from "@prep-hamster/db"
+import { withUserAuth } from "./middleware/auth"
+import { withDb } from "./middleware/db"
+import { onError } from "./middleware/error"
 import { stocksRouter } from "./routes/stocks"
 
 export type AppEnv = {
@@ -10,22 +14,27 @@ export type AppEnv = {
 }
 
 export function createApp(opts: { db: Db }) {
-  return new Hono<AppEnv>()
-    .use("*", async (c, next) => {
-      c.set("db", opts.db)
-      await next()
-    })
-    .get("/health", (c) => c.json({ ok: true as const }))
-    .use("/v1/*", async (c, next) => {
-      const userId = c.req.header("x-user-id")
-      if (!userId) {
-        return c.json({ error: "x-user-id header required" }, 401)
-      }
-      c.set("userId", userId)
-      await next()
-      return
-    })
-    .route("/v1/stocks", stocksRouter)
+  const app = new OpenAPIHono<AppEnv>()
+
+  app.onError(onError)
+  app.use("*", withDb(opts.db))
+  app.use("/v1/*", withUserAuth)
+
+  app.doc("/openapi.json", {
+    openapi: "3.1.0",
+    info: {
+      title: "prep-hamster API",
+      version: "0.0.0",
+      description: "備蓄管理アプリのバックエンド API",
+    },
+    servers: [{ url: "http://localhost:3000", description: "local dev" }],
+  })
+
+  app.get("/docs", Scalar({ url: "/openapi.json", theme: "default" }))
+
+  // route 定義をチェイン化することで `hc<typeof app>` が
+  // 全 endpoint を型として認識できるようにする。
+  return app.get("/health", (c) => c.json({ ok: true as const })).route("/v1/stocks", stocksRouter)
 }
 
 export type AppType = ReturnType<typeof createApp>
