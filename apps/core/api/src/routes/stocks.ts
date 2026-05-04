@@ -1,24 +1,94 @@
-import { Hono } from "hono"
-import { zValidator } from "@hono/zod-validator"
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, eq, isNull } from "drizzle-orm"
-import { z } from "zod"
 import { stocks } from "@prep-hamster/db"
-import { StockSchema } from "@prep-hamster/schema"
 import type { AppEnv } from "../app"
+import { createStockBodyDtoSchema, errorResponseSchema, stockDtoSchema } from "./schemas"
 
 const ListQuerySchema = z.object({
-  groupId: z.string().uuid(),
+  groupId: z.string().uuid().openapi({ example: "00000000-0000-0000-0000-000000000000" }),
 })
 
-const CreateStockBodySchema = StockSchema.omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-  deletedAt: true,
+// drizzle 行を API DTO 形式 (timestamp は ISO string、id は plain UUID) に変換
+const toStockDto = (row: typeof stocks.$inferSelect): z.infer<typeof stockDtoSchema> => ({
+  id: row.id,
+  groupId: row.groupId,
+  itemId: row.itemId,
+  locationId: row.locationId,
+  quantity: row.quantity,
+  unit: row.unit,
+  useByDate: row.useByDate,
+  bestBeforeDate: row.bestBeforeDate,
+  openedAt: row.openedAt,
+  note: row.note,
+  createdAt: row.createdAt.toISOString(),
+  updatedAt: row.updatedAt.toISOString(),
+  deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
 })
 
-export const stocksRouter = new Hono<AppEnv>()
-  .get("/", zValidator("query", ListQuerySchema), async (c) => {
+const listStocksRoute = createRoute({
+  method: "get",
+  path: "/",
+  tags: ["stocks"],
+  summary: "在庫一覧を取得",
+  request: {
+    query: ListQuerySchema,
+  },
+  responses: {
+    200: {
+      description: "在庫一覧",
+      content: {
+        "application/json": {
+          schema: z.object({ stocks: z.array(stockDtoSchema) }),
+        },
+      },
+    },
+    401: {
+      description: "未認証",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    422: {
+      description: "クエリ不正",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+  },
+})
+
+const createStockRoute = createRoute({
+  method: "post",
+  path: "/",
+  tags: ["stocks"],
+  summary: "在庫を 1 件作成",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: createStockBodyDtoSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "作成成功",
+      content: {
+        "application/json": {
+          schema: z.object({ stock: stockDtoSchema }),
+        },
+      },
+    },
+    401: {
+      description: "未認証",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    422: {
+      description: "ボディ不正",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+  },
+})
+
+export const stocksRouter = new OpenAPIHono<AppEnv>()
+  .openapi(listStocksRoute, async (c) => {
     const { groupId } = c.req.valid("query")
     const db = c.get("db")
 
@@ -27,9 +97,9 @@ export const stocksRouter = new Hono<AppEnv>()
       .from(stocks)
       .where(and(eq(stocks.groupId, groupId), isNull(stocks.deletedAt)))
 
-    return c.json({ stocks: rows })
+    return c.json({ stocks: rows.map(toStockDto) }, 200)
   })
-  .post("/", zValidator("json", CreateStockBodySchema), async (c) => {
+  .openapi(createStockRoute, async (c) => {
     const body = c.req.valid("json")
     const db = c.get("db")
 
@@ -49,5 +119,8 @@ export const stocksRouter = new Hono<AppEnv>()
       })
       .returning()
 
-    return c.json({ stock: created }, 201)
+    if (!created) {
+      throw new Error("insert returned no row")
+    }
+    return c.json({ stock: toStockDto(created) }, 201)
   })
