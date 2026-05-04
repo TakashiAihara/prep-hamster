@@ -71,7 +71,7 @@ Supabase ローカルスタックの停止: `bunx supabase stop`
 
 ## 型チェック (typescript-go / tsgo)
 
-`bun run typecheck` は [`@typescript/native-preview`](https://www.npmjs.com/package/@typescript/native-preview) (tsgo) を使用する。Go 製の TypeScript コンパイラで本家 `tsc` のドロップインリプレイス。
+`bun run typecheck` は [`@typescript/native-preview`](https://www.npmjs.com/package/@typescript/native-preview) (tsgo) を使用する。Go 製の TypeScript コンパイラで、型チェック (`--noEmit`) において本家 `tsc` の代替として機能する（LSP / emit など他のパスは未対応または進行中）。
 
 役割分担:
 
