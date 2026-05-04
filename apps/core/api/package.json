@@ -22,7 +22,8 @@
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "typecheck": "tsgo --noEmit",
-    "test": "bun test"
+    "test": "bun test src",
+    "test:e2e": "bun test e2e"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.4.0",
