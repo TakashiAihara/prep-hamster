@@ -12,12 +12,16 @@ const MIGRATIONS_FOLDER = resolve(here, "../../../../packages/db/drizzle")
 
 export const testDb = createDb(TEST_DB_URL)
 
-let migrated = false
+let migratePromise: Promise<void> | null = null
 
-export async function ensureMigrated() {
-  if (migrated) return
-  await migrate(testDb, { migrationsFolder: MIGRATIONS_FOLDER })
-  migrated = true
+export function ensureMigrated(): Promise<void> {
+  if (!migratePromise) {
+    migratePromise = migrate(testDb, { migrationsFolder: MIGRATIONS_FOLDER }).catch((err) => {
+      migratePromise = null
+      throw err
+    })
+  }
+  return migratePromise
 }
 
 export async function truncateAll() {

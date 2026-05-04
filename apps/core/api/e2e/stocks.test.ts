@@ -15,6 +15,8 @@ test("POST /v1/stocks creates a stock and GET returns it", async () => {
   const { userId, groupId, itemId, locationId } = await seedBaseFixture()
   const app = createApp({ db: testDb })
 
+  const oneYearAhead = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
   const createRes = await app.request("/v1/stocks", {
     method: "POST",
     headers: {
@@ -28,7 +30,7 @@ test("POST /v1/stocks creates a stock and GET returns it", async () => {
       quantity: 3,
       unit: "個",
       useByDate: null,
-      bestBeforeDate: "2027-01-01",
+      bestBeforeDate: oneYearAhead,
       openedAt: null,
       note: null,
     }),
