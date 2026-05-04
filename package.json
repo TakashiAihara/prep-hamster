@@ -12,6 +12,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "lefthook install",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "build": "turbo run build",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "lefthook": "^2.1.6",
     "supabase": "^2.98.0",
     "turbo": "^2.9.8",
     "typescript": "^5.7.0"
