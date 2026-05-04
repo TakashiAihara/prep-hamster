@@ -13,9 +13,7 @@ test("GET /health returns ok", async () => {
 
 test("GET /v1/stocks without x-user-id returns 401", async () => {
   const app = createApp({ db: mockDb })
-  const res = await app.request(
-    "/v1/stocks?groupId=00000000-0000-0000-0000-000000000000",
-  )
+  const res = await app.request("/v1/stocks?groupId=00000000-0000-0000-0000-000000000000")
   expect(res.status).toBe(401)
 })
 

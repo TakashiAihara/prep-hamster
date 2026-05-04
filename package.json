@@ -1,23 +1,23 @@
 {
   "name": "prep-hamster",
-  "private": true,
-  "type": "module",
   "version": "0.0.0",
+  "private": true,
   "description": "備蓄管理アプリ",
-  "packageManager": "bun@1.3.13",
   "workspaces": [
     "apps/administrator/client/*",
     "apps/user/client/*",
     "apps/core/*",
     "packages/*"
   ],
+  "type": "module",
   "scripts": {
     "postinstall": "lefthook install",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "format": "bun run --filter '*' format",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "typecheck:bun": "bun run --filter '*' typecheck",
@@ -26,9 +26,11 @@
   "devDependencies": {
     "@types/bun": "latest",
     "lefthook": "^2.1.6",
+    "oxfmt": "^0.47.0",
     "oxlint": "^1.62.0",
     "supabase": "^2.98.0",
     "turbo": "^2.9.8",
     "typescript": "^5.7.0"
-  }
+  },
+  "packageManager": "bun@1.3.13"
 }

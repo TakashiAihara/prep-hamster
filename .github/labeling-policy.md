@@ -19,23 +19,23 @@ GitHub Issue / PR label naming conventions and usage rules for the prep-hamster 
 
 ラベル名はディレクトリ構造をそのままミラーする（新パッケージ追加時の判断を機械化するため）。
 
-| Label | Trigger path |
-|---|---|
-| `changed/apps/core/api` | `apps/core/api/**` |
-| `changed/apps/user/client/cli` | `apps/user/client/cli/**` |
-| `changed/apps/user/client/mobile` | `apps/user/client/mobile/**` |
-| `changed/apps/administrator/client/cli` | `apps/administrator/client/cli/**` |
-| `changed/apps/administrator/client/web` | `apps/administrator/client/web/**` |
-| `changed/packages/schema` | `packages/schema/**` |
-| `changed/packages/db` | `packages/db/**` |
-| `changed/packages/api-client` | `packages/api-client/**` |
-| `changed/packages/jan-api` | `packages/jan-api/**` |
-| `changed/packages/sync` | `packages/sync/**` |
-| `changed/docs` | `docs/**` |
-| `changed/ci` | `.github/**` |
-| `changed/docker` | `Dockerfile`, `compose.yaml`, `compose.*.yaml`, `.dockerignore`, `apps/**/Dockerfile`, `apps/**/.dockerignore` |
-| `changed/supabase` | `supabase/**` |
-| `changed/build` | `turbo.json`, `tsconfig.base.json`, root `package.json`, `bun.lock`, `.mise.toml` |
+| Label                                   | Trigger path                                                                                                   |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `changed/apps/core/api`                 | `apps/core/api/**`                                                                                             |
+| `changed/apps/user/client/cli`          | `apps/user/client/cli/**`                                                                                      |
+| `changed/apps/user/client/mobile`       | `apps/user/client/mobile/**`                                                                                   |
+| `changed/apps/administrator/client/cli` | `apps/administrator/client/cli/**`                                                                             |
+| `changed/apps/administrator/client/web` | `apps/administrator/client/web/**`                                                                             |
+| `changed/packages/schema`               | `packages/schema/**`                                                                                           |
+| `changed/packages/db`                   | `packages/db/**`                                                                                               |
+| `changed/packages/api-client`           | `packages/api-client/**`                                                                                       |
+| `changed/packages/jan-api`              | `packages/jan-api/**`                                                                                          |
+| `changed/packages/sync`                 | `packages/sync/**`                                                                                             |
+| `changed/docs`                          | `docs/**`                                                                                                      |
+| `changed/ci`                            | `.github/**`                                                                                                   |
+| `changed/docker`                        | `Dockerfile`, `compose.yaml`, `compose.*.yaml`, `.dockerignore`, `apps/**/Dockerfile`, `apps/**/.dockerignore` |
+| `changed/supabase`                      | `supabase/**`                                                                                                  |
+| `changed/build`                         | `turbo.json`, `tsconfig.base.json`, root `package.json`, `bun.lock`, `.mise.toml`                              |
 
 新パッケージ追加時はこの表に行を追加し、同時に `.github/labeler.yml` も更新する。命名は `changed/` + リポルートからの相対パス。
 
@@ -43,46 +43,46 @@ GitHub Issue / PR label naming conventions and usage rules for the prep-hamster 
 
 影響範囲を示す。本リポは個人開発だが、将来チーム運用を考慮して prefix 体系は揃える。
 
-| Label | Description |
-|---|---|
-| `scope/apps` | apps/ 配下のアプリケーション |
+| Label                  | Description                                       |
+| ---------------------- | ------------------------------------------------- |
+| `scope/apps`           | apps/ 配下のアプリケーション                      |
 | `scope/infrastructure` | CI / Docker / Cloud Run / Supabase / 設定ファイル |
-| `scope/packages` | packages/ 配下の共通パッケージ |
+| `scope/packages`       | packages/ 配下の共通パッケージ                    |
 
 ### `type/` -- Manual (Issue / PR)
 
 変更や課題の種類を示す。**Conventional Commits の type と 1:1 対応**。
 
-| Label | Conventional Commits | Description |
-|---|---|---|
-| `type/bug` | `fix:` | バグ修正 |
-| `type/enhancement` | `feat:` | 新機能・機能改善 |
-| `type/refactoring` | `refactor:` | 振る舞いを変えないリファクタ |
-| `type/tech-debt` | `refactor:` / `chore:` | 設計・アーキ負債、より広範な書き換え |
-| `type/documentation` | `docs:` | ドキュメント変更 |
-| `type/chore` | `chore:` | ビルド / CI / tooling / 設定の変更 |
-| `type/test` | `test:` | テストの追加・修正 |
+| Label                | Conventional Commits   | Description                          |
+| -------------------- | ---------------------- | ------------------------------------ |
+| `type/bug`           | `fix:`                 | バグ修正                             |
+| `type/enhancement`   | `feat:`                | 新機能・機能改善                     |
+| `type/refactoring`   | `refactor:`            | 振る舞いを変えないリファクタ         |
+| `type/tech-debt`     | `refactor:` / `chore:` | 設計・アーキ負債、より広範な書き換え |
+| `type/documentation` | `docs:`                | ドキュメント変更                     |
+| `type/chore`         | `chore:`               | ビルド / CI / tooling / 設定の変更   |
+| `type/test`          | `test:`                | テストの追加・修正                   |
 
 ### `priority/` -- Manual (Issue)
 
 トリアージ用の緊急度。将来 GitHub Projects のカスタムフィールドに移行する可能性あり。
 
-| Label | Description |
-|---|---|
-| `priority/critical` | 即時対応必須 |
-| `priority/high` | 現在のスプリントで対応 |
-| `priority/medium` | 近いうちに対応 |
-| `priority/low` | バックログ、余裕があるとき |
+| Label               | Description                |
+| ------------------- | -------------------------- |
+| `priority/critical` | 即時対応必須               |
+| `priority/high`     | 現在のスプリントで対応     |
+| `priority/medium`   | 近いうちに対応             |
+| `priority/low`      | バックログ、余裕があるとき |
 
 ### `needs/` -- Manual (Issue / PR)
 
 着手・マージの前提が欠けていることを示す。`status/`（現在の状態）と異なり、`needs/` は **次に進むために必要なもの** を表す。
 
-| Label | Description |
-|---|---|
-| `needs/reproduction` | 再現手順が報告者から必要 |
-| `needs/information` | 追加のコンテキスト・詳細が必要 |
-| `needs/investigation` | 計画前に技術調査が必要 |
+| Label                     | Description                                                           |
+| ------------------------- | --------------------------------------------------------------------- |
+| `needs/reproduction`      | 再現手順が報告者から必要                                              |
+| `needs/information`       | 追加のコンテキスト・詳細が必要                                        |
+| `needs/investigation`     | 計画前に技術調査が必要                                                |
 | `needs/coderabbit-review` | **本リポ固有**: CodeRabbit のレビューを必ず一度は通してからマージする |
 
 #### `needs/coderabbit-review` の運用
@@ -90,6 +90,7 @@ GitHub Issue / PR label naming conventions and usage rules for the prep-hamster 
 本リポは OSS free tier で CodeRabbit を使用しており、レビューに 1/h の rate limit がある。通常はベストエフォートで運用するが、**重要な PR では必ずレビューを通したい**。それを明示するためのラベル。
 
 **付与基準（目安）**:
+
 - 機能実装系（`type/enhancement`）の PR / Issue
 - インフラ / セキュリティ影響あり（Dockerfile, compose, DB schema, RLS 関連）
 - ライブラリの major bump（Bun, Hono, Drizzle, Zod 等の major version 上げ）
@@ -97,11 +98,13 @@ GitHub Issue / PR label naming conventions and usage rules for the prep-hamster 
 - 設計判断が大きい PR（OpenAPI ライブラリ採用、typescript-go への切替 等）
 
 **付与しない目安**:
+
 - 単純な docs 更新
 - 1 ヶ所の typo 修正
 - 自動生成ファイル（drizzle migration, lockfile）の更新のみ
 
 **運用ルール**:
+
 1. 該当 PR で CodeRabbit が `Review skipped` / rate limit hit になった場合、**マージしない**
 2. 45 分以上待ってから `@coderabbitai review` をコメント投稿して再レビュー
 3. レビュー結果を反映 / resolve してからマージ
@@ -110,21 +113,21 @@ GitHub Issue / PR label naming conventions and usage rules for the prep-hamster 
 
 GitHub の draft / ready 機構を超えた PR の状態を示す。
 
-| Label | Description |
-|---|---|
-| `status/blocked` | 外部依存でブロック |
-| `status/in-progress` | 作業中（draft ではないが完了でもない） |
-| `status/needs-testing` | 手動 / 環境テスト待ち |
+| Label                  | Description                            |
+| ---------------------- | -------------------------------------- |
+| `status/blocked`       | 外部依存でブロック                     |
+| `status/in-progress`   | 作業中（draft ではないが完了でもない） |
+| `status/needs-testing` | 手動 / 環境テスト待ち                  |
 
 ### `effort/` -- Manual (Issue)
 
 実装コストの見積もり。スプリント計画 / トリアージで使う。
 
-| Label | Description |
-|---|---|
-| `effort/small` | 数時間。1 ファイル or 軽微な設定変更 |
-| `effort/medium` | 1-2 日。複数ファイル、ある程度のテストが必要 |
-| `effort/large` | 3 日以上。設計判断、横断的変更、まとまった検証が必要 |
+| Label           | Description                                          |
+| --------------- | ---------------------------------------------------- |
+| `effort/small`  | 数時間。1 ファイル or 軽微な設定変更                 |
+| `effort/medium` | 1-2 日。複数ファイル、ある程度のテストが必要         |
+| `effort/large`  | 3 日以上。設計判断、横断的変更、まとまった検証が必要 |
 
 ## Exceptions
 
@@ -163,24 +166,24 @@ GitHub の組み込みラベル。標準トリアージワークフロー用に�
 
 ### `scope/` / `priority/` / `needs/` 等の色
 
-| Prefix | Color | 意図 |
-|---|---|---|
-| `scope/*` | `#c5def5` | 中立的な情報ラベル |
-| `type/bug` | `#d73a4a` | GitHub default 維持 |
-| `type/enhancement` | `#a2eeef` | GitHub default 維持 |
-| `type/documentation` | `#0075ca` | GitHub default 維持 |
-| `type/refactoring` | `#fbca04` | 注意喚起 |
-| `type/tech-debt` | `#f9a825` | 注意喚起（より濃い） |
-| `type/chore`, `type/test` | `#ededed` | グレー（軽微変更） |
-| `priority/critical` | `#b60205` | 強い赤 |
-| `priority/high` | `#d93f0b` | オレンジ |
-| `priority/medium` | `#fbca04` | 黄色 |
-| `priority/low` | `#0e8a16` | 緑 |
-| `needs/*`（投資情報系） | `#f9d0c4` | 桃色 |
-| `needs/coderabbit-review` | `#ff9966` | 桃色より濃いオレンジ（区別用） |
-| `effort/small/medium/large` | `#bfd4f2` / `#d4c5f9` / `#7057ff` | 紫グラデ |
-| `status/blocked` | `#b60205` | 強い赤 |
-| `status/in-progress`, `status/needs-testing` | `#fbca04` | 黄色 |
+| Prefix                                       | Color                             | 意図                           |
+| -------------------------------------------- | --------------------------------- | ------------------------------ |
+| `scope/*`                                    | `#c5def5`                         | 中立的な情報ラベル             |
+| `type/bug`                                   | `#d73a4a`                         | GitHub default 維持            |
+| `type/enhancement`                           | `#a2eeef`                         | GitHub default 維持            |
+| `type/documentation`                         | `#0075ca`                         | GitHub default 維持            |
+| `type/refactoring`                           | `#fbca04`                         | 注意喚起                       |
+| `type/tech-debt`                             | `#f9a825`                         | 注意喚起（より濃い）           |
+| `type/chore`, `type/test`                    | `#ededed`                         | グレー（軽微変更）             |
+| `priority/critical`                          | `#b60205`                         | 強い赤                         |
+| `priority/high`                              | `#d93f0b`                         | オレンジ                       |
+| `priority/medium`                            | `#fbca04`                         | 黄色                           |
+| `priority/low`                               | `#0e8a16`                         | 緑                             |
+| `needs/*`（投資情報系）                      | `#f9d0c4`                         | 桃色                           |
+| `needs/coderabbit-review`                    | `#ff9966`                         | 桃色より濃いオレンジ（区別用） |
+| `effort/small/medium/large`                  | `#bfd4f2` / `#d4c5f9` / `#7057ff` | 紫グラデ                       |
+| `status/blocked`                             | `#b60205`                         | 強い赤                         |
+| `status/in-progress`, `status/needs-testing` | `#fbca04`                         | 黄色                           |
 
 ## Related Files
 

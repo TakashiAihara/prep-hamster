@@ -6,9 +6,7 @@ async function resolveMeta(cmd: typeof main) {
 }
 
 async function resolveSubCommands(cmd: typeof main) {
-  return await (typeof cmd.subCommands === "function"
-    ? cmd.subCommands()
-    : cmd.subCommands)
+  return await (typeof cmd.subCommands === "function" ? cmd.subCommands() : cmd.subCommands)
 }
 
 test("main command has expected metadata", async () => {

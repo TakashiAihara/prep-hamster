@@ -2,10 +2,10 @@
   "name": "@prep-hamster/cli-admin",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "bin": {
     "prep-hamster-admin": "./src/index.ts"
   },
+  "type": "module",
   "scripts": {
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
