@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm"
+import { relations, sql } from "drizzle-orm"
 import {
   boolean,
   check,
@@ -53,6 +53,20 @@ export const shoppingListStatusEnum = pgEnum("shopping_list_status", [
 ])
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+const tsCol = (name: string) => timestamp(name, { withTimezone: true })
+
+// 全テーブル共通の created_at / updated_at / deleted_at。
+// drizzle 0.36 系は spread 経由の column reuse をサポートしている。
+const timestamps = {
+  createdAt: tsCol("created_at").notNull().defaultNow(),
+  updatedAt: tsCol("updated_at").notNull().defaultNow(),
+  deletedAt: tsCol("deleted_at"),
+}
+
+// ============================================================================
 // Tables
 // ============================================================================
 
@@ -62,9 +76,7 @@ export const users = pgTable("users", {
   displayName: text("display_name").notNull(),
   avatarUrl: text("avatar_url"),
   locale: text("locale").notNull().default("ja-JP"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  ...timestamps,
 })
 
 export const groups = pgTable("groups", {
@@ -73,9 +85,7 @@ export const groups = pgTable("groups", {
   createdBy: uuid("created_by")
     .notNull()
     .references(() => users.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  ...timestamps,
 })
 
 export const memberships = pgTable(
@@ -89,10 +99,8 @@ export const memberships = pgTable(
       .notNull()
       .references(() => groups.id),
     role: roleEnum("role").notNull(),
-    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    joinedAt: tsCol("joined_at").notNull(),
+    ...timestamps,
   },
   (t) => [
     unique("memberships_user_group_unique").on(t.userId, t.groupId),
@@ -111,12 +119,10 @@ export const invitations = pgTable("invitations", {
     .references(() => users.id),
   role: roleEnum("role").notNull(),
   token: text("token").notNull().unique(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  usedAt: timestamp("used_at", { withTimezone: true }),
+  expiresAt: tsCol("expires_at").notNull(),
+  usedAt: tsCol("used_at"),
   usedBy: uuid("used_by").references(() => users.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  ...timestamps,
 })
 
 export const locations = pgTable("locations", {
@@ -126,9 +132,7 @@ export const locations = pgTable("locations", {
     .references(() => groups.id),
   name: text("name").notNull(),
   sortOrder: integer("sort_order"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  ...timestamps,
 })
 
 export const categories = pgTable("categories", {
@@ -138,9 +142,7 @@ export const categories = pgTable("categories", {
     .references(() => groups.id),
   name: text("name").notNull(),
   sortOrder: integer("sort_order"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  ...timestamps,
 })
 
 export const productMasters = pgTable(
@@ -157,11 +159,9 @@ export const productMasters = pgTable(
     imageUrl: text("image_url"),
     source: productMasterSourceEnum("source").notNull(),
     sourceRaw: jsonb("source_raw"),
-    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    fetchedAt: tsCol("fetched_at").notNull(),
     confidence: productMasterConfidenceEnum("confidence"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    ...timestamps,
   },
   (t) => [index("product_masters_fetched_at_idx").on(t.fetchedAt)],
 )
@@ -180,9 +180,7 @@ export const items = pgTable(
     defaultUnit: text("default_unit"),
     manufacturer: text("manufacturer"),
     memo: text("memo"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    ...timestamps,
   },
   (t) => [
     uniqueIndex("items_group_product_master_idx")
@@ -213,9 +211,7 @@ export const stocks = pgTable(
     bestBeforeDate: date("best_before_date"),
     openedAt: date("opened_at"),
     note: text("note"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    ...timestamps,
   },
   (t) => [
     check("stocks_quantity_nonneg", sql`${t.quantity} >= 0`),
@@ -240,10 +236,10 @@ export const stockEvents = pgTable(
     quantityDelta: real("quantity_delta").notNull(),
     fromLocationId: uuid("from_location_id").references(() => locations.id),
     toLocationId: uuid("to_location_id").references(() => locations.id),
-    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    occurredAt: tsCol("occurred_at").notNull(),
     actorUserId: uuid("actor_user_id").references(() => users.id),
     reason: text("reason"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: tsCol("created_at").notNull().defaultNow(),
   },
   (t) => [
     index("stock_events_group_occurred_idx").on(t.groupId, t.occurredAt.desc()),
@@ -260,9 +256,7 @@ export const requirementSettings = pgTable("requirement_settings", {
   peopleCount: integer("people_count").notNull(),
   days: integer("days").notNull(),
   perCategorySettings: jsonb("per_category_settings"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  ...timestamps,
 })
 
 export const shoppingListItems = pgTable("shopping_list_items", {
@@ -279,9 +273,7 @@ export const shoppingListItems = pgTable("shopping_list_items", {
   addedBy: uuid("added_by")
     .notNull()
     .references(() => users.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  ...timestamps,
 })
 
 export const notificationSettings = pgTable("notification_settings", {
@@ -296,7 +288,113 @@ export const notificationSettings = pgTable("notification_settings", {
   shortageNotifyEnabled: boolean("shortage_notify_enabled").notNull().default(true),
   invitationNotifyEnabled: boolean("invitation_notify_enabled").notNull().default(true),
   pushToken: text("push_token"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  ...timestamps,
 })
+
+// ============================================================================
+// Relations
+// ============================================================================
+
+export const usersRelations = relations(users, ({ one, many }) => ({
+  memberships: many(memberships),
+  groupsCreated: many(groups, { relationName: "groupCreator" }),
+  notificationSetting: one(notificationSettings),
+}))
+
+export const groupsRelations = relations(groups, ({ one, many }) => ({
+  creator: one(users, {
+    fields: [groups.createdBy],
+    references: [users.id],
+    relationName: "groupCreator",
+  }),
+  memberships: many(memberships),
+  invitations: many(invitations),
+  locations: many(locations),
+  categories: many(categories),
+  items: many(items),
+  stocks: many(stocks),
+  stockEvents: many(stockEvents),
+  requirementSetting: one(requirementSettings),
+  shoppingListItems: many(shoppingListItems),
+}))
+
+export const membershipsRelations = relations(memberships, ({ one }) => ({
+  user: one(users, { fields: [memberships.userId], references: [users.id] }),
+  group: one(groups, { fields: [memberships.groupId], references: [groups.id] }),
+}))
+
+export const invitationsRelations = relations(invitations, ({ one }) => ({
+  group: one(groups, { fields: [invitations.groupId], references: [groups.id] }),
+  inviter: one(users, {
+    fields: [invitations.inviterId],
+    references: [users.id],
+    relationName: "invitationInviter",
+  }),
+  usedByUser: one(users, {
+    fields: [invitations.usedBy],
+    references: [users.id],
+    relationName: "invitationUsedBy",
+  }),
+}))
+
+export const locationsRelations = relations(locations, ({ one, many }) => ({
+  group: one(groups, { fields: [locations.groupId], references: [groups.id] }),
+  stocks: many(stocks),
+}))
+
+export const categoriesRelations = relations(categories, ({ one, many }) => ({
+  group: one(groups, { fields: [categories.groupId], references: [groups.id] }),
+  items: many(items),
+}))
+
+export const productMastersRelations = relations(productMasters, ({ many }) => ({
+  items: many(items),
+}))
+
+export const itemsRelations = relations(items, ({ one, many }) => ({
+  group: one(groups, { fields: [items.groupId], references: [groups.id] }),
+  productMaster: one(productMasters, {
+    fields: [items.productMasterId],
+    references: [productMasters.id],
+  }),
+  category: one(categories, { fields: [items.categoryId], references: [categories.id] }),
+  stocks: many(stocks),
+  shoppingListItems: many(shoppingListItems),
+}))
+
+export const stocksRelations = relations(stocks, ({ one, many }) => ({
+  group: one(groups, { fields: [stocks.groupId], references: [groups.id] }),
+  item: one(items, { fields: [stocks.itemId], references: [items.id] }),
+  location: one(locations, { fields: [stocks.locationId], references: [locations.id] }),
+  events: many(stockEvents),
+}))
+
+export const stockEventsRelations = relations(stockEvents, ({ one }) => ({
+  group: one(groups, { fields: [stockEvents.groupId], references: [groups.id] }),
+  stock: one(stocks, { fields: [stockEvents.stockId], references: [stocks.id] }),
+  fromLocation: one(locations, {
+    fields: [stockEvents.fromLocationId],
+    references: [locations.id],
+    relationName: "stockEventFrom",
+  }),
+  toLocation: one(locations, {
+    fields: [stockEvents.toLocationId],
+    references: [locations.id],
+    relationName: "stockEventTo",
+  }),
+  actor: one(users, { fields: [stockEvents.actorUserId], references: [users.id] }),
+}))
+
+export const requirementSettingsRelations = relations(requirementSettings, ({ one }) => ({
+  group: one(groups, { fields: [requirementSettings.groupId], references: [groups.id] }),
+}))
+
+export const shoppingListItemsRelations = relations(shoppingListItems, ({ one }) => ({
+  group: one(groups, { fields: [shoppingListItems.groupId], references: [groups.id] }),
+  item: one(items, { fields: [shoppingListItems.itemId], references: [items.id] }),
+  addedByUser: one(users, { fields: [shoppingListItems.addedBy], references: [users.id] }),
+}))
+
+export const notificationSettingsRelations = relations(notificationSettings, ({ one }) => ({
+  user: one(users, { fields: [notificationSettings.userId], references: [users.id] }),
+}))

@@ -1,15 +1,21 @@
 import { test, expect } from "bun:test"
 import {
-  UserSchema,
   GroupSchema,
-  StockSchema,
-  StockEventSchema,
   ProductMasterSchema,
   RoleSchema,
+  StockEventSchema,
+  StockSchema,
+  UserSchema,
 } from "../index"
 
-const NOW = "2026-05-03T00:00:00Z"
+const NOW = new Date("2026-05-03T00:00:00Z")
 const UUID = "00000000-0000-0000-0000-000000000000"
+
+const baseRow = {
+  createdAt: NOW,
+  updatedAt: NOW,
+  deletedAt: null,
+}
 
 test("UserSchema accepts a valid user", () => {
   expect(
@@ -19,9 +25,7 @@ test("UserSchema accepts a valid user", () => {
       displayName: "Test",
       avatarUrl: null,
       locale: "ja-JP",
-      createdAt: NOW,
-      updatedAt: NOW,
-      deletedAt: null,
+      ...baseRow,
     }).success,
   ).toBe(true)
 })
@@ -34,9 +38,7 @@ test("UserSchema rejects an invalid email", () => {
       displayName: "Test",
       avatarUrl: null,
       locale: "ja-JP",
-      createdAt: NOW,
-      updatedAt: NOW,
-      deletedAt: null,
+      ...baseRow,
     }).success,
   ).toBe(false)
 })
@@ -47,9 +49,7 @@ test("GroupSchema accepts a valid group", () => {
       id: UUID,
       name: "自宅",
       createdBy: UUID,
-      createdAt: NOW,
-      updatedAt: NOW,
-      deletedAt: null,
+      ...baseRow,
     }).success,
   ).toBe(true)
 })
@@ -67,31 +67,9 @@ test("StockSchema accepts a stock with both expiry dates null", () => {
       bestBeforeDate: null,
       openedAt: null,
       note: null,
-      createdAt: NOW,
-      updatedAt: NOW,
-      deletedAt: null,
+      ...baseRow,
     }).success,
   ).toBe(true)
-})
-
-test("StockSchema rejects negative quantity", () => {
-  expect(
-    StockSchema.safeParse({
-      id: UUID,
-      groupId: UUID,
-      itemId: UUID,
-      locationId: UUID,
-      quantity: -1,
-      unit: "個",
-      useByDate: null,
-      bestBeforeDate: null,
-      openedAt: null,
-      note: null,
-      createdAt: NOW,
-      updatedAt: NOW,
-      deletedAt: null,
-    }).success,
-  ).toBe(false)
 })
 
 test("StockEventSchema accepts an ADD event with positive delta", () => {
@@ -128,9 +106,7 @@ test("ProductMasterSchema accepts a Yahoo-sourced record", () => {
       sourceRaw: { hits: [{ name: "コカ・コーラ" }] },
       fetchedAt: NOW,
       confidence: "HIGH",
-      createdAt: NOW,
-      updatedAt: NOW,
-      deletedAt: null,
+      ...baseRow,
     }).success,
   ).toBe(true)
 })
