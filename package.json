@@ -18,13 +18,15 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "format": "bun run --filter '*' format",
-    "lint": "bun run --filter '*' lint",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
     "typecheck:bun": "bun run --filter '*' typecheck",
     "test:bun": "bun run --filter '*' test"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "lefthook": "^2.1.6",
+    "oxlint": "^1.62.0",
     "supabase": "^2.98.0",
     "turbo": "^2.9.8",
     "typescript": "^5.7.0"
