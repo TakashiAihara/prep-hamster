@@ -21,7 +21,8 @@ services:
   api-dev:
     image: oven/bun:1-slim
     working_dir: /app
-    command: ["sh", "-c", "bun install --frozen-lockfile && bun run --watch apps/core/api/src/index.ts"]
+    command:
+      ["sh", "-c", "bun install --frozen-lockfile && bun run --watch apps/core/api/src/index.ts"]
     ports:
       - "3000:3000"
     environment:
