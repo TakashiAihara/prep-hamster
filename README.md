@@ -68,3 +68,14 @@ DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres \
 ```
 
 Supabase ローカルスタックの停止: `bunx supabase stop`
+
+## 型チェック (typescript-go / tsgo)
+
+`bun run typecheck` は [`@typescript/native-preview`](https://www.npmjs.com/package/@typescript/native-preview) (tsgo) を使用する。Go 製の TypeScript コンパイラで、型チェック (`--noEmit`) において本家 `tsc` の代替として機能する（LSP / emit など他のパスは未対応または進行中）。
+
+役割分担:
+
+- **CLI 型チェック**: `tsgo --noEmit`（速度優先、CI / `bun run typecheck` で使用）
+- **IDE 言語サーバー**: 本家 `tsc`（`typescript@^5.7` を devDep に維持）。tsgo は LSP の機能パリティが未完成のため
+
+切替対象は v1.0.0 では `--noEmit` のみ。`declaration` / `declarationMap` / `incremental` などの emit パスは tsgo 側でまだ「進行中」とされているため、必要になったら再評価する。

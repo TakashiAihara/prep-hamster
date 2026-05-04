@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev.20260503.1",
     "lefthook": "^2.1.6",
     "oxfmt": "^0.47.0",
     "oxlint": "^1.62.0",
