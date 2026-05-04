@@ -295,10 +295,10 @@ export const notificationSettings = pgTable("notification_settings", {
 // Relations
 // ============================================================================
 
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ one, many }) => ({
   memberships: many(memberships),
-  groupsCreated: many(groups),
-  notificationSettings: many(notificationSettings),
+  groupsCreated: many(groups, { relationName: "groupCreator" }),
+  notificationSetting: one(notificationSettings),
 }))
 
 export const groupsRelations = relations(groups, ({ one, many }) => ({
@@ -314,7 +314,7 @@ export const groupsRelations = relations(groups, ({ one, many }) => ({
   items: many(items),
   stocks: many(stocks),
   stockEvents: many(stockEvents),
-  requirementSetting: many(requirementSettings),
+  requirementSetting: one(requirementSettings),
   shoppingListItems: many(shoppingListItems),
 }))
 
