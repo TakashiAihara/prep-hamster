@@ -1,0 +1,45 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["tsconfig.base.json", "bun.lock"],
+  "tasks": {
+    "typecheck": {
+      "description": "型検査 (tsc --noEmit)",
+      "dependsOn": ["^typecheck"],
+      "inputs": [
+        "src/**",
+        "tsconfig.json",
+        "tsconfig.*.json",
+        "package.json"
+      ],
+      "outputs": []
+    },
+    "build": {
+      "description": "ビルド成果物を持つ package 用 (現状は枠のみ)",
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "tsconfig.json",
+        "tsconfig.*.json",
+        "package.json"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "test": {
+      "description": "テスト (Bun は TS を直接解決するため ^build ではなく ^typecheck に依存)",
+      "dependsOn": ["^typecheck"],
+      "inputs": [
+        "src/**",
+        "tsconfig.json",
+        "tsconfig.*.json",
+        "package.json"
+      ],
+      "outputs": []
+    },
+    "dev": {
+      "description": "開発用永続タスク (cache 無効、env はキャッシュキーに影響させない)",
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["DATABASE_URL", "PORT", "PREP_HAMSTER_*"]
+    }
+  }
+}
