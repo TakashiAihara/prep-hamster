@@ -32,3 +32,4 @@ export {
 } from "@prep-hamster/db/zod"
 
 export * from "./common"
+export * from "./error-map"

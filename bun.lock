@@ -45,6 +45,7 @@
       },
       "dependencies": {
         "@prep-hamster/api-client": "workspace:*",
+        "@prep-hamster/schema": "workspace:*",
         "citty": "^0.1.6",
       },
     },

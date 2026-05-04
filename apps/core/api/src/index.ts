@@ -1,5 +1,8 @@
 import { createDb } from "@prep-hamster/db"
+import { installJaErrorMap } from "@prep-hamster/schema"
 import { createApp } from "./app"
+
+installJaErrorMap()
 
 const DEFAULT_DB_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
