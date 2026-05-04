@@ -46,6 +46,11 @@ mise install
 bun install
 ```
 
+`bun install` で [lefthook](https://lefthook.dev/) の git hook が自動セットアップされる（`commit-msg` でコミットメッセージを Conventional Commits 形式かチェック）。
+
+- 個別 commit で hook をスキップ: `LEFTHOOK=0 git commit -m "..."`
+- CI 中（`CI=true`）は lefthook が自動で skip するため何もしなくてよい
+
 ## ローカル DB（Supabase + Drizzle）
 
 ローカル環境では Supabase CLI で Postgres / Auth / Storage を Docker で立て、Drizzle がスキーママイグレーションを管理する。
