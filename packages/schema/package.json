@@ -18,6 +18,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@prep-hamster/db": "workspace:*",
     "zod": "^3.24.0"
   }
 }
