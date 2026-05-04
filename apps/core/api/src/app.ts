@@ -23,6 +23,7 @@ export function createApp(opts: { db: Db }) {
       }
       c.set("userId", userId)
       await next()
+      return
     })
     .route("/v1/stocks", stocksRouter)
 }
