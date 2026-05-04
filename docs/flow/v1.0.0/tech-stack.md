@@ -5,12 +5,14 @@
 
 ## 1. ランタイム・基盤
 
-| 項目                 | 採用                                          | 理由                                                       |
-| -------------------- | --------------------------------------------- | ---------------------------------------------------------- |
-| パッケージマネージャ | Bun（workspaces）                             | 単一バイナリで TS 直実行。CLAUDE.md の第一選択方針に整合   |
-| ランタイム管理       | mise（`.mise.toml`）                          | Bun / Node のバージョン固定                                |
-| 言語                 | TypeScript                                    | 全ワークスペース共通                                       |
-| TS 設定              | `tsconfig.base.json` を全 workspace で extend | strict + verbatimModuleSyntax + exactOptionalPropertyTypes |
+| 項目                 | 採用                                               | 理由                                                       |
+| -------------------- | -------------------------------------------------- | ---------------------------------------------------------- |
+| パッケージマネージャ | Bun（workspaces）                                  | 単一バイナリで TS 直実行。CLAUDE.md の第一選択方針に整合   |
+| ランタイム管理       | mise（`.mise.toml`）                               | Bun / Node のバージョン固定                                |
+| 言語                 | TypeScript                                         | 全ワークスペース共通                                       |
+| TS 設定              | `tsconfig.base.json` を全 workspace で extend      | strict + verbatimModuleSyntax + exactOptionalPropertyTypes |
+| 型チェック (CLI)     | typescript-go (tsgo, `@typescript/native-preview`) | tsc 互換ドロップイン、CLI 型チェックが約 4-7x 速い         |
+| IDE 言語サーバー     | 本家 `typescript` (`tsc`)                          | tsgo は LSP 機能パリティ未完成のため当面は本家を併用       |
 
 ## 2. apps/core/api（バックエンド）
 
