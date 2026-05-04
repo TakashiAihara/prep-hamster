@@ -7,9 +7,13 @@
 //
 // ID 列は branded UUID で nominal type 化する。`UserId` と `StockId` は実体は
 // string だが型では区別され、誤った id を渡すと compile error になる。
+//
+// refinement callback は **必ず引数 `s` を chain する**こと。`() => z.string()...`
+// のように新しい schema を返すと、drizzle-zod は列の optional / default /
+// nullable 属性を再適用しなくなる (CodeRabbit PR #65 で指摘)。
 
 import { createInsertSchema, createSelectSchema, createUpdateSchema } from "drizzle-zod"
-import { z } from "zod"
+import type { z } from "zod"
 import {
   categories,
   groups,
@@ -26,19 +30,24 @@ import {
   users,
 } from "./schema"
 
-const brandedId = <const TName extends string>(_name: TName) => z.string().uuid().brand<TName>()
+// uuid 列を branded uuid に置換するヘルパ。`s` を chain することで
+// drizzle-zod が列属性 (optional / nullable) を outer 側で再適用する性質を保つ。
+const brandUuid =
+  <const TName extends string>(_name: TName) =>
+  (s: z.ZodString) =>
+    s.uuid().brand<TName>()
 
 // users
 export const UserSchema = createSelectSchema(users, {
-  id: () => brandedId("UserId"),
+  id: brandUuid("UserId"),
   email: (s) => s.email(),
 })
 export const UserInsertSchema = createInsertSchema(users, {
-  id: () => brandedId("UserId"),
+  id: brandUuid("UserId"),
   email: (s) => s.email(),
 })
 export const UserUpdateSchema = createUpdateSchema(users, {
-  id: () => brandedId("UserId"),
+  id: brandUuid("UserId"),
   email: (s) => s.email(),
 })
 export type User = typeof users.$inferSelect
@@ -46,8 +55,8 @@ export type UserInsert = typeof users.$inferInsert
 
 // groups
 const groupBrands = {
-  id: () => brandedId("GroupId"),
-  createdBy: () => brandedId("UserId"),
+  id: brandUuid("GroupId"),
+  createdBy: brandUuid("UserId"),
 }
 export const GroupSchema = createSelectSchema(groups, groupBrands)
 export const GroupInsertSchema = createInsertSchema(groups, groupBrands)
@@ -57,9 +66,9 @@ export type GroupInsert = typeof groups.$inferInsert
 
 // memberships
 const membershipBrands = {
-  id: () => brandedId("MembershipId"),
-  userId: () => brandedId("UserId"),
-  groupId: () => brandedId("GroupId"),
+  id: brandUuid("MembershipId"),
+  userId: brandUuid("UserId"),
+  groupId: brandUuid("GroupId"),
 }
 export const MembershipSchema = createSelectSchema(memberships, membershipBrands)
 export const MembershipInsertSchema = createInsertSchema(memberships, membershipBrands)
@@ -69,10 +78,10 @@ export type MembershipInsert = typeof memberships.$inferInsert
 
 // invitations
 const invitationBrands = {
-  id: () => brandedId("InvitationId"),
-  groupId: () => brandedId("GroupId"),
-  inviterId: () => brandedId("UserId"),
-  usedBy: () => brandedId("UserId").nullable(),
+  id: brandUuid("InvitationId"),
+  groupId: brandUuid("GroupId"),
+  inviterId: brandUuid("UserId"),
+  usedBy: brandUuid("UserId"),
 }
 export const InvitationSchema = createSelectSchema(invitations, invitationBrands)
 export const InvitationInsertSchema = createInsertSchema(invitations, invitationBrands)
@@ -82,8 +91,8 @@ export type InvitationInsert = typeof invitations.$inferInsert
 
 // locations
 const locationBrands = {
-  id: () => brandedId("LocationId"),
-  groupId: () => brandedId("GroupId"),
+  id: brandUuid("LocationId"),
+  groupId: brandUuid("GroupId"),
 }
 export const LocationSchema = createSelectSchema(locations, locationBrands)
 export const LocationInsertSchema = createInsertSchema(locations, locationBrands)
@@ -93,8 +102,8 @@ export type LocationInsert = typeof locations.$inferInsert
 
 // categories
 const categoryBrands = {
-  id: () => brandedId("CategoryId"),
-  groupId: () => brandedId("GroupId"),
+  id: brandUuid("CategoryId"),
+  groupId: brandUuid("GroupId"),
 }
 export const CategorySchema = createSelectSchema(categories, categoryBrands)
 export const CategoryInsertSchema = createInsertSchema(categories, categoryBrands)
@@ -104,7 +113,7 @@ export type CategoryInsert = typeof categories.$inferInsert
 
 // productMasters
 const productMasterBrands = {
-  id: () => brandedId("ProductMasterId"),
+  id: brandUuid("ProductMasterId"),
 }
 export const ProductMasterSchema = createSelectSchema(productMasters, productMasterBrands)
 export const ProductMasterInsertSchema = createInsertSchema(productMasters, productMasterBrands)
@@ -114,10 +123,10 @@ export type ProductMasterInsert = typeof productMasters.$inferInsert
 
 // items
 const itemBrands = {
-  id: () => brandedId("ItemId"),
-  groupId: () => brandedId("GroupId"),
-  productMasterId: () => brandedId("ProductMasterId").nullable(),
-  categoryId: () => brandedId("CategoryId").nullable(),
+  id: brandUuid("ItemId"),
+  groupId: brandUuid("GroupId"),
+  productMasterId: brandUuid("ProductMasterId"),
+  categoryId: brandUuid("CategoryId"),
 }
 export const ItemSchema = createSelectSchema(items, itemBrands)
 export const ItemInsertSchema = createInsertSchema(items, itemBrands)
@@ -127,10 +136,10 @@ export type ItemInsert = typeof items.$inferInsert
 
 // stocks
 const stockBrands = {
-  id: () => brandedId("StockId"),
-  groupId: () => brandedId("GroupId"),
-  itemId: () => brandedId("ItemId"),
-  locationId: () => brandedId("LocationId"),
+  id: brandUuid("StockId"),
+  groupId: brandUuid("GroupId"),
+  itemId: brandUuid("ItemId"),
+  locationId: brandUuid("LocationId"),
 }
 export const StockSchema = createSelectSchema(stocks, stockBrands)
 export const StockInsertSchema = createInsertSchema(stocks, stockBrands)
@@ -140,12 +149,12 @@ export type StockInsert = typeof stocks.$inferInsert
 
 // stockEvents
 const stockEventBrands = {
-  id: () => brandedId("StockEventId"),
-  groupId: () => brandedId("GroupId"),
-  stockId: () => brandedId("StockId"),
-  fromLocationId: () => brandedId("LocationId").nullable(),
-  toLocationId: () => brandedId("LocationId").nullable(),
-  actorUserId: () => brandedId("UserId").nullable(),
+  id: brandUuid("StockEventId"),
+  groupId: brandUuid("GroupId"),
+  stockId: brandUuid("StockId"),
+  fromLocationId: brandUuid("LocationId"),
+  toLocationId: brandUuid("LocationId"),
+  actorUserId: brandUuid("UserId"),
 }
 export const StockEventSchema = createSelectSchema(stockEvents, stockEventBrands)
 export const StockEventInsertSchema = createInsertSchema(stockEvents, stockEventBrands)
@@ -155,8 +164,8 @@ export type StockEventInsert = typeof stockEvents.$inferInsert
 
 // requirementSettings
 const requirementSettingBrands = {
-  id: () => brandedId("RequirementSettingId"),
-  groupId: () => brandedId("GroupId"),
+  id: brandUuid("RequirementSettingId"),
+  groupId: brandUuid("GroupId"),
 }
 export const RequirementSettingSchema = createSelectSchema(
   requirementSettings,
@@ -175,10 +184,10 @@ export type RequirementSettingInsert = typeof requirementSettings.$inferInsert
 
 // shoppingListItems
 const shoppingListItemBrands = {
-  id: () => brandedId("ShoppingListItemId"),
-  groupId: () => brandedId("GroupId"),
-  itemId: () => brandedId("ItemId").nullable(),
-  addedBy: () => brandedId("UserId"),
+  id: brandUuid("ShoppingListItemId"),
+  groupId: brandUuid("GroupId"),
+  itemId: brandUuid("ItemId"),
+  addedBy: brandUuid("UserId"),
 }
 export const ShoppingListItemSchema = createSelectSchema(shoppingListItems, shoppingListItemBrands)
 export const ShoppingListItemInsertSchema = createInsertSchema(
@@ -194,8 +203,8 @@ export type ShoppingListItemInsert = typeof shoppingListItems.$inferInsert
 
 // notificationSettings
 const notificationSettingBrands = {
-  id: () => brandedId("NotificationSettingId"),
-  userId: () => brandedId("UserId"),
+  id: brandUuid("NotificationSettingId"),
+  userId: brandUuid("UserId"),
 }
 export const NotificationSettingSchema = createSelectSchema(
   notificationSettings,
