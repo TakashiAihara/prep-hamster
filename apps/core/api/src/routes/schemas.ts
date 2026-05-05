@@ -52,6 +52,60 @@ export const updateGroupBodyDtoSchema = z
   })
   .openapi("UpdateGroupBody")
 
+export const locationDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    groupId: z.string().uuid(),
+    name: z.string(),
+    sortOrder: z.number().int().nullable(),
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    deletedAt: z.string().datetime({ offset: true }).nullable(),
+  })
+  .openapi("Location")
+
+export const createLocationBodyDtoSchema = z
+  .object({
+    groupId: z.string().uuid(),
+    name: z.string().min(1).max(100),
+    sortOrder: z.number().int().nullable().optional(),
+  })
+  .openapi("CreateLocationBody")
+
+export const updateLocationBodyDtoSchema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    sortOrder: z.number().int().nullable().optional(),
+  })
+  .openapi("UpdateLocationBody")
+
+export const categoryDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    groupId: z.string().uuid(),
+    name: z.string(),
+    sortOrder: z.number().int().nullable(),
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    deletedAt: z.string().datetime({ offset: true }).nullable(),
+  })
+  .openapi("Category")
+
+export const createCategoryBodyDtoSchema = z
+  .object({
+    groupId: z.string().uuid(),
+    name: z.string().min(1).max(100),
+    sortOrder: z.number().int().nullable().optional(),
+  })
+  .openapi("CreateCategoryBody")
+
+export const updateCategoryBodyDtoSchema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    sortOrder: z.number().int().nullable().optional(),
+  })
+  .openapi("UpdateCategoryBody")
+
 export const stockDtoSchema = z
   .object({
     id: z.string().uuid(),

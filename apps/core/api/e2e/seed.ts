@@ -1,4 +1,4 @@
-import { groups, items, locations, memberships, users } from "@prep-hamster/db"
+import { categories, groups, items, locations, memberships, stocks, users } from "@prep-hamster/db"
 import { testDb } from "./setup"
 
 export type SeedFixture = {
@@ -51,6 +51,58 @@ export async function seedMembership(
     groupId,
     role,
     joinedAt: new Date(),
+  })
+  return id
+}
+
+export async function seedLocation(
+  groupId: string,
+  name = "Pantry",
+  sortOrder: number | null = null,
+): Promise<string> {
+  const id = crypto.randomUUID()
+  await testDb.insert(locations).values({ id, groupId, name, sortOrder })
+  return id
+}
+
+export async function seedCategory(
+  groupId: string,
+  name = "Food",
+  sortOrder: number | null = null,
+): Promise<string> {
+  const id = crypto.randomUUID()
+  await testDb.insert(categories).values({ id, groupId, name, sortOrder })
+  return id
+}
+
+export async function seedItem(
+  groupId: string,
+  name = "Canned Tomato",
+  categoryId: string | null = null,
+): Promise<string> {
+  const id = crypto.randomUUID()
+  await testDb.insert(items).values({ id, groupId, name, categoryId })
+  return id
+}
+
+export async function seedStock(
+  groupId: string,
+  itemId: string,
+  locationId: string,
+  quantity = 1,
+): Promise<string> {
+  const id = crypto.randomUUID()
+  await testDb.insert(stocks).values({
+    id,
+    groupId,
+    itemId,
+    locationId,
+    quantity,
+    unit: "個",
+    useByDate: null,
+    bestBeforeDate: null,
+    openedAt: null,
+    note: null,
   })
   return id
 }
