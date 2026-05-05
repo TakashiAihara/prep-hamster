@@ -89,7 +89,7 @@ test("GET /v1/groups returns only groups the user is a member of", async () => {
   expect(body.groups[0]?.name).toBe("Alice's Home")
 })
 
-test("GET /v1/groups/:id by non-member returns 404", async () => {
+test("GET /v1/groups/:id by non-member returns 403", async () => {
   const aliceId = await seedUser("Alice")
   const bobId = await seedUser("Bob")
   const bobGroupId = await seedGroupWithMembership(bobId, "Bob's Home")
@@ -99,7 +99,9 @@ test("GET /v1/groups/:id by non-member returns 404", async () => {
     headers: { "x-user-id": aliceId },
   })
 
-  expect(res.status).toBe(404)
+  expect(res.status).toBe(403)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("FORBIDDEN_GROUP_ACCESS")
 })
 
 test("PATCH /v1/groups/:id by OWNER returns 200 and updates name", async () => {
@@ -139,9 +141,11 @@ test("PATCH /v1/groups/:id by EDITOR returns 403", async () => {
   })
 
   expect(res.status).toBe(403)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("INSUFFICIENT_ROLE")
 })
 
-test("PATCH /v1/groups/:id by non-member returns 404", async () => {
+test("PATCH /v1/groups/:id by non-member returns 403", async () => {
   const ownerId = await seedUser("Owner")
   const outsiderId = await seedUser("Outsider")
   const groupId = await seedGroupWithMembership(ownerId, "Closed Home")
@@ -156,5 +160,7 @@ test("PATCH /v1/groups/:id by non-member returns 404", async () => {
     body: JSON.stringify({ name: "Sneak" }),
   })
 
-  expect(res.status).toBe(404)
+  expect(res.status).toBe(403)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("FORBIDDEN_GROUP_ACCESS")
 })

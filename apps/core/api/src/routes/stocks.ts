@@ -1,7 +1,8 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, eq, isNull } from "drizzle-orm"
-import { stocks } from "@prep-hamster/db"
+import { memberships, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
+import { withGroupAccess } from "../middleware/group-access"
 import { createStockBodyDtoSchema, errorResponseSchema, stockDtoSchema } from "./schemas"
 
 const ListQuerySchema = z.object({
@@ -30,6 +31,7 @@ const listStocksRoute = createRoute({
   path: "/",
   tags: ["stocks"],
   summary: "在庫一覧を取得",
+  middleware: [withGroupAccess((c) => c.req.query("groupId"))] as const,
   request: {
     query: ListQuerySchema,
   },
@@ -44,6 +46,10 @@ const listStocksRoute = createRoute({
     },
     401: {
       description: "未認証",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    403: {
+      description: "未参加",
       content: { "application/json": { schema: errorResponseSchema } },
     },
     422: {
@@ -80,6 +86,10 @@ const createStockRoute = createRoute({
       description: "未認証",
       content: { "application/json": { schema: errorResponseSchema } },
     },
+    403: {
+      description: "未参加",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
     422: {
       description: "ボディ不正",
       content: { "application/json": { schema: errorResponseSchema } },
@@ -102,6 +112,32 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
   .openapi(createStockRoute, async (c) => {
     const body = c.req.valid("json")
     const db = c.get("db")
+    const userId = c.get("userId")
+
+    // body.groupId の membership は middleware では検査できないため (body 読込のタイミング)、
+    // ここで明示的にチェックする。本検査の middleware 化は別 Issue (#69 後続) で扱う。
+    const [member] = await db
+      .select({ id: memberships.id })
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.userId, userId),
+          eq(memberships.groupId, body.groupId),
+          isNull(memberships.deletedAt),
+        ),
+      )
+      .limit(1)
+    if (!member) {
+      return c.json(
+        {
+          error: {
+            code: "FORBIDDEN_GROUP_ACCESS",
+            message: "この group に対するアクセス権がありません",
+          },
+        },
+        403,
+      )
+    }
 
     const [created] = await db
       .insert(stocks)
