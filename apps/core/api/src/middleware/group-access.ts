@@ -66,16 +66,21 @@ export const withGroupAccess = (extractGroupId: ExtractGroupId, requiredRole?: R
       )
     }
 
-    if (requiredRole && ROLE_RANK[member.role as Role] < ROLE_RANK[requiredRole]) {
-      return c.json<ApiErrorBody>(
-        {
-          error: {
-            code: "INSUFFICIENT_ROLE",
-            message: `${requiredRole} 以上の権限が必要です`,
+    if (requiredRole) {
+      // DB に想定外の role 文字列が入っていた場合は fail-closed で拒否する。
+      // pgEnum で型は守られているはずだが、認可処理なので防御的に未知値を弾く。
+      const memberRoleRank = ROLE_RANK[member.role as Role]
+      if (memberRoleRank == null || memberRoleRank < ROLE_RANK[requiredRole]) {
+        return c.json<ApiErrorBody>(
+          {
+            error: {
+              code: "INSUFFICIENT_ROLE",
+              message: `${requiredRole} 以上の権限が必要です`,
+            },
           },
-        },
-        403,
-      )
+          403,
+        )
+      }
     }
 
     c.set("membership", member)
