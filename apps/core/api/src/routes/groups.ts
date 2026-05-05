@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, eq, inArray, isNull } from "drizzle-orm"
 import { groups, memberships } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
+import { withGroupAccess } from "../middleware/group-access"
 import {
   createGroupBodyDtoSchema,
   errorResponseSchema,
@@ -102,6 +103,7 @@ const getGroupRoute = createRoute({
   path: "/{id}",
   tags: ["groups"],
   summary: "group 単件取得（member のみ）",
+  middleware: [withGroupAccess((c) => c.req.param("id"))] as const,
   request: { params: IdParamSchema },
   responses: {
     200: {
@@ -116,8 +118,12 @@ const getGroupRoute = createRoute({
       description: "未認証",
       content: { "application/json": { schema: errorResponseSchema } },
     },
+    403: {
+      description: "未参加",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
     404: {
-      description: "未参加 or 存在しない",
+      description: "存在しない",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },
@@ -128,6 +134,7 @@ const patchGroupRoute = createRoute({
   path: "/{id}",
   tags: ["groups"],
   summary: "group の名前変更（OWNER のみ）",
+  middleware: [withGroupAccess((c) => c.req.param("id"), "OWNER")] as const,
   request: {
     params: IdParamSchema,
     body: {
@@ -152,11 +159,11 @@ const patchGroupRoute = createRoute({
       content: { "application/json": { schema: errorResponseSchema } },
     },
     403: {
-      description: "OWNER でない",
+      description: "OWNER でない / 未参加",
       content: { "application/json": { schema: errorResponseSchema } },
     },
     404: {
-      description: "未参加 or 存在しない",
+      description: "存在しない",
       content: { "application/json": { schema: errorResponseSchema } },
     },
     422: {
@@ -242,23 +249,6 @@ export const groupsRouter = new OpenAPIHono<AppEnv>()
   .openapi(getGroupRoute, async (c) => {
     const { id } = c.req.valid("param")
     const db = c.get("db")
-    const userId = c.get("userId")
-
-    const [member] = await db
-      .select({ id: memberships.id })
-      .from(memberships)
-      .where(
-        and(
-          eq(memberships.userId, userId),
-          eq(memberships.groupId, id),
-          isNull(memberships.deletedAt),
-        ),
-      )
-      .limit(1)
-
-    if (!member) {
-      return c.json({ error: { code: "NOT_FOUND", message: "group が見つかりません" } }, 404)
-    }
 
     const [row] = await db
       .select()
@@ -276,26 +266,6 @@ export const groupsRouter = new OpenAPIHono<AppEnv>()
     const { id } = c.req.valid("param")
     const body = c.req.valid("json")
     const db = c.get("db")
-    const userId = c.get("userId")
-
-    const [member] = await db
-      .select({ role: memberships.role })
-      .from(memberships)
-      .where(
-        and(
-          eq(memberships.userId, userId),
-          eq(memberships.groupId, id),
-          isNull(memberships.deletedAt),
-        ),
-      )
-      .limit(1)
-
-    if (!member) {
-      return c.json({ error: { code: "NOT_FOUND", message: "group が見つかりません" } }, 404)
-    }
-    if (member.role !== "OWNER") {
-      return c.json({ error: { code: "FORBIDDEN", message: "OWNER のみ更新できます" } }, 403)
-    }
 
     const [row] = await db
       .update(groups)
