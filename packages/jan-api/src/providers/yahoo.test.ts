@@ -81,3 +81,29 @@ test("Yahoo provider: network error returns null", async () => {
 
   expect(await provider.lookup(VALID_JAN)).toBeNull()
 })
+
+test("Yahoo provider: endpoint / confidence / name are overridable", async () => {
+  let calledUrl = ""
+  const fetchMock = buildFetch(async (url) => {
+    calledUrl = url
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { hits: [{ name: "Mock Product" }] }
+      },
+    } as Awaited<ReturnType<YahooFetch>>
+  })
+  const provider = createYahooProvider({
+    appId: "fake-app-id",
+    endpoint: "https://staging.example.test/itemSearch",
+    confidence: "HIGH",
+    name: "yahoo-staging",
+    fetch: fetchMock,
+  })
+
+  expect(provider.name).toBe("yahoo-staging")
+  const result = await provider.lookup(VALID_JAN)
+  expect(calledUrl.startsWith("https://staging.example.test/itemSearch?")).toBe(true)
+  expect(result?.confidence).toBe("HIGH")
+})

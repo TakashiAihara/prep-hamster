@@ -3,6 +3,22 @@ import { createStubProvider } from "./providers/stub"
 import { createYahooProvider } from "./providers/yahoo"
 import type { JanApiClient, JanProvider, ProductMasterCandidate } from "./types"
 
+// レイヤ構造（消費者は `JanApiClient` interface だけに依存することを想定）:
+//
+//   consumer (API endpoint / mobile UI)
+//        │  受け取る型は JanApiClient のみ
+//        ▼
+//   JanApiClient   ←  createJanApiClient(opts)
+//        │  内部で chain を順に試して first hit を返す
+//        ▼
+//   JanProvider[]  ←  Yahoo / 楽天 (TBD) / JANCODE (TBD) / stub / ...
+//
+// 上のレイヤは下のレイヤの実体を知らなくて済むので、
+//   - 別 vendor の provider に差し替え (e.g. Rakuten 本実装、staging endpoint, mock)
+//   - client 層の振る舞い変更 (cache, retry, metrics 等の wrapper)
+//   - 消費者側のテスト (custom JanApiClient を直接注入)
+// が独立に行える。
+
 export type CreateJanApiClientOptions = {
   // 明示的に渡された provider を順に試す。env からの自動構築を行う場合は省略。
   providers?: JanProvider[]
@@ -17,7 +33,7 @@ export type CreateJanApiClientOptions = {
 //   YAHOO_SHOPPING_APP_ID があれば yahoo → stub
 //   なければ stub のみ (UI からの動作確認・E2E 用)
 export function createJanApiClient(opts: CreateJanApiClientOptions = {}): JanApiClient {
-  const providers = opts.providers ?? buildDefaultProviders(opts)
+  const providers = opts.providers ?? createDefaultProviders(opts)
 
   return {
     async lookup(jan: string): Promise<ProductMasterCandidate | null> {
@@ -36,7 +52,11 @@ export function createJanApiClient(opts: CreateJanApiClientOptions = {}): JanApi
   }
 }
 
-function buildDefaultProviders(opts: CreateJanApiClientOptions): JanProvider[] {
+// env / opts から「デフォルトの」provider chain を組み立てる convenience helper。
+// 消費者が独自の chain を組みたい場合は呼ばずに、`providers: [...]` を直接渡せばよい。
+// この関数を export しておくのは、デフォルト構成に独自 provider を **追加** する用途
+// (例: stub の前に楽天や JANCODE を挟む) を想定しているため。
+export function createDefaultProviders(opts: CreateJanApiClientOptions = {}): JanProvider[] {
   const providers: JanProvider[] = []
 
   const yahooAppId = opts.yahooAppId ?? process.env["YAHOO_SHOPPING_APP_ID"]

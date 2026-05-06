@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { createJanApiClient } from "./client"
+import { createDefaultProviders, createJanApiClient } from "./client"
 import type { JanProvider, ProductMasterCandidate } from "./types"
 
 const VALID_JAN = "4901234567894"
@@ -83,4 +83,24 @@ test("default chain: yahooAppId not set falls back to stub fixtures", async () =
 
   const client = createJanApiClient({ stubFixtures: fixtures })
   expect((await client.lookup(VALID_JAN))?.name).toBe("Test Product")
+})
+
+test("createDefaultProviders is publicly exposed for chain extension", () => {
+  const previousAppId = process.env["YAHOO_SHOPPING_APP_ID"]
+  delete process.env["YAHOO_SHOPPING_APP_ID"]
+  try {
+    // env yahooAppId なしなら stub だけが返る
+    const providers = createDefaultProviders()
+    expect(providers.length).toBe(1)
+    expect(providers.at(-1)?.name).toBe("fallback-stub")
+
+    // appId 指定があれば yahoo が前段に追加される
+    const withYahoo = createDefaultProviders({ yahooAppId: "test-app-id" })
+    expect(withYahoo.length).toBe(2)
+    expect(withYahoo[0]?.name).toBe("yahoo")
+  } finally {
+    if (previousAppId !== undefined) {
+      process.env["YAHOO_SHOPPING_APP_ID"] = previousAppId
+    }
+  }
 })
