@@ -7,8 +7,10 @@ import { withDb } from "./middleware/db"
 import { onError } from "./middleware/error"
 import { categoriesRouter } from "./routes/categories"
 import { groupsRouter } from "./routes/groups"
+import { invitationsRouter } from "./routes/invitations"
 import { itemsRouter } from "./routes/items"
 import { locationsRouter } from "./routes/locations"
+import { membershipsRouter } from "./routes/memberships"
 import { stocksRouter } from "./routes/stocks"
 
 export type AppEnv = {
@@ -52,13 +54,19 @@ export function createApp(opts: CreateAppOptions) {
 
   // route 定義をチェイン化することで `hc<typeof app>` が
   // 全 endpoint を型として認識できるようにする。
-  return app
-    .get("/health", (c) => c.json({ ok: true as const }))
-    .route("/v1/groups", groupsRouter)
-    .route("/v1/locations", locationsRouter)
-    .route("/v1/categories", categoriesRouter)
-    .route("/v1/items", itemsRouter)
-    .route("/v1/stocks", stocksRouter)
+  return (
+    app
+      .get("/health", (c) => c.json({ ok: true as const }))
+      .route("/v1/groups", groupsRouter)
+      .route("/v1/locations", locationsRouter)
+      .route("/v1/categories", categoriesRouter)
+      .route("/v1/items", itemsRouter)
+      .route("/v1/stocks", stocksRouter)
+      // memberships / invitations は full-path (`/v1/groups/{groupId}/...` and
+      // `/v1/invitations/{token}/accept`) で書いているため `/v1` 直下にまとめてマウント。
+      .route("/v1", membershipsRouter)
+      .route("/v1", invitationsRouter)
+  )
 }
 
 export type AppType = ReturnType<typeof createApp>

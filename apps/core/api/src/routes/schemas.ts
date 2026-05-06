@@ -40,6 +40,39 @@ export const membershipDtoSchema = z
   })
   .openapi("Membership")
 
+// 招待発行時の role は EDITOR / VIEWER のみ。OWNER は手動 PATCH で昇格させる。
+export const inviteRoleSchema = z.enum(["EDITOR", "VIEWER"]).openapi("InviteRole")
+
+export const invitationDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    groupId: z.string().uuid(),
+    inviterId: z.string().uuid(),
+    role: roleSchema,
+    token: z.string(),
+    expiresAt: z.string().datetime({ offset: true }),
+    usedAt: z.string().datetime({ offset: true }).nullable(),
+    usedBy: z.string().uuid().nullable(),
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    deletedAt: z.string().datetime({ offset: true }).nullable(),
+  })
+  .openapi("Invitation")
+
+export const createInvitationBodyDtoSchema = z
+  .object({
+    role: inviteRoleSchema,
+    // 1〜90 日。default は handler 側で 7 日に置き換える。
+    expiresInDays: z.number().int().min(1).max(90).optional(),
+  })
+  .openapi("CreateInvitationBody")
+
+export const updateMembershipRoleBodyDtoSchema = z
+  .object({
+    role: roleSchema,
+  })
+  .openapi("UpdateMembershipRoleBody")
+
 export const createGroupBodyDtoSchema = z
   .object({
     name: z.string().min(1).max(100),
