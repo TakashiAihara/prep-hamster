@@ -112,7 +112,6 @@ async function loadProductMaster(
   return row ?? null
 }
 
-
 // 同じ groupId + barcode の active item が既にいないか確認する。
 // DB 側にも `(group_id, barcode) WHERE product_master_id IS NULL AND barcode IS NOT NULL`
 // の uniqueIndex があるが、明示的に事前 check してわかりやすい 422 を返す。

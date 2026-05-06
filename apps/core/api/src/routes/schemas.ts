@@ -152,8 +152,8 @@ export const itemByBarcodeBodyDtoSchema = z
 
 export const itemByBarcodeResponseDtoSchema = z
   .object({
-    item: z.lazy(() => itemDtoSchema),
-    productMaster: z.lazy(() => productMasterDtoSchema).nullable(),
+    item: itemDtoSchema,
+    productMaster: productMasterDtoSchema.nullable(),
     productLookup: z.enum(["existing", "hit", "miss"]),
   })
   .openapi("ItemByBarcodeResponse")
