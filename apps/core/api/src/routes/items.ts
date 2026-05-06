@@ -1,12 +1,15 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, asc, eq, isNull } from "drizzle-orm"
-import { categories, items, stocks } from "@prep-hamster/db"
+import { categories, items, productMasters, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
   createItemBodyDtoSchema,
   errorResponseSchema,
+  itemByBarcodeBodyDtoSchema,
+  itemByBarcodeResponseDtoSchema,
   itemDtoSchema,
+  productMasterDtoSchema,
   updateItemBodyDtoSchema,
 } from "./schemas"
 
@@ -21,6 +24,26 @@ const ListQuerySchema = z.object({
   groupId: z.string().uuid().openapi({ example: "00000000-0000-0000-0000-000000000000" }),
   categoryId: z.string().uuid().optional(),
   barcode: z.string().optional(),
+})
+
+const toProductMasterDto = (
+  row: typeof productMasters.$inferSelect,
+): z.infer<typeof productMasterDtoSchema> => ({
+  id: row.id,
+  jan: row.jan,
+  name: row.name,
+  manufacturer: row.manufacturer,
+  brand: row.brand,
+  contentAmount: row.contentAmount,
+  contentUnit: row.contentUnit,
+  categoryHint: row.categoryHint,
+  imageUrl: row.imageUrl,
+  source: row.source,
+  confidence: row.confidence,
+  fetchedAt: row.fetchedAt.toISOString(),
+  createdAt: row.createdAt.toISOString(),
+  updatedAt: row.updatedAt.toISOString(),
+  deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
 })
 
 const toItemDto = (row: typeof items.$inferSelect): z.infer<typeof itemDtoSchema> => ({
@@ -76,6 +99,18 @@ const BARCODE_DUPLICATE_RESPONSE = {
     message: "同じ group に同じ barcode の item が既に存在します",
   },
 } as const
+
+async function loadProductMaster(
+  db: AppEnv["Variables"]["db"],
+  productMasterId: string,
+): Promise<typeof productMasters.$inferSelect | null> {
+  const [row] = await db
+    .select()
+    .from(productMasters)
+    .where(and(eq(productMasters.id, productMasterId), isNull(productMasters.deletedAt)))
+    .limit(1)
+  return row ?? null
+}
 
 // 同じ groupId + barcode の active item が既にいないか確認する。
 // DB 側にも `(group_id, barcode) WHERE product_master_id IS NULL AND barcode IS NOT NULL`
@@ -218,6 +253,42 @@ const patchItemRoute = createRoute({
     },
     422: {
       description: "ボディ不正 / barcode 重複 / category 不整合",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+  },
+})
+
+const itemByBarcodeRoute = createRoute({
+  method: "post",
+  path: "/by-barcode",
+  tags: ["items"],
+  summary: "barcode から item を find-or-create (EDITOR 以上)",
+  request: {
+    body: { content: { "application/json": { schema: itemByBarcodeBodyDtoSchema } } },
+  },
+  responses: {
+    200: {
+      description: "既存 item を返却",
+      content: {
+        "application/json": { schema: itemByBarcodeResponseDtoSchema },
+      },
+    },
+    201: {
+      description: "外部 lookup hit / miss いずれかで新規作成",
+      content: {
+        "application/json": { schema: itemByBarcodeResponseDtoSchema },
+      },
+    },
+    401: {
+      description: "未認証",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    403: {
+      description: "未参加 / role 不足",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    422: {
+      description: "ボディ不正",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },
@@ -445,4 +516,147 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
       .where(and(eq(items.id, id), isNull(items.deletedAt)))
 
     return c.body(null, 204)
+  })
+  .openapi(itemByBarcodeRoute, async (c) => {
+    const body = c.req.valid("json")
+    const db = c.get("db")
+    const userId = c.get("userId")
+    const janApi = c.get("janApi")
+
+    const access = await checkGroupAccess(db, userId, body.groupId, "EDITOR")
+    if (!access.ok) {
+      return c.json(access.body, access.status)
+    }
+
+    // 1. 既存 item 検索: 同じ group + barcode で active な item があれば再利用。
+    //    productMasterId の有無は問わない (手動入力 / バーコード経路の両方を拾う)。
+    const [existingItem] = await db
+      .select()
+      .from(items)
+      .where(
+        and(
+          eq(items.groupId, body.groupId),
+          eq(items.barcode, body.barcode),
+          isNull(items.deletedAt),
+        ),
+      )
+      .limit(1)
+
+    if (existingItem) {
+      const productMaster = existingItem.productMasterId
+        ? await loadProductMaster(db, existingItem.productMasterId)
+        : null
+      return c.json(
+        {
+          item: toItemDto(existingItem),
+          productMaster: productMaster ? toProductMasterDto(productMaster) : null,
+          productLookup: "existing" as const,
+        },
+        200,
+      )
+    }
+
+    // 2. 外部 lookup。null ならフォールバック (placeholder で進む)。
+    const candidate = await janApi.lookup(body.barcode)
+
+    if (!candidate) {
+      const [created] = await db
+        .insert(items)
+        .values({
+          id: crypto.randomUUID(),
+          groupId: body.groupId,
+          productMasterId: null,
+          // 外部 lookup miss 時は barcode をそのまま name に置く placeholder。
+          // ユーザーが後で PATCH で書き換える前提。
+          name: body.barcode,
+          barcode: body.barcode,
+          categoryId: null,
+          defaultUnit: null,
+          manufacturer: null,
+          memo: null,
+        })
+        .returning()
+      if (!created) {
+        throw new Error("item insert (placeholder) returned no row")
+      }
+      return c.json(
+        {
+          item: toItemDto(created),
+          productMaster: null,
+          productLookup: "miss" as const,
+        },
+        201,
+      )
+    }
+
+    // 3. lookup hit: productMaster を upsert (jan UNIQUE) してから item insert。
+    //    同じ JAN を別 group が先に登録していれば既存 master を再利用する。
+    //    fetchedAt と confidence / 各メタは最新 lookup 結果で更新する。
+    const [pm] = await db
+      .insert(productMasters)
+      .values({
+        id: crypto.randomUUID(),
+        jan: candidate.jan,
+        name: candidate.name,
+        manufacturer: candidate.manufacturer,
+        brand: candidate.brand,
+        contentAmount: candidate.contentAmount,
+        contentUnit: candidate.contentUnit,
+        categoryHint: candidate.categoryHint,
+        imageUrl: candidate.imageUrl,
+        source: candidate.source,
+        sourceRaw: candidate.sourceRaw,
+        confidence: candidate.confidence,
+        fetchedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: productMasters.jan,
+        set: {
+          name: candidate.name,
+          manufacturer: candidate.manufacturer,
+          brand: candidate.brand,
+          contentAmount: candidate.contentAmount,
+          contentUnit: candidate.contentUnit,
+          categoryHint: candidate.categoryHint,
+          imageUrl: candidate.imageUrl,
+          source: candidate.source,
+          sourceRaw: candidate.sourceRaw,
+          confidence: candidate.confidence,
+          fetchedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      })
+      .returning()
+    if (!pm) {
+      throw new Error("productMaster upsert returned no row")
+    }
+
+    const [createdItem] = await db
+      .insert(items)
+      .values({
+        id: crypto.randomUUID(),
+        groupId: body.groupId,
+        productMasterId: pm.id,
+        // item の name / manufacturer は productMaster からコピーして group 内で
+        // 上書き可能にする (data-model.md 準拠: items はプロジェクト内の overrides 層)。
+        name: candidate.name,
+        barcode: body.barcode,
+        categoryId: null,
+        defaultUnit: null,
+        manufacturer: candidate.manufacturer,
+        memo: null,
+      })
+      .returning()
+    if (!createdItem) {
+      throw new Error("item insert (hit) returned no row")
+    }
+
+    return c.json(
+      {
+        item: toItemDto(createdItem),
+        productMaster: toProductMasterDto(pm),
+        productLookup: "hit" as const,
+      },
+      201,
+    )
   })

@@ -123,6 +123,41 @@ export const itemDtoSchema = z
   })
   .openapi("Item")
 
+export const productMasterDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    jan: z.string(),
+    name: z.string(),
+    manufacturer: z.string().nullable(),
+    brand: z.string().nullable(),
+    contentAmount: z.number().nullable(),
+    contentUnit: z.string().nullable(),
+    categoryHint: z.string().nullable(),
+    imageUrl: z.string().nullable(),
+    source: z.enum(["YAHOO_SHOPPING", "RAKUTEN_ICHIBA", "JANCODE_LOOKUP", "GS1_JICFS", "OTHER"]),
+    confidence: z.enum(["HIGH", "MEDIUM", "LOW"]).nullable(),
+    fetchedAt: z.string().datetime({ offset: true }),
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    deletedAt: z.string().datetime({ offset: true }).nullable(),
+  })
+  .openapi("ProductMaster")
+
+export const itemByBarcodeBodyDtoSchema = z
+  .object({
+    groupId: z.string().uuid(),
+    barcode: z.string().min(1).max(64),
+  })
+  .openapi("ItemByBarcodeBody")
+
+export const itemByBarcodeResponseDtoSchema = z
+  .object({
+    item: itemDtoSchema,
+    productMaster: productMasterDtoSchema.nullable(),
+    productLookup: z.enum(["existing", "hit", "miss"]),
+  })
+  .openapi("ItemByBarcodeResponse")
+
 // 手動入力では productMasterId は指定不可（バーコード経路で別途自動紐付け）
 export const createItemBodyDtoSchema = z
   .object({
