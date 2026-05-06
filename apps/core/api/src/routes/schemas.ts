@@ -213,3 +213,35 @@ export const createStockBodyDtoSchema = z
     note: z.string().nullable(),
   })
   .openapi("CreateStockBody")
+
+export const stockEventDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    groupId: z.string().uuid(),
+    stockId: z.string().uuid(),
+    eventType: z.enum(["ADD", "CONSUME", "DISCARD", "MOVE", "EDIT"]),
+    quantityDelta: z.number(),
+    fromLocationId: z.string().uuid().nullable(),
+    toLocationId: z.string().uuid().nullable(),
+    occurredAt: z.string().datetime({ offset: true }),
+    actorUserId: z.string().uuid().nullable(),
+    reason: z.string().nullable(),
+    createdAt: z.string().datetime({ offset: true }),
+  })
+  .openapi("StockEvent")
+
+// 数量変動 (consume / discard) の body。quantityDelta は **削減量を正で** 渡す。
+// stock_events には `-quantityDelta` を保存することで集計時の SUM 整合を保つ。
+export const stockQuantityDeltaBodyDtoSchema = z
+  .object({
+    quantityDelta: z.number().positive(),
+    reason: z.string().max(500).nullable().optional(),
+  })
+  .openapi("StockQuantityDeltaBody")
+
+export const stockMoveBodyDtoSchema = z
+  .object({
+    toLocationId: z.string().uuid(),
+    reason: z.string().max(500).nullable().optional(),
+  })
+  .openapi("StockMoveBody")
