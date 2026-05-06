@@ -59,6 +59,24 @@ async function assertCategoryInGroup(
   return true
 }
 
+// Postgres unique violation (SQLSTATE 23505) かを判定する。
+// 事前 check と INSERT/UPDATE の間に race が発生した場合の最終防衛で使う。
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code: unknown }).code === "23505"
+  )
+}
+
+const BARCODE_DUPLICATE_RESPONSE = {
+  error: {
+    code: "ITEM_BARCODE_DUPLICATE",
+    message: "同じ group に同じ barcode の item が既に存在します",
+  },
+} as const
+
 // 同じ groupId + barcode の active item が既にいないか確認する。
 // DB 側にも `(group_id, barcode) WHERE product_master_id IS NULL AND barcode IS NOT NULL`
 // の uniqueIndex があるが、明示的に事前 check してわかりやすい 422 を返す。
@@ -267,36 +285,37 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
     if (body.barcode) {
       const dup = await findDuplicateBarcode(db, body.groupId, body.barcode)
       if (dup) {
-        return c.json(
-          {
-            error: {
-              code: "ITEM_BARCODE_DUPLICATE",
-              message: "同じ group に同じ barcode の item が既に存在します",
-            },
-          },
-          422,
-        )
+        return c.json(BARCODE_DUPLICATE_RESPONSE, 422)
       }
     }
 
-    const [created] = await db
-      .insert(items)
-      .values({
-        id: crypto.randomUUID(),
-        groupId: body.groupId,
-        productMasterId: null,
-        name: body.name,
-        barcode: body.barcode ?? null,
-        categoryId: body.categoryId ?? null,
-        defaultUnit: body.defaultUnit ?? null,
-        manufacturer: body.manufacturer ?? null,
-        memo: body.memo ?? null,
-      })
-      .returning()
-    if (!created) {
-      throw new Error("item insert returned no row")
+    try {
+      const [created] = await db
+        .insert(items)
+        .values({
+          id: crypto.randomUUID(),
+          groupId: body.groupId,
+          productMasterId: null,
+          name: body.name,
+          barcode: body.barcode ?? null,
+          categoryId: body.categoryId ?? null,
+          defaultUnit: body.defaultUnit ?? null,
+          manufacturer: body.manufacturer ?? null,
+          memo: body.memo ?? null,
+        })
+        .returning()
+      if (!created) {
+        throw new Error("item insert returned no row")
+      }
+      return c.json({ item: toItemDto(created) }, 201)
+    } catch (err) {
+      // 並行リクエストで事前 check を双方通過した場合に DB の uniqueIndex で 23505。
+      // 500 として扱わずユーザーに 422 ITEM_BARCODE_DUPLICATE で返す。
+      if (isUniqueViolation(err)) {
+        return c.json(BARCODE_DUPLICATE_RESPONSE, 422)
+      }
+      throw err
     }
-    return c.json({ item: toItemDto(created) }, 201)
   })
   .openapi(getItemRoute, async (c) => {
     const { id } = c.req.valid("param")
@@ -352,15 +371,7 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
     if (body.barcode !== undefined && body.barcode !== null && existing.productMasterId == null) {
       const dup = await findDuplicateBarcode(db, existing.groupId, body.barcode, id)
       if (dup) {
-        return c.json(
-          {
-            error: {
-              code: "ITEM_BARCODE_DUPLICATE",
-              message: "同じ group に同じ barcode の item が既に存在します",
-            },
-          },
-          422,
-        )
+        return c.json(BARCODE_DUPLICATE_RESPONSE, 422)
       }
     }
 
@@ -372,15 +383,22 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
     if (body.memo !== undefined) updates.memo = body.memo
     if (body.barcode !== undefined) updates.barcode = body.barcode
 
-    const [row] = await db
-      .update(items)
-      .set(updates)
-      .where(and(eq(items.id, id), isNull(items.deletedAt)))
-      .returning()
-    if (!row) {
-      return c.json({ error: { code: "NOT_FOUND", message: "item が見つかりません" } }, 404)
+    try {
+      const [row] = await db
+        .update(items)
+        .set(updates)
+        .where(and(eq(items.id, id), isNull(items.deletedAt)))
+        .returning()
+      if (!row) {
+        return c.json({ error: { code: "NOT_FOUND", message: "item が見つかりません" } }, 404)
+      }
+      return c.json({ item: toItemDto(row) }, 200)
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        return c.json(BARCODE_DUPLICATE_RESPONSE, 422)
+      }
+      throw err
     }
-    return c.json({ item: toItemDto(row) }, 200)
   })
   .openapi(deleteItemRoute, async (c) => {
     const { id } = c.req.valid("param")
@@ -418,9 +436,12 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
       )
     }
 
+    // PATCH と同様 updatedAt も touch する。差分同期 / キャッシュ無効化が
+    // updatedAt を見るクライアントから論理削除を検知できるようにするため。
+    const now = new Date()
     await db
       .update(items)
-      .set({ deletedAt: new Date() })
+      .set({ deletedAt: now, updatedAt: now })
       .where(and(eq(items.id, id), isNull(items.deletedAt)))
 
     return c.body(null, 204)

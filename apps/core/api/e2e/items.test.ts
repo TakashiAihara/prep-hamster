@@ -138,6 +138,7 @@ test("GET /v1/items?groupId=X&categoryId=Y filters", async () => {
     headers: { "x-user-id": userId },
   })
 
+  expect(res.status).toBe(200)
   const body = (await res.json()) as { items: { name: string }[] }
   expect(body.items.map((i) => i.name)).toEqual(["Apple"])
 })
