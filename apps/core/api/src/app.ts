@@ -1,6 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { Scalar } from "@scalar/hono-api-reference"
 import type { Db } from "@prep-hamster/db"
+import { createJanApiClient, type JanApiClient } from "@prep-hamster/jan-api"
 import { withUserAuth } from "./middleware/auth"
 import { withDb } from "./middleware/db"
 import { onError } from "./middleware/error"
@@ -14,14 +15,27 @@ export type AppEnv = {
   Variables: {
     db: Db
     userId: string
+    janApi: JanApiClient
   }
 }
 
-export function createApp(opts: { db: Db }) {
+export type CreateAppOptions = {
+  db: Db
+  // 消費者は JanApiClient interface のみに依存。
+  // 未指定なら env (YAHOO_SHOPPING_APP_ID) ベースの default chain を使う。
+  janApi?: JanApiClient
+}
+
+export function createApp(opts: CreateAppOptions) {
   const app = new OpenAPIHono<AppEnv>()
+  const janApi = opts.janApi ?? createJanApiClient()
 
   app.onError(onError)
   app.use("*", withDb(opts.db))
+  app.use("*", async (c, next) => {
+    c.set("janApi", janApi)
+    await next()
+  })
   app.use("/v1/*", withUserAuth)
 
   app.doc("/openapi.json", {
