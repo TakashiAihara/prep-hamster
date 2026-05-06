@@ -30,7 +30,7 @@ iOS Simulator なら `i`、Android Emulator なら `a` を押す。
 
 `.env.local` に以下を記述（コミットしない）。
 
-```
+```env
 EXPO_PUBLIC_API_BASE_URL=http://192.168.x.y:3000
 EXPO_PUBLIC_STUB_USER_ID=<開発機ごとの UUID>
 ```
