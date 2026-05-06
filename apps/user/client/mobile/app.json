@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "prep-hamster",
+    "slug": "prep-hamster",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "prep-hamster",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.example.prephamster"
+    },
+    "android": {
+      "package": "com.example.prephamster",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
