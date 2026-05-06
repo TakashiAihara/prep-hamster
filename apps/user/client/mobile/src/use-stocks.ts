@@ -21,6 +21,36 @@ type State =
   | { status: "ok"; rows: StockListItem[] }
   | { status: "error"; message: string }
 
+type StockRow = {
+  id: string
+  itemId: string
+  locationId: string
+  quantity: number
+  unit: string
+  useByDate: string | null
+  bestBeforeDate: string | null
+}
+
+// items / locations を id → name の Map に畳み込み、stocks に画面表示用 join した行を作る。
+// hook 本体から切り出すことで描画なしの unit test で挙動を固定できる。
+export function joinStocksWithMasters(
+  stocks: StockRow[],
+  items: { id: string; name: string }[],
+  locations: { id: string; name: string }[],
+): StockListItem[] {
+  const itemMap = new Map(items.map((i) => [i.id, i.name]))
+  const locMap = new Map(locations.map((l) => [l.id, l.name]))
+  return stocks.map((s) => ({
+    id: s.id,
+    itemName: itemMap.get(s.itemId) ?? "(unknown item)",
+    locationName: locMap.get(s.locationId) ?? "(unknown location)",
+    quantity: s.quantity,
+    unit: s.unit,
+    useByDate: s.useByDate,
+    bestBeforeDate: s.bestBeforeDate,
+  }))
+}
+
 export function useStocks(): { state: State; reload: () => void } {
   const [state, setState] = useState<State>({ status: "loading" })
   const [reloadKey, setReloadKey] = useState(0)
@@ -54,20 +84,7 @@ export function useStocks(): { state: State; reload: () => void } {
         const stocks = (await stocksRes.json()).stocks
         const items = (await itemsRes.json()).items
         const locations = (await locationsRes.json()).locations
-
-        const itemMap = new Map(items.map((i) => [i.id, i.name]))
-        const locMap = new Map(locations.map((l) => [l.id, l.name]))
-
-        const rows: StockListItem[] = stocks.map((s) => ({
-          id: s.id,
-          itemName: itemMap.get(s.itemId) ?? "(unknown item)",
-          locationName: locMap.get(s.locationId) ?? "(unknown location)",
-          quantity: s.quantity,
-          unit: s.unit,
-          useByDate: s.useByDate,
-          bestBeforeDate: s.bestBeforeDate,
-        }))
-        setState({ status: "ok", rows })
+        setState({ status: "ok", rows: joinStocksWithMasters(stocks, items, locations) })
       } catch (err) {
         if (cancelled) return
         const message = err instanceof Error ? err.message : "unknown"
