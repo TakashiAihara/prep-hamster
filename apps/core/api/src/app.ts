@@ -4,7 +4,9 @@ import type { Db } from "@prep-hamster/db"
 import { withUserAuth } from "./middleware/auth"
 import { withDb } from "./middleware/db"
 import { onError } from "./middleware/error"
+import { categoriesRouter } from "./routes/categories"
 import { groupsRouter } from "./routes/groups"
+import { locationsRouter } from "./routes/locations"
 import { stocksRouter } from "./routes/stocks"
 
 export type AppEnv = {
@@ -38,6 +40,8 @@ export function createApp(opts: { db: Db }) {
   return app
     .get("/health", (c) => c.json({ ok: true as const }))
     .route("/v1/groups", groupsRouter)
+    .route("/v1/locations", locationsRouter)
+    .route("/v1/categories", categoriesRouter)
     .route("/v1/stocks", stocksRouter)
 }
 
