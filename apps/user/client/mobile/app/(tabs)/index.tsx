@@ -1,40 +1,76 @@
-import { StyleSheet, Text, View } from "react-native"
-import { useHealth } from "@/use-health"
+import { useFocusEffect } from "expo-router"
+import { useCallback } from "react"
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native"
+import { useStocks, type StockListItem } from "@/use-stocks"
 
-// 在庫一覧 placeholder。
-// 本実装は別 Issue (#77 + 後続) で stocks endpoint を叩いて表示する。
-// bootstrap (#76) の段階では /v1/health の結果を出して API 疎通を確認するだけ。
+// 在庫一覧画面 (/(tabs)/index)。
+// 追加画面 (#77) からの導線で「保存後に一覧に反映」を満たすためのシンプル表示。
 
 export default function StocksIndex() {
-  const health = useHealth()
+  const { state, reload } = useStocks()
+
+  // tab に戻ってくるたびに最新化したい (#77 の add fl ow からの帰還で表示更新)
+  useFocusEffect(
+    useCallback(() => {
+      reload()
+    }, [reload]),
+  )
+
+  if (state.status === "loading") {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+      </View>
+    )
+  }
+  if (state.status === "error") {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.error}>取得失敗: {state.message}</Text>
+      </View>
+    )
+  }
+  if (state.rows.length === 0) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.empty}>在庫はまだありません</Text>
+        <Text style={styles.empty}>「追加」タブから登録してください</Text>
+      </View>
+    )
+  }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>在庫一覧 (bootstrap)</Text>
-      <Text style={styles.subtitle}>API 疎通: {renderHealth(health)}</Text>
+    <FlatList
+      data={state.rows}
+      keyExtractor={(row) => row.id}
+      contentContainerStyle={styles.listContent}
+      refreshControl={<RefreshControl refreshing={false} onRefresh={reload} />}
+      renderItem={({ item }) => <StockRow row={item} />}
+      ItemSeparatorComponent={() => <View style={styles.separator} />}
+    />
+  )
+}
+
+function StockRow({ row }: { row: StockListItem }) {
+  const expiry = row.useByDate ?? row.bestBeforeDate
+  return (
+    <View style={styles.row}>
+      <Text style={styles.itemName}>{row.itemName}</Text>
+      <Text style={styles.meta}>
+        {row.locationName} ・ {row.quantity} {row.unit}
+        {expiry ? ` ・ 期限 ${expiry}` : ""}
+      </Text>
     </View>
   )
 }
 
-function renderHealth(health: ReturnType<typeof useHealth>): string {
-  switch (health.status) {
-    case "loading":
-      return "確認中..."
-    case "ok":
-      return `OK (HTTP ${health.httpStatus})`
-    case "error":
-      return `NG (${health.message})`
-  }
-}
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-    gap: 8,
-  },
-  title: { fontSize: 20, fontWeight: "600" },
-  subtitle: { fontSize: 14, color: "#555" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16, gap: 6 },
+  empty: { color: "#666" },
+  error: { color: "#c0392b" },
+  listContent: { paddingVertical: 8 },
+  row: { paddingHorizontal: 16, paddingVertical: 12, gap: 4 },
+  itemName: { fontSize: 16, fontWeight: "600" },
+  meta: { fontSize: 13, color: "#555" },
+  separator: { height: 1, backgroundColor: "#eee" },
 })

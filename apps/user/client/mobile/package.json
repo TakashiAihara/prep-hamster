@@ -13,7 +13,10 @@
   },
   "dependencies": {
     "@prep-hamster/api-client": "workspace:*",
+    "@prep-hamster/jan-api": "workspace:*",
+    "@react-native-community/datetimepicker": "8.2.0",
     "expo": "~52.0.27",
+    "expo-camera": "~16.0.10",
     "expo-constants": "~17.0.4",
     "expo-linking": "~7.0.4",
     "expo-router": "~4.0.17",
