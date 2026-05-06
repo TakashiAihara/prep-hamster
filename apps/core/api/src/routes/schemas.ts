@@ -106,6 +106,47 @@ export const updateCategoryBodyDtoSchema = z
   })
   .openapi("UpdateCategoryBody")
 
+export const itemDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    groupId: z.string().uuid(),
+    productMasterId: z.string().uuid().nullable(),
+    name: z.string(),
+    barcode: z.string().nullable(),
+    categoryId: z.string().uuid().nullable(),
+    defaultUnit: z.string().nullable(),
+    manufacturer: z.string().nullable(),
+    memo: z.string().nullable(),
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    deletedAt: z.string().datetime({ offset: true }).nullable(),
+  })
+  .openapi("Item")
+
+// 手動入力では productMasterId は指定不可（バーコード経路で別途自動紐付け）
+export const createItemBodyDtoSchema = z
+  .object({
+    groupId: z.string().uuid(),
+    name: z.string().min(1).max(200),
+    categoryId: z.string().uuid().nullable().optional(),
+    defaultUnit: z.string().min(1).max(50).nullable().optional(),
+    manufacturer: z.string().max(200).nullable().optional(),
+    memo: z.string().max(2000).nullable().optional(),
+    barcode: z.string().min(1).max(64).nullable().optional(),
+  })
+  .openapi("CreateItemBody")
+
+export const updateItemBodyDtoSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    categoryId: z.string().uuid().nullable().optional(),
+    defaultUnit: z.string().min(1).max(50).nullable().optional(),
+    manufacturer: z.string().max(200).nullable().optional(),
+    memo: z.string().max(2000).nullable().optional(),
+    barcode: z.string().min(1).max(64).nullable().optional(),
+  })
+  .openapi("UpdateItemBody")
+
 export const stockDtoSchema = z
   .object({
     id: z.string().uuid(),
