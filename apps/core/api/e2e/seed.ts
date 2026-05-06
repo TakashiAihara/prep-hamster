@@ -90,6 +90,7 @@ export async function seedStock(
   itemId: string,
   locationId: string,
   quantity = 1,
+  dates: { useByDate?: string | null; bestBeforeDate?: string | null } = {},
 ): Promise<string> {
   const id = crypto.randomUUID()
   await testDb.insert(stocks).values({
@@ -99,8 +100,8 @@ export async function seedStock(
     locationId,
     quantity,
     unit: "個",
-    useByDate: null,
-    bestBeforeDate: null,
+    useByDate: dates.useByDate ?? null,
+    bestBeforeDate: dates.bestBeforeDate ?? null,
     openedAt: null,
     note: null,
   })
