@@ -75,6 +75,13 @@
         "drizzle-kit": "^0.28.0",
       },
     },
+    "packages/jan-api": {
+      "name": "@prep-hamster/jan-api",
+      "version": "0.0.0",
+      "dependencies": {
+        "@prep-hamster/db": "workspace:*",
+      },
+    },
     "packages/schema": {
       "name": "@prep-hamster/schema",
       "version": "0.0.0",
@@ -230,6 +237,8 @@
     "@prep-hamster/cli-user": ["@prep-hamster/cli-user@workspace:apps/user/client/cli"],
 
     "@prep-hamster/db": ["@prep-hamster/db@workspace:packages/db"],
+
+    "@prep-hamster/jan-api": ["@prep-hamster/jan-api@workspace:packages/jan-api"],
 
     "@prep-hamster/schema": ["@prep-hamster/schema@workspace:packages/schema"],
 
