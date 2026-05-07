@@ -9,9 +9,15 @@ import { getCurrentUserId } from "./auth"
 
 const FALLBACK_BASE_URL = "http://localhost:3000"
 
+// env 解決を切り出して unit test 可能にする。getApiClient 自体は createApiClient を
+// 呼び出すため副作用 (network ベース) を含む。
+export function resolveApiBaseUrl(env: Record<string, string | undefined> = process.env): string {
+  return env["EXPO_PUBLIC_API_BASE_URL"] ?? FALLBACK_BASE_URL
+}
+
 export function getApiClient(): ApiClient {
   return createApiClient({
-    baseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? FALLBACK_BASE_URL,
+    baseUrl: resolveApiBaseUrl(),
     userId: getCurrentUserId(),
   })
 }
