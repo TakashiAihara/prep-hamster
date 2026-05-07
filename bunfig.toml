@@ -1,0 +1,11 @@
+# bun の install linker を npm/yarn 互換の flat layout (hoisted) にする。
+#
+# 既定の "isolated" linker は `node_modules/.bun/<pkg>@<ver>/node_modules/<pkg>` に
+# 実体を置き、上位 dir には symlink を張る。これは bun runtime 単体では問題ないが、
+# **Metro / React Native の resolver は `.bun/` 配下の transitive peer を辿れず、
+# mobile package が bundle 失敗する** (Issue #98)。
+#
+# hoisted にすると workspace root の `node_modules/<pkg>` に実体が置かれ、
+# Metro の標準探索で transitive 解決が通るようになる。
+[install]
+linker = "hoisted"
