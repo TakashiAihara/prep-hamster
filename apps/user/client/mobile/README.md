@@ -48,6 +48,32 @@ EXPO_PUBLIC_STUB_USER_ID=<開発機ごとの UUID>
 
 `bun --filter @prep-hamster/mobile typecheck` が CI で通ることが merge 条件。
 
+## As-Is screen catalog (Maestro)
+
+`docs/design/screens-as-is.md` に画面遷移図 + 各画面のキャプチャを集める。再生成手順:
+
+```sh
+# 1. Android emulator 起動 + adb で認識させる
+emulator -avd <name>  # or Android Studio から起動
+adb devices            # 1 台以上認識していること
+
+# 2. app をビルド & インストール (初回 / app が無い時のみ)
+bun run --filter @prep-hamster/mobile android
+
+# 3. flow を実行してキャプチャ取得
+bun run --filter @prep-hamster/mobile capture
+```
+
+Maestro CLI のインストール:
+
+```sh
+curl -Ls "https://get.maestro.mobile.dev" | bash
+# PATH に ~/.maestro/bin を追加
+```
+
+flow 定義は `apps/user/client/mobile/maestro/*.yaml`。新画面追加時はここに flow を増やす。
+iOS / 実機・本物の barcode 読取は別 Issue で扱う (本仕組みは Android emulator 前提)。
+
 ## v1.1.0 以降の差し替えポイント
 
 - `src/auth.ts` の `getCurrentUserId()` を Supabase Auth ベースに置換

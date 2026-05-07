@@ -10,7 +10,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsgo --noEmit",
-    "test": "bun test src"
+    "test": "bun test src",
+    "capture": "bun run scripts/capture-screens.ts"
   },
   "dependencies": {
     "@prep-hamster/api-client": "workspace:*",

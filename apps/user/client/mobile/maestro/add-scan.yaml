@@ -1,0 +1,17 @@
+# 起動 → 追加タブ → カメラ起動入口 (権限プロンプト or CameraView)
+#
+# emulator のカメラはバーコードを読み取れないので **permission 確認画面までで止める**。
+# 実機でカメラから読む flow は別 Issue。
+appId: com.example.prephamster
+---
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd
+- tapOn:
+    text: "追加"
+- waitForAnimationToEnd
+- tapOn:
+    text: "カメラで読み取る"
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: add-scan-permission-or-camera
