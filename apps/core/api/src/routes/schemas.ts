@@ -214,6 +214,20 @@ export const createStockBodyDtoSchema = z
   })
   .openapi("CreateStockBody")
 
+// quantity は consume / move / discard / soft-delete 経由で履歴を残しつつ更新する方針のため、
+// PATCH では受け付けない。.strict() で未知キー (quantity を含む) を 422 で reject する。
+export const updateStockBodyDtoSchema = z
+  .object({
+    locationId: z.string().uuid().optional(),
+    unit: z.string().min(1).optional(),
+    useByDate: z.string().date().nullable().optional(),
+    bestBeforeDate: z.string().date().nullable().optional(),
+    openedAt: z.string().date().nullable().optional(),
+    note: z.string().nullable().optional(),
+  })
+  .strict()
+  .openapi("UpdateStockBody")
+
 export const stockEventDtoSchema = z
   .object({
     id: z.string().uuid(),

@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
-import { and, eq, isNull } from "drizzle-orm"
-import { locations, memberships, stockEvents, stocks } from "@prep-hamster/db"
+import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm"
+import { items, locations, memberships, stockEvents, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
@@ -10,6 +10,7 @@ import {
   stockEventDtoSchema,
   stockMoveBodyDtoSchema,
   stockQuantityDeltaBodyDtoSchema,
+  updateStockBodyDtoSchema,
 } from "./schemas"
 
 const IdParamSchema = z.object({
@@ -19,8 +20,18 @@ const IdParamSchema = z.object({
     .openapi({ param: { name: "id", in: "path" } }),
 })
 
+// `?includeExpired=true` のように文字列で来るため、boolean は文字列パース後に変換する。
+const booleanQuery = z
+  .enum(["true", "false"])
+  .transform((v) => v === "true")
+  .openapi({ type: "boolean" })
+
 const ListQuerySchema = z.object({
   groupId: z.string().uuid().openapi({ example: "00000000-0000-0000-0000-000000000000" }),
+  categoryId: z.string().uuid().optional(),
+  locationId: z.string().uuid().optional(),
+  expiringBefore: z.string().date().optional(),
+  includeExpired: booleanQuery.optional(),
 })
 
 // drizzle 行を API DTO 形式 (timestamp は ISO string、id は plain UUID) に変換
@@ -60,14 +71,14 @@ const listStocksRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["stocks"],
-  summary: "在庫一覧を取得",
+  summary: "在庫一覧を取得 (categoryId / locationId / 期限で絞り込み可)",
   middleware: [withGroupAccess((c) => c.req.query("groupId"))] as const,
   request: {
     query: ListQuerySchema,
   },
   responses: {
     200: {
-      description: "在庫一覧",
+      description: "在庫一覧 (useByDate ASC NULLS LAST, bestBeforeDate ASC NULLS LAST)",
       content: {
         "application/json": {
           schema: z.object({ stocks: z.array(stockDtoSchema) }),
@@ -84,6 +95,73 @@ const listStocksRoute = createRoute({
     },
     422: {
       description: "クエリ不正",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+  },
+})
+
+const getStockRoute = createRoute({
+  method: "get",
+  path: "/{id}",
+  tags: ["stocks"],
+  summary: "在庫を 1 件取得",
+  request: { params: IdParamSchema },
+  responses: {
+    200: {
+      description: "取得成功",
+      content: {
+        "application/json": {
+          schema: z.object({ stock: stockDtoSchema }),
+        },
+      },
+    },
+    401: {
+      description: "未認証",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    403: {
+      description: "未参加",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    404: {
+      description: "存在しない",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+  },
+})
+
+const patchStockRoute = createRoute({
+  method: "patch",
+  path: "/{id}",
+  tags: ["stocks"],
+  summary: "在庫の属性を部分更新 (EDITOR 以上、quantity は対象外)",
+  request: {
+    params: IdParamSchema,
+    body: { content: { "application/json": { schema: updateStockBodyDtoSchema } } },
+  },
+  responses: {
+    200: {
+      description: "更新成功",
+      content: {
+        "application/json": {
+          schema: z.object({ stock: stockDtoSchema }),
+        },
+      },
+    },
+    401: {
+      description: "未認証",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    403: {
+      description: "未参加 / role 不足",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    404: {
+      description: "存在しない",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    422: {
+      description: "ボディ不正 (quantity を含む / 移動先 location が group 外)",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },
@@ -263,15 +341,137 @@ const deleteStockRoute = createRoute({
 
 export const stocksRouter = new OpenAPIHono<AppEnv>()
   .openapi(listStocksRoute, async (c) => {
-    const { groupId } = c.req.valid("query")
+    const { groupId, categoryId, locationId, expiringBefore, includeExpired } = c.req.valid("query")
     const db = c.get("db")
 
-    const rows = await db
+    // YYYY-MM-DD 文字列で比較するため、PG 上の DATE 列に対しても辞書順 = 日付順で正しく動く。
+    const today = new Date().toISOString().slice(0, 10)
+
+    const conditions = [eq(stocks.groupId, groupId), isNull(stocks.deletedAt)]
+    if (locationId) {
+      conditions.push(eq(stocks.locationId, locationId))
+    }
+    if (expiringBefore) {
+      // 「いずれかの期限日が指定日以前」= useByDate <= X OR bestBeforeDate <= X
+      const expiringCond = or(
+        lte(stocks.useByDate, expiringBefore),
+        lte(stocks.bestBeforeDate, expiringBefore),
+      )
+      if (expiringCond) conditions.push(expiringCond)
+    }
+    if (!includeExpired) {
+      // 既に期限切れ (useByDate or bestBeforeDate <= today) のものを除外。
+      // null は期限が無いので残す。
+      const notExpired = and(
+        or(isNull(stocks.useByDate), sql`${stocks.useByDate} > ${today}`),
+        or(isNull(stocks.bestBeforeDate), sql`${stocks.bestBeforeDate} > ${today}`),
+      )
+      if (notExpired) conditions.push(notExpired)
+    }
+
+    const baseQuery = db
+      .select({ stock: stocks })
+      .from(stocks)
+      // categoryId は items 経由で絞る。filter 無しでも JOIN すると stocks 列に影響するため、
+      // categoryId 指定時のみ JOIN を追加する。
+      .$dynamic()
+
+    const query = categoryId
+      ? baseQuery
+          .innerJoin(items, eq(stocks.itemId, items.id))
+          .where(and(...conditions, eq(items.categoryId, categoryId)))
+      : baseQuery.where(and(...conditions))
+
+    const rows = await query.orderBy(
+      sql`${stocks.useByDate} ASC NULLS LAST`,
+      sql`${stocks.bestBeforeDate} ASC NULLS LAST`,
+      asc(stocks.createdAt),
+    )
+
+    return c.json({ stocks: rows.map((r) => toStockDto(r.stock)) }, 200)
+  })
+  .openapi(getStockRoute, async (c) => {
+    const { id } = c.req.valid("param")
+    const db = c.get("db")
+    const userId = c.get("userId")
+
+    const [existing] = await db
       .select()
       .from(stocks)
-      .where(and(eq(stocks.groupId, groupId), isNull(stocks.deletedAt)))
+      .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+      .limit(1)
+    if (!existing) {
+      return c.json({ error: { code: "NOT_FOUND", message: "stock が見つかりません" } }, 404)
+    }
 
-    return c.json({ stocks: rows.map(toStockDto) }, 200)
+    const access = await checkGroupAccess(db, userId, existing.groupId)
+    if (!access.ok) {
+      return c.json(access.body, access.status)
+    }
+
+    return c.json({ stock: toStockDto(existing) }, 200)
+  })
+  .openapi(patchStockRoute, async (c) => {
+    const { id } = c.req.valid("param")
+    const body = c.req.valid("json")
+    const db = c.get("db")
+    const userId = c.get("userId")
+
+    const [existing] = await db
+      .select()
+      .from(stocks)
+      .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+      .limit(1)
+    if (!existing) {
+      return c.json({ error: { code: "NOT_FOUND", message: "stock が見つかりません" } }, 404)
+    }
+
+    const access = await checkGroupAccess(db, userId, existing.groupId, "EDITOR")
+    if (!access.ok) {
+      return c.json(access.body, access.status)
+    }
+
+    // locationId 変更を PATCH で許容するが、move エンドポイントとは違い stock_events への
+    // MOVE 記録は行わない (PATCH は属性訂正系。物理移動は /move を使うこと)。
+    // ただし group をまたいだ location は弾く。
+    if (body.locationId && body.locationId !== existing.locationId) {
+      const [toLoc] = await db
+        .select({ groupId: locations.groupId })
+        .from(locations)
+        .where(and(eq(locations.id, body.locationId), isNull(locations.deletedAt)))
+        .limit(1)
+      if (!toLoc || toLoc.groupId !== existing.groupId) {
+        return c.json(
+          {
+            error: {
+              code: "LOCATION_GROUP_MISMATCH",
+              message: "locationId が同じ group の active な location ではありません",
+            },
+          },
+          422,
+        )
+      }
+    }
+
+    const now = new Date()
+    const [updated] = await db
+      .update(stocks)
+      .set({
+        ...(body.locationId !== undefined && { locationId: body.locationId }),
+        ...(body.unit !== undefined && { unit: body.unit }),
+        ...(body.useByDate !== undefined && { useByDate: body.useByDate }),
+        ...(body.bestBeforeDate !== undefined && { bestBeforeDate: body.bestBeforeDate }),
+        ...(body.openedAt !== undefined && { openedAt: body.openedAt }),
+        ...(body.note !== undefined && { note: body.note }),
+        updatedAt: now,
+      })
+      .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+      .returning()
+    if (!updated) {
+      throw new Error("stock update returned no row")
+    }
+
+    return c.json({ stock: toStockDto(updated) }, 200)
   })
   .openapi(createStockRoute, async (c) => {
     const body = c.req.valid("json")
