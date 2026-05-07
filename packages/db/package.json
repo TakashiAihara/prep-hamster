@@ -36,12 +36,12 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "drizzle-orm": "^0.41.0",
-    "drizzle-zod": "^0.7.0",
+    "drizzle-orm": "^0.45.2",
+    "drizzle-zod": "^0.8.3",
     "postgres": "^3.4.5",
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.28.0"
+    "drizzle-kit": "^0.31.10"
   }
 }
