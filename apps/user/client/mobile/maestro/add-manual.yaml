@@ -1,0 +1,27 @@
+# 起動 → 追加タブ → 手動入力 → JAN 投入 → 詳細フォーム
+#
+# API がローカルで起動 (PORT 3000) かつ EXPO_PUBLIC_API_BASE_URL が emulator から
+# 到達可能な値 (Android emu なら 10.0.2.2:3000) になっている前提。
+# 接続できないと「送信」後に error 表示で止まる (それ自体も catalog として撮れる)。
+appId: com.example.prephamster
+---
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd
+- tapOn:
+    text: "追加"
+- waitForAnimationToEnd
+- tapOn:
+    text: "手動で barcode を入力 (debug)"
+- waitForAnimationToEnd
+- takeScreenshot: add-manual-input
+- tapOn:
+    id: "input"
+    optional: true
+- inputText: "4901234567894"
+- takeScreenshot: add-manual-input-filled
+- tapOn:
+    text: "送信"
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: add-manual-after-submit

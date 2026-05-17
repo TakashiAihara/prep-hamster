@@ -1,0 +1,14 @@
+# 起動 → 在庫一覧 (空) → 追加タブ → カメラ起動入口
+#
+# 想定: API には接続できなくても良い (loading / error / empty いずれかの状態を捕捉)。
+# Android emulator 上でアプリが起動できれば最低限の screen catalog は埋まる。
+appId: com.example.prephamster
+---
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd
+- takeScreenshot: home-stocks-list
+- tapOn:
+    text: "追加"
+- waitForAnimationToEnd
+- takeScreenshot: home-add-entry
