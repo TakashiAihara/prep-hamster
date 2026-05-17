@@ -27,6 +27,7 @@ export default function ManualBarcodeScreen() {
     <View style={styles.container}>
       <Text style={styles.label}>JAN コード (EAN-13 / EAN-8)</Text>
       <TextInput
+        testID="input"
         value={barcode}
         onChangeText={setBarcode}
         keyboardType="number-pad"
