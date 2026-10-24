@@ -8,9 +8,9 @@
 // ID 列は branded UUID で nominal type 化する。`UserId` と `StockId` は実体は
 // string だが型では区別され、誤った id を渡すと compile error になる。
 //
-// refinement callback は **必ず引数 `s` を chain する**こと。`() => z.string()...`
-// のように新しい schema を返すと、drizzle-zod は列の optional / default /
-// nullable 属性を再適用しなくなる (CodeRabbit PR #65 で指摘)。
+// refinement は callback で渡す。schema を直接渡すと drizzle-zod は列の optional /
+// default / nullable 属性を再適用しない (CodeRabbit PR #65 で指摘)。callback なら
+// 返した schema が新しく作ったものでも再適用される (zod 3 版と同じ結果を実測)。
 
 import { createInsertSchema, createSelectSchema, createUpdateSchema } from "drizzle-zod"
 import { z } from "zod"

@@ -83,7 +83,8 @@ export const jaErrorMap: z.core.$ZodErrorMap = (issue) => {
   return undefined
 }
 
-// zod 4 は issue.received を持たないので、zod 3 と同じく null / 配列 / Date を typeof から分ける。
+// zod 4 は issue.received を持たないので、typeLabel が名前を持つ null / 配列 / Date だけ
+// typeof から分ける (zod 3 の nan / map / set / promise は区別しない)。
 const receivedType = (v: unknown): string =>
   v === null ? "null" : Array.isArray(v) ? "array" : v instanceof Date ? "date" : typeof v
 

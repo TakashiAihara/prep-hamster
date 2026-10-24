@@ -127,3 +127,10 @@ test("row schema の id は version を持たない stub id も受ける", () =>
   expect(StockSchema.shape.groupId.safeParse(stubId).success).toBe(true)
   expect(UserSchema.shape.id.safeParse("not-a-uuid").success).toBe(false)
 })
+
+// brandUuid は drizzle-zod の `s` を chain せず作り直すので、列の nullable / optional が
+// 外側で再適用され続けることを固定する。
+test("branded uuid 列は列の nullable / optional を保つ", () => {
+  expect(StockEventSchema.shape.fromLocationId.safeParse(null).success).toBe(true)
+  expect(StockEventSchema.shape.stockId.safeParse(null).success).toBe(false)
+})

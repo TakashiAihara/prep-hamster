@@ -120,4 +120,29 @@ test("stub ids without a UUID version are accepted on path and query", async () 
 
   expect(byPath.status).toBe(200)
   expect(byQuery.status).toBe(200)
+
+  const members = await app.request(`/v1/groups/${groupId}/memberships`, {
+    headers: { "x-user-id": userId },
+  })
+  expect(members.status).toBe(200)
+
+  const invite = await app.request(`/v1/groups/${groupId}/invitations`, {
+    method: "POST",
+    headers: { "x-user-id": userId, "content-type": "application/json" },
+    body: JSON.stringify({ role: "VIEWER" }),
+  })
+  expect(invite.status).toBe(201)
+
+  // 存在しない stub id は形式エラー (400) ではなく 404 になる。
+  const missingId = "00000000-0000-0000-0000-000000000099"
+  const resources = ["categories", "items", "locations", "stocks"]
+  const statuses = await Promise.all(
+    resources.map(async (resource) => {
+      const res = await app.request(`/v1/${resource}/${missingId}?groupId=${groupId}`, {
+        headers: { "x-user-id": userId },
+      })
+      return `${resource} ${res.status}`
+    }),
+  )
+  expect(statuses).toEqual(resources.map((resource) => `${resource} 404`))
 })
