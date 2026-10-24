@@ -13,7 +13,7 @@ import {
 const GroupParamSchema = z.object({
   groupId: z
     .string()
-    .uuid()
+    .guid()
     .openapi({ param: { name: "groupId", in: "path" } }),
 })
 

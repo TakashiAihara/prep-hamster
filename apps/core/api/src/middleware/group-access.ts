@@ -22,7 +22,7 @@ export type GroupAccessEnv = {
 
 export type ExtractGroupId = (c: Context) => string | undefined
 
-const uuidSchema = z.string().uuid()
+const uuidSchema = z.string().guid()
 
 export type GroupAccessFailure = {
   ok: false

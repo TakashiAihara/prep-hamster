@@ -7,7 +7,7 @@ import { z } from "zod"
 // 型レベルで区別したいので nominal type を作る。consumer 側では `Brand<...>`
 // で受け渡しするだけで他の id を渡そうとすると compile error になる。
 export const brandedId = <const TName extends string>(_name: TName) =>
-  z.string().uuid().brand<TName>()
+  z.string().guid().brand<TName>()
 
 export const UserId = brandedId("UserId")
 export type UserId = z.infer<typeof UserId>
@@ -49,7 +49,7 @@ export const NotificationSettingId = brandedId("NotificationSettingId")
 export type NotificationSettingId = z.infer<typeof NotificationSettingId>
 
 // 旧称 `Id` (汎用 UUID) は新規コードでは使わない。互換のため当面残す。
-export const Id = z.string().uuid()
+export const Id = z.string().guid()
 export type Id = z.infer<typeof Id>
 
 export const TimestampString = z.string().datetime({ offset: true })

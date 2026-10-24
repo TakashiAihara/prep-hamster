@@ -117,3 +117,20 @@ test("RoleSchema accepts only OWNER / EDITOR / VIEWER", () => {
   expect(RoleSchema.safeParse("VIEWER").success).toBe(true)
   expect(RoleSchema.safeParse("ADMIN").success).toBe(false)
 })
+
+// zod 4 の uuid() は RFC 9562 の version を見るので、mobile の stub id (...0001) を弾く。
+// row schema も zod 3 と同じ緩い形式で受けることを固定する。
+test("row schema の id は version を持たない stub id も受ける", () => {
+  const stubId = "00000000-0000-0000-0000-000000000001"
+  expect(UserSchema.shape.id.safeParse(stubId).success).toBe(true)
+  expect(GroupSchema.shape.id.safeParse(stubId).success).toBe(true)
+  expect(StockSchema.shape.groupId.safeParse(stubId).success).toBe(true)
+  expect(UserSchema.shape.id.safeParse("not-a-uuid").success).toBe(false)
+})
+
+// brandUuid は drizzle-zod の `s` を chain せず作り直すので、列の nullable / optional が
+// 外側で再適用され続けることを固定する。
+test("branded uuid 列は列の nullable / optional を保つ", () => {
+  expect(StockEventSchema.shape.fromLocationId.safeParse(null).success).toBe(true)
+  expect(StockEventSchema.shape.stockId.safeParse(null).success).toBe(false)
+})

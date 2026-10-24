@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
 import { eq } from "drizzle-orm"
-import { memberships } from "@prep-hamster/db"
+import { groups, memberships, users } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import { seedGroupWithMembership, seedMembership, seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
@@ -97,4 +97,52 @@ test("PATCH /v1/groups/:id by VIEWER returns 403 INSUFFICIENT_ROLE", async () =>
   expect(res.status).toBe(403)
   const body = (await res.json()) as { error: { code: string } }
   expect(body.error.code).toBe("INSUFFICIENT_ROLE")
+})
+
+// mobile の stub id (auth.ts / config.ts) は RFC 9562 の version を持たない。
+// zod 4 の uuid() は弾くので、path / query の両方で 400 にならないことを固定する。
+test("stub ids without a UUID version are accepted on path and query", async () => {
+  const userId = "00000000-0000-0000-0000-000000000001"
+  const groupId = "00000000-0000-0000-0000-000000000010"
+  await testDb
+    .insert(users)
+    .values({ id: userId, email: "stub@example.test", displayName: "Stub", locale: "ja-JP" })
+  await testDb.insert(groups).values({ id: groupId, name: "Stub Home", createdBy: userId })
+  await testDb
+    .insert(memberships)
+    .values({ id: crypto.randomUUID(), userId, groupId, role: "OWNER", joinedAt: new Date() })
+
+  const app = createApp({ db: testDb })
+  const byPath = await app.request(`/v1/groups/${groupId}`, { headers: { "x-user-id": userId } })
+  const byQuery = await app.request(`/v1/stocks?groupId=${groupId}`, {
+    headers: { "x-user-id": userId },
+  })
+
+  expect(byPath.status).toBe(200)
+  expect(byQuery.status).toBe(200)
+
+  const members = await app.request(`/v1/groups/${groupId}/memberships`, {
+    headers: { "x-user-id": userId },
+  })
+  expect(members.status).toBe(200)
+
+  const invite = await app.request(`/v1/groups/${groupId}/invitations`, {
+    method: "POST",
+    headers: { "x-user-id": userId, "content-type": "application/json" },
+    body: JSON.stringify({ role: "VIEWER" }),
+  })
+  expect(invite.status).toBe(201)
+
+  // 存在しない stub id は形式エラー (400) ではなく 404 になる。
+  const missingId = "00000000-0000-0000-0000-000000000099"
+  const resources = ["categories", "items", "locations", "stocks"]
+  const statuses = await Promise.all(
+    resources.map(async (resource) => {
+      const res = await app.request(`/v1/${resource}/${missingId}?groupId=${groupId}`, {
+        headers: { "x-user-id": userId },
+      })
+      return `${resource} ${res.status}`
+    }),
+  )
+  expect(statuses).toEqual(resources.map((resource) => `${resource} 404`))
 })
