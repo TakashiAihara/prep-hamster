@@ -18,9 +18,9 @@ export const roleSchema = z.enum(["OWNER", "EDITOR", "VIEWER"]).openapi("Role")
 
 export const groupDtoSchema = z
   .object({
-    id: z.string().uuid(),
+    id: z.string().guid(),
     name: z.string(),
-    createdBy: z.string().uuid(),
+    createdBy: z.string().guid(),
     createdAt: z.string().datetime({ offset: true }),
     updatedAt: z.string().datetime({ offset: true }),
     deletedAt: z.string().datetime({ offset: true }).nullable(),
@@ -29,9 +29,9 @@ export const groupDtoSchema = z
 
 export const membershipDtoSchema = z
   .object({
-    id: z.string().uuid(),
-    userId: z.string().uuid(),
-    groupId: z.string().uuid(),
+    id: z.string().guid(),
+    userId: z.string().guid(),
+    groupId: z.string().guid(),
     role: roleSchema,
     joinedAt: z.string().datetime({ offset: true }),
     createdAt: z.string().datetime({ offset: true }),
@@ -45,14 +45,14 @@ export const inviteRoleSchema = z.enum(["EDITOR", "VIEWER"]).openapi("InviteRole
 
 export const invitationDtoSchema = z
   .object({
-    id: z.string().uuid(),
-    groupId: z.string().uuid(),
-    inviterId: z.string().uuid(),
+    id: z.string().guid(),
+    groupId: z.string().guid(),
+    inviterId: z.string().guid(),
     role: roleSchema,
     token: z.string(),
     expiresAt: z.string().datetime({ offset: true }),
     usedAt: z.string().datetime({ offset: true }).nullable(),
-    usedBy: z.string().uuid().nullable(),
+    usedBy: z.string().guid().nullable(),
     createdAt: z.string().datetime({ offset: true }),
     updatedAt: z.string().datetime({ offset: true }),
     deletedAt: z.string().datetime({ offset: true }).nullable(),
@@ -87,8 +87,8 @@ export const updateGroupBodyDtoSchema = z
 
 export const locationDtoSchema = z
   .object({
-    id: z.string().uuid(),
-    groupId: z.string().uuid(),
+    id: z.string().guid(),
+    groupId: z.string().guid(),
     name: z.string(),
     sortOrder: z.number().int().nullable(),
     createdAt: z.string().datetime({ offset: true }),
@@ -99,7 +99,7 @@ export const locationDtoSchema = z
 
 export const createLocationBodyDtoSchema = z
   .object({
-    groupId: z.string().uuid(),
+    groupId: z.string().guid(),
     name: z.string().min(1).max(100),
     sortOrder: z.number().int().nullable().optional(),
   })
@@ -114,8 +114,8 @@ export const updateLocationBodyDtoSchema = z
 
 export const categoryDtoSchema = z
   .object({
-    id: z.string().uuid(),
-    groupId: z.string().uuid(),
+    id: z.string().guid(),
+    groupId: z.string().guid(),
     name: z.string(),
     sortOrder: z.number().int().nullable(),
     createdAt: z.string().datetime({ offset: true }),
@@ -126,7 +126,7 @@ export const categoryDtoSchema = z
 
 export const createCategoryBodyDtoSchema = z
   .object({
-    groupId: z.string().uuid(),
+    groupId: z.string().guid(),
     name: z.string().min(1).max(100),
     sortOrder: z.number().int().nullable().optional(),
   })
@@ -141,12 +141,12 @@ export const updateCategoryBodyDtoSchema = z
 
 export const itemDtoSchema = z
   .object({
-    id: z.string().uuid(),
-    groupId: z.string().uuid(),
-    productMasterId: z.string().uuid().nullable(),
+    id: z.string().guid(),
+    groupId: z.string().guid(),
+    productMasterId: z.string().guid().nullable(),
     name: z.string(),
     barcode: z.string().nullable(),
-    categoryId: z.string().uuid().nullable(),
+    categoryId: z.string().guid().nullable(),
     defaultUnit: z.string().nullable(),
     manufacturer: z.string().nullable(),
     memo: z.string().nullable(),
@@ -158,7 +158,7 @@ export const itemDtoSchema = z
 
 export const productMasterDtoSchema = z
   .object({
-    id: z.string().uuid(),
+    id: z.string().guid(),
     jan: z.string(),
     name: z.string(),
     manufacturer: z.string().nullable(),
@@ -178,7 +178,7 @@ export const productMasterDtoSchema = z
 
 export const itemByBarcodeBodyDtoSchema = z
   .object({
-    groupId: z.string().uuid(),
+    groupId: z.string().guid(),
     barcode: z.string().min(1).max(64),
   })
   .openapi("ItemByBarcodeBody")
@@ -194,9 +194,9 @@ export const itemByBarcodeResponseDtoSchema = z
 // 手動入力では productMasterId は指定不可（バーコード経路で別途自動紐付け）
 export const createItemBodyDtoSchema = z
   .object({
-    groupId: z.string().uuid(),
+    groupId: z.string().guid(),
     name: z.string().min(1).max(200),
-    categoryId: z.string().uuid().nullable().optional(),
+    categoryId: z.string().guid().nullable().optional(),
     defaultUnit: z.string().min(1).max(50).nullable().optional(),
     manufacturer: z.string().max(200).nullable().optional(),
     memo: z.string().max(2000).nullable().optional(),
@@ -207,7 +207,7 @@ export const createItemBodyDtoSchema = z
 export const updateItemBodyDtoSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
-    categoryId: z.string().uuid().nullable().optional(),
+    categoryId: z.string().guid().nullable().optional(),
     defaultUnit: z.string().min(1).max(50).nullable().optional(),
     manufacturer: z.string().max(200).nullable().optional(),
     memo: z.string().max(2000).nullable().optional(),
@@ -217,10 +217,10 @@ export const updateItemBodyDtoSchema = z
 
 export const stockDtoSchema = z
   .object({
-    id: z.string().uuid(),
-    groupId: z.string().uuid(),
-    itemId: z.string().uuid(),
-    locationId: z.string().uuid(),
+    id: z.string().guid(),
+    groupId: z.string().guid(),
+    itemId: z.string().guid(),
+    locationId: z.string().guid(),
     quantity: z.number().nonnegative(),
     unit: z.string(),
     useByDate: z.string().date().nullable(),
@@ -235,9 +235,9 @@ export const stockDtoSchema = z
 
 export const createStockBodyDtoSchema = z
   .object({
-    groupId: z.string().uuid(),
-    itemId: z.string().uuid(),
-    locationId: z.string().uuid(),
+    groupId: z.string().guid(),
+    itemId: z.string().guid(),
+    locationId: z.string().guid(),
     quantity: z.number().nonnegative(),
     unit: z.string().min(1),
     useByDate: z.string().date().nullable(),
@@ -251,7 +251,7 @@ export const createStockBodyDtoSchema = z
 // PATCH では受け付けない。.strict() で未知キー (quantity を含む) を 422 で reject する。
 export const updateStockBodyDtoSchema = z
   .object({
-    locationId: z.string().uuid().optional(),
+    locationId: z.string().guid().optional(),
     unit: z.string().min(1).optional(),
     useByDate: z.string().date().nullable().optional(),
     bestBeforeDate: z.string().date().nullable().optional(),
@@ -263,15 +263,15 @@ export const updateStockBodyDtoSchema = z
 
 export const stockEventDtoSchema = z
   .object({
-    id: z.string().uuid(),
-    groupId: z.string().uuid(),
-    stockId: z.string().uuid(),
+    id: z.string().guid(),
+    groupId: z.string().guid(),
+    stockId: z.string().guid(),
     eventType: z.enum(["ADD", "CONSUME", "DISCARD", "MOVE", "EDIT"]),
     quantityDelta: z.number(),
-    fromLocationId: z.string().uuid().nullable(),
-    toLocationId: z.string().uuid().nullable(),
+    fromLocationId: z.string().guid().nullable(),
+    toLocationId: z.string().guid().nullable(),
     occurredAt: z.string().datetime({ offset: true }),
-    actorUserId: z.string().uuid().nullable(),
+    actorUserId: z.string().guid().nullable(),
     reason: z.string().nullable(),
     createdAt: z.string().datetime({ offset: true }),
   })
@@ -288,7 +288,7 @@ export const stockQuantityDeltaBodyDtoSchema = z
 
 export const stockMoveBodyDtoSchema = z
   .object({
-    toLocationId: z.string().uuid(),
+    toLocationId: z.string().guid(),
     reason: z.string().max(500).nullable().optional(),
   })
   .openapi("StockMoveBody")

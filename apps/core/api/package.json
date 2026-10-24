@@ -26,7 +26,7 @@
     "test:e2e": "bun test e2e"
   },
   "dependencies": {
-    "@hono/zod-openapi": "^0.19.10",
+    "@hono/zod-openapi": "^1.6.3",
     "@hono/zod-validator": "^0.4.0",
     "@prep-hamster/db": "workspace:*",
     "@prep-hamster/jan-api": "workspace:*",

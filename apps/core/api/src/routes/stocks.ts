@@ -16,7 +16,7 @@ import {
 const IdParamSchema = z.object({
   id: z
     .string()
-    .uuid()
+    .guid()
     .openapi({ param: { name: "id", in: "path" } }),
 })
 
@@ -27,9 +27,9 @@ const booleanQuery = z
   .openapi({ type: "boolean" })
 
 const ListQuerySchema = z.object({
-  groupId: z.string().uuid().openapi({ example: "00000000-0000-0000-0000-000000000000" }),
-  categoryId: z.string().uuid().optional(),
-  locationId: z.string().uuid().optional(),
+  groupId: z.string().guid().openapi({ example: "00000000-0000-0000-0000-000000000000" }),
+  categoryId: z.string().guid().optional(),
+  locationId: z.string().guid().optional(),
   expiringBefore: z.string().date().optional(),
   includeExpired: booleanQuery.optional(),
 })

@@ -4,83 +4,83 @@ import { z } from "zod"
 // API レスポンス / CLI 出力の両方で使えるよう zod-i18n-map ではなく自前で定義し、
 // i18next 依存を持ち込まない。
 //
-// 適用は `z.setErrorMap(jaErrorMap)` を起動時 1 回呼ぶ (apps/core/api/src/index.ts
+// 適用は `z.config({ customError: jaErrorMap })` を起動時 1 回呼ぶ (apps/core/api/src/index.ts
 // と CLI の entry point)。テスト中は副作用を避けたいので明示的に呼ばない。
 
-export const jaErrorMap: z.ZodErrorMap = (issue, ctx) => {
+export const jaErrorMap: z.core.$ZodErrorMap = (issue) => {
   switch (issue.code) {
-    case z.ZodIssueCode.invalid_type:
-      if (issue.received === "undefined") {
+    case "invalid_type":
+      if (issue.input === undefined) {
         return { message: "必須項目です" }
       }
       return {
-        message: `${typeLabel(issue.expected)}を指定してください (受信: ${typeLabel(issue.received)})`,
+        message: `${typeLabel(issue.expected)}を指定してください (受信: ${typeLabel(typeof issue.input)})`,
       }
 
-    case z.ZodIssueCode.invalid_string:
-      if (issue.validation === "uuid") {
+    case "invalid_format":
+      if (issue.format === "uuid" || issue.format === "guid") {
         return { message: "UUID 形式で指定してください" }
       }
-      if (issue.validation === "email") {
+      if (issue.format === "email") {
         return { message: "メールアドレス形式で指定してください" }
       }
-      if (issue.validation === "url") {
+      if (issue.format === "url") {
         return { message: "URL 形式で指定してください" }
       }
-      if (issue.validation === "datetime") {
+      if (issue.format === "datetime") {
         return { message: "ISO 8601 形式の日時で指定してください" }
       }
-      if (issue.validation === "date") {
+      if (issue.format === "date") {
         return { message: "YYYY-MM-DD 形式の日付で指定してください" }
       }
       return { message: "文字列形式が不正です" }
 
-    case z.ZodIssueCode.too_small:
-      if (issue.type === "string") {
+    case "too_small":
+      if (issue.origin === "string") {
         return {
           message:
             issue.minimum === 1 ? "必須項目です" : `${issue.minimum} 文字以上で指定してください`,
         }
       }
-      if (issue.type === "number") {
+      if (issue.origin === "number") {
         return {
           message: `${issue.minimum} 以上の数値で指定してください`,
         }
       }
-      if (issue.type === "array") {
+      if (issue.origin === "array") {
         return {
           message: `${issue.minimum} 件以上で指定してください`,
         }
       }
       break
 
-    case z.ZodIssueCode.too_big:
-      if (issue.type === "string") {
+    case "too_big":
+      if (issue.origin === "string") {
         return { message: `${issue.maximum} 文字以下で指定してください` }
       }
-      if (issue.type === "number") {
+      if (issue.origin === "number") {
         return { message: `${issue.maximum} 以下の数値で指定してください` }
       }
-      if (issue.type === "array") {
+      if (issue.origin === "array") {
         return { message: `${issue.maximum} 件以下で指定してください` }
       }
       break
 
-    case z.ZodIssueCode.invalid_enum_value:
+    case "invalid_value":
       return {
-        message: `次のいずれかを指定してください: ${issue.options.join(" / ")}`,
+        message: `次のいずれかを指定してください: ${issue.values.join(" / ")}`,
       }
 
-    case z.ZodIssueCode.invalid_union:
+    case "invalid_union":
       return { message: "いずれかの形式に一致する必要があります" }
 
-    case z.ZodIssueCode.unrecognized_keys:
+    case "unrecognized_keys":
       return { message: `未知のキーが含まれています: ${issue.keys.join(", ")}` }
 
-    case z.ZodIssueCode.custom:
+    case "custom":
       return { message: issue.message ?? "値が不正です" }
   }
-  return { message: ctx.defaultError }
+  return undefined
 }
 
 const typeLabel = (t: string): string => {
@@ -110,5 +110,5 @@ const typeLabel = (t: string): string => {
 
 // 起動時 1 回呼ぶ。テスト等で global state を汚したくない場合は呼ばない。
 export const installJaErrorMap = () => {
-  z.setErrorMap(jaErrorMap)
+  z.config({ customError: jaErrorMap })
 }

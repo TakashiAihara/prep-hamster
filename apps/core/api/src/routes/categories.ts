@@ -13,12 +13,12 @@ import {
 const IdParamSchema = z.object({
   id: z
     .string()
-    .uuid()
+    .guid()
     .openapi({ param: { name: "id", in: "path" } }),
 })
 
 const ListQuerySchema = z.object({
-  groupId: z.string().uuid().openapi({ example: "00000000-0000-0000-0000-000000000000" }),
+  groupId: z.string().guid().openapi({ example: "00000000-0000-0000-0000-000000000000" }),
 })
 
 const toCategoryDto = (row: typeof categories.$inferSelect): z.infer<typeof categoryDtoSchema> => ({
