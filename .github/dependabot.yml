@@ -9,17 +9,29 @@ updates:
       - dependencies
     commit-message:
       prefix: chore(deps)
-    # Expo の SDK が版を固定するパッケージは単独で上げると mobile の build が壊れ、
+    # Expo の SDK が版を固定するパッケージは minor 以上を単独で上げると mobile の build が壊れ、
     # CI の typecheck / test では検出できない。SDK の更新で `bunx expo install --fix` に揃える。
+    # ignore は security update にも効くので patch は止めない (Dependabot は 0.76 -> 0.88 も minor と読む)。
+    # `react-native-*` は Expo 外の RN ライブラリも含めて止める (どれも SDK の RN 版に縛られるため)。
     ignore:
       - dependency-name: "expo"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "expo-*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "@expo/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "react"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "react-native"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "react-native-*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "@react-native/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@react-native-community/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       bun-minor-and-patch:
         applies-to: version-updates
