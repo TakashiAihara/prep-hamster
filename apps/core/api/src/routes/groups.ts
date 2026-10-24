@@ -14,7 +14,7 @@ import {
 const IdParamSchema = z.object({
   id: z
     .string()
-    .uuid()
+    .guid()
     .openapi({ param: { name: "id", in: "path" } }),
 })
 

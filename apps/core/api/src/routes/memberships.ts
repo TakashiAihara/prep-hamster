@@ -12,18 +12,18 @@ import {
 const GroupAndUserParamSchema = z.object({
   groupId: z
     .string()
-    .uuid()
+    .guid()
     .openapi({ param: { name: "groupId", in: "path" } }),
   userId: z
     .string()
-    .uuid()
+    .guid()
     .openapi({ param: { name: "userId", in: "path" } }),
 })
 
 const GroupParamSchema = z.object({
   groupId: z
     .string()
-    .uuid()
+    .guid()
     .openapi({ param: { name: "groupId", in: "path" } }),
 })
 

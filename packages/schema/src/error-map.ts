@@ -14,7 +14,7 @@ export const jaErrorMap: z.core.$ZodErrorMap = (issue) => {
         return { message: "必須項目です" }
       }
       return {
-        message: `${typeLabel(issue.expected)}を指定してください (受信: ${typeLabel(typeof issue.input)})`,
+        message: `${typeLabel(issue.expected)}を指定してください (受信: ${typeLabel(receivedType(issue.input))})`,
       }
 
     case "invalid_format":
@@ -82,6 +82,10 @@ export const jaErrorMap: z.core.$ZodErrorMap = (issue) => {
   }
   return undefined
 }
+
+// zod 4 は issue.received を持たないので、zod 3 と同じく null / 配列 / Date を typeof から分ける。
+const receivedType = (v: unknown): string =>
+  v === null ? "null" : Array.isArray(v) ? "array" : v instanceof Date ? "date" : typeof v
 
 const typeLabel = (t: string): string => {
   switch (t) {

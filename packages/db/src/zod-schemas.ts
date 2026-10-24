@@ -13,7 +13,7 @@
 // nullable 属性を再適用しなくなる (CodeRabbit PR #65 で指摘)。
 
 import { createInsertSchema, createSelectSchema, createUpdateSchema } from "drizzle-zod"
-import type { z } from "zod"
+import { z } from "zod"
 import {
   categories,
   groups,
@@ -30,12 +30,13 @@ import {
   users,
 } from "./schema"
 
-// uuid 列を branded uuid に置換するヘルパ。`s` を chain することで
-// drizzle-zod が列属性 (optional / nullable) を outer 側で再適用する性質を保つ。
+// uuid 列を branded uuid に置換するヘルパ。関数で渡すと drizzle-zod が列属性
+// (optional / nullable) を outer 側で再適用する。`s` は zod 4 の厳密な uuid() を
+// 既に持つので chain せず、zod 3 と同じ緩い guid() から作り直す。
 const brandUuid =
   <const TName extends string>(_name: TName) =>
-  (s: z.ZodString) =>
-    s.uuid().brand<TName>()
+  (_s: z.ZodString) =>
+    z.string().guid().brand<TName>()
 
 // users
 export const UserSchema = createSelectSchema(users, {
