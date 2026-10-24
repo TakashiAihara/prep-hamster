@@ -9,7 +9,17 @@ updates:
       - dependencies
     commit-message:
       prefix: chore(deps)
-      include: scope
+    # Expo の SDK が版を固定するパッケージは単独で上げると mobile の build が壊れ、
+    # CI の typecheck / test では検出できない。SDK の更新で `bunx expo install --fix` に揃える。
+    ignore:
+      - dependency-name: "expo"
+      - dependency-name: "expo-*"
+      - dependency-name: "@expo/*"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "react-native"
+      - dependency-name: "react-native-*"
+      - dependency-name: "@react-native/*"
     groups:
       bun-minor-and-patch:
         applies-to: version-updates
@@ -26,7 +36,6 @@ updates:
       - dependencies
     commit-message:
       prefix: chore(ci)
-      include: scope
     groups:
       actions-minor-and-patch:
         applies-to: version-updates
