@@ -60,3 +60,15 @@ test("invalid_enum_value → 候補リストを表示", () => {
     expect(r.error.issues[0]?.message).toBe("次のいずれかを指定してください: A / B / C")
   }
 })
+
+test("invalid_type の受信型は null と配列を区別する", () => {
+  const s = z.object({ name: z.string() })
+  const n = s.safeParse({ name: null }, { error: jaErrorMap })
+  const a = s.safeParse({ name: [] }, { error: jaErrorMap })
+  const o = s.safeParse({ name: {} }, { error: jaErrorMap })
+  expect(n.success || n.error.issues[0]?.message).toBe("文字列を指定してください (受信: null)")
+  expect(a.success || a.error.issues[0]?.message).toBe("文字列を指定してください (受信: 配列)")
+  expect(o.success || o.error.issues[0]?.message).toBe(
+    "文字列を指定してください (受信: オブジェクト)",
+  )
+})
