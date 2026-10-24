@@ -13,6 +13,14 @@ test("invalid_string (uuid) → 日本語メッセージ", () => {
   }
 })
 
+test("invalid_string (guid) → UUID と同じ日本語メッセージ", () => {
+  const r = z.guid().safeParse("not-a-uuid", { error: jaErrorMap })
+  expect(r.success).toBe(false)
+  if (!r.success) {
+    expect(r.error.issues[0]?.message).toBe("UUID 形式で指定してください")
+  }
+})
+
 test("invalid_string (email) → 日本語メッセージ", () => {
   const r = z.string().email().safeParse("not-email", { error: jaErrorMap })
   expect(r.success).toBe(false)
