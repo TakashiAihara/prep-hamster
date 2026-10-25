@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
-import { sql } from "drizzle-orm"
+import { DrizzleQueryError, sql } from "drizzle-orm"
 import { Hono } from "hono"
 import { items } from "@prep-hamster/db"
 import { createOnError } from "../src/middleware/error"
@@ -49,7 +49,7 @@ test("unhandled duplicate insert is logged with constraint and SQLSTATE but with
   expect(logged).toContain("items_group_barcode_idx")
   expect(logged).toContain("insert into")
   expect(logged).toContain('table: "items"')
-  expect(logged).toContain("    at ")
+  expect(logged).toContain("drizzle-orm")
   for (const bound of [row.barcode, row.name, row.groupId, dupId]) {
     expect(logged).not.toContain(bound)
   }
@@ -74,6 +74,40 @@ test("not-null violation is logged with the column but without the failing row",
   expect(logged).toContain("23502")
   expect(logged).toContain('column: "name"')
   expect(logged).not.toContain(rowId)
+})
+
+test("a bound value that looks like a stack frame does not reach the log", async () => {
+  const bound = "x\n    at LEAK-7f3a9c"
+
+  const err = await caught(() => testDb.execute(sql`select ${bound}::uuid`))
+  const { logged } = await logOf(err)
+
+  expect(logged).toContain("22P02")
+  expect(logged).not.toContain("LEAK-7f3a9c")
+  expect(logged).toContain("drizzle-orm")
+})
+
+test("a raw driver error that drizzle did not wrap is logged without its message and detail", async () => {
+  const bound = "not-a-uuid-raw-5d21"
+
+  const err = await caught(() => testDb.$client`select ${bound}::uuid`)
+  const { logged } = await logOf(err)
+
+  expect(err).not.toBeInstanceOf(DrizzleQueryError)
+  expect(logged).toContain("unhandled database error")
+  expect(logged).toContain("22P02")
+  expect(logged).not.toContain(bound)
+})
+
+test("a plain Error wrapping a database error is logged without the bound values", async () => {
+  const bound = "not-a-uuid-wrapped-8c40"
+
+  const dbErr = await caught(() => testDb.execute(sql`select ${bound}::uuid`))
+  const { logged } = await logOf(new Error("wrapper-msg", { cause: dbErr }))
+
+  expect(logged).toContain("wrapper-msg")
+  expect(logged).toContain("22P02")
+  expect(logged).not.toContain(bound)
 })
 
 test("non-database errors keep name, message and stack", async () => {
