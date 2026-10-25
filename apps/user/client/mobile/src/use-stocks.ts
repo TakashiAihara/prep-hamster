@@ -70,8 +70,8 @@ export function isExpired(
   )
 }
 
-export function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10)
+export function todayUtc(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10)
 }
 
 export type LoadRowsResult = { ok: true; rows: StockListItem[] } | { ok: false; message: string }

@@ -3,6 +3,7 @@ import { useCallback, useReducer, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,7 +20,7 @@ import {
   type StockDetail,
   type StockDto,
 } from "@/stock-detail"
-import { loadReducer } from "@/stock-detail-controller"
+import { createConfirmDiscard, leaveDetail, loadReducer } from "@/stock-detail-controller"
 import { useStockActions } from "@/use-stock-actions"
 
 // 在庫詳細画面 (M-05)。消費 / 廃棄 / 移動 / 編集を 1 画面にまとめる。
@@ -92,19 +93,11 @@ export default function StockDetailScreen() {
   )
 }
 
-function confirmDiscard(quantity: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    Alert.alert(
-      "在庫を廃棄しますか？",
-      `${formatQuantity(quantity)} を廃棄します。この操作は取り消せません。`,
-      [
-        { text: "キャンセル", style: "cancel", onPress: () => resolve(false) },
-        { text: "廃棄する", style: "destructive", onPress: () => resolve(true) },
-      ],
-      { cancelable: true, onDismiss: () => resolve(false) },
-    )
-  })
-}
+const confirmDiscard = createConfirmDiscard({
+  os: Platform.OS,
+  webConfirm: (message) => window.confirm(message),
+  alert: Alert.alert,
+})
 
 function DetailBody({
   detail,
@@ -125,7 +118,7 @@ function DetailBody({
     onStockChanged,
     onMoved: () => setTargetId(null),
     confirmDiscard,
-    leave: () => router.back(),
+    leave: () => leaveDetail(router),
   })
 
   const empty = shouldSuggestShopping(stock.quantity)

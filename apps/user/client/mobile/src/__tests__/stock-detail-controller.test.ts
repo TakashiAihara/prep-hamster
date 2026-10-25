@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test"
 import type { ApiClient } from "@prep-hamster/api-client"
 import {
+  createConfirmDiscard,
   createGuard,
   createStockActions,
+  leaveDetail,
   loadReducer,
   type ActionMessage,
   type LoadState,
@@ -35,12 +37,15 @@ const json = (body: unknown, status = 200) =>
 // 応答の stock は呼び出しごとに quantity を引いた値を返す (サーバの consume / discard を模す)。
 function harness(opts: { result?: () => Response; confirm?: boolean } = {}) {
   const posts: string[] = []
+  const sent: unknown[] = []
   const events: string[] = []
   const messages: Array<ActionMessage | null> = []
   const busy: boolean[] = []
+  const busyDuringConfirm: Array<boolean | undefined> = []
   const changed: StockDto[] = []
-  const respond = (name: string) => async () => {
+  const respond = (name: string) => async (args?: { json?: unknown }) => {
     posts.push(name)
+    sent.push(args?.json)
     // 非同期に待たせ、二重 tap が同じ tick で来る状況を作る
     await new Promise((r) => setTimeout(r, 5))
     return opts.result?.() ?? json({ stock: stock({ quantity: 4 }), event: {} })
@@ -67,11 +72,12 @@ function harness(opts: { result?: () => Response; confirm?: boolean } = {}) {
     onMoved: () => events.push("moved"),
     confirmDiscard: async () => {
       events.push("confirm")
+      busyDuringConfirm.push(busy.at(-1))
       return opts.confirm ?? true
     },
     leave: () => events.push("leave"),
   })
-  return { actions, posts, events, messages, busy, changed }
+  return { actions, posts, sent, events, messages, busy, busyDuringConfirm, changed }
 }
 
 const lastMessage = (h: ReturnType<typeof harness>) => h.messages.at(-1)
@@ -121,6 +127,86 @@ test("discard validates input before asking for confirmation", async () => {
   await h.actions.discard("1", "a".repeat(501))
   expect(h.events).toEqual([])
   expect(lastMessage(h)?.kind).toBe("error")
+})
+
+test("discard forwards the typed reason, and null when blank", async () => {
+  const h = harness()
+  await h.actions.discard("1", "期限切れ")
+  await h.actions.discard("1", "")
+  expect(h.sent).toEqual([{ quantityDelta: 1, reason: "期限切れ" }, { quantityDelta: 1 }])
+})
+
+test("discard that leaves stock goes back to the list", async () => {
+  const h = harness()
+  await h.actions.discard("1", "")
+  expect(h.events).toEqual(["confirm", "leave"])
+})
+
+test("busy is set while the discard confirmation is open and released when declined", async () => {
+  const h = harness({ confirm: false })
+  await h.actions.discard("1", "")
+  expect(h.busyDuringConfirm).toEqual([true])
+  expect(h.busy).toEqual([true, false])
+})
+
+test.each([
+  [false, ["consume"]],
+  [true, ["discard", "consume"]],
+])("the guard is released after the confirmation resolves %p", async (confirm, expected) => {
+  const h = harness({ confirm })
+  await h.actions.discard("1", "")
+  await h.actions.consume("1")
+  expect(h.posts).toEqual(expected)
+})
+
+test("leaveDetail goes back when it can and replaces to the list otherwise", () => {
+  const calls: string[] = []
+  const nav = (can: boolean) => ({
+    canGoBack: () => can,
+    back: () => calls.push("back"),
+    replace: (href: string) => calls.push(`replace ${href}`),
+  })
+  leaveDetail(nav(true))
+  leaveDetail(nav(false))
+  expect(calls).toEqual(["back", "replace /"])
+})
+
+test.each([true, false])(
+  "createConfirmDiscard on web returns window.confirm = %p and never Alert",
+  async (answer) => {
+    const seen: string[] = []
+    const confirm = createConfirmDiscard({
+      os: "web",
+      webConfirm: (m) => (seen.push(m), answer),
+      alert: () => seen.push("alert"),
+    })
+    expect(await confirm(2)).toBe(answer)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toContain("2")
+    expect(seen[0]).toContain("取り消せません")
+  },
+)
+
+type AlertPick = (
+  buttons: Array<{ text?: string; onPress?: () => void }>,
+  options: { onDismiss?: () => void },
+) => void
+
+const nativeConfirm = (pick: AlertPick) =>
+  createConfirmDiscard({
+    os: "android",
+    webConfirm: () => {
+      throw new Error("web confirm on native")
+    },
+    alert: ((_t: string, _m: string, b: never, o: never) => pick(b, o)) as never,
+  })(1)
+
+test("createConfirmDiscard resolves from the Alert buttons and dismissal on native", async () => {
+  expect(await nativeConfirm((b) => b.find((x) => x.text === "廃棄する")?.onPress?.())).toBe(true)
+  expect(await nativeConfirm((b) => b.find((x) => x.text === "キャンセル")?.onPress?.())).toBe(
+    false,
+  )
+  expect(await nativeConfirm((_b, o) => o.onDismiss?.())).toBe(false)
 })
 
 test("consume that leaves stock goes back to the list without a success message", async () => {

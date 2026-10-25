@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { joinStocksWithMasters } from "../use-stocks"
+import { joinStocksWithMasters, todayUtc } from "../use-stocks"
 
 test("joinStocksWithMasters joins by id with item / location names", () => {
   const stocks = [
@@ -77,4 +77,15 @@ test("joinStocksWithMasters preserves the input order of stocks", () => {
   ]
   const rows = joinStocksWithMasters(stocks, [{ id: "i", name: "X" }], [{ id: "l", name: "Y" }])
   expect(rows.map((r) => r.id)).toEqual(["a", "b", "c"])
+})
+
+test("todayUtc is the UTC calendar date even when the local date differs", () => {
+  const prev = process.env.TZ
+  process.env.TZ = "Asia/Tokyo"
+  try {
+    expect(todayUtc(new Date("2026-06-01T20:00:00Z"))).toBe("2026-06-01")
+  } finally {
+    if (prev === undefined) delete process.env.TZ
+    else process.env.TZ = prev
+  }
 })

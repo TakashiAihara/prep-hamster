@@ -1,4 +1,5 @@
 import type { ApiClient } from "@prep-hamster/api-client"
+import type { Alert } from "react-native"
 import {
   buildEditPatch,
   consumeStock,
@@ -6,6 +7,7 @@ import {
   editStock,
   moveStock,
   parseAmount,
+  formatQuantity,
   parseReason,
   shouldSuggestShopping,
   type ActionResult,
@@ -61,6 +63,40 @@ export function createGuard(): Guard {
         inFlight = false
       }
     },
+  }
+}
+
+export type Nav = { canGoBack: () => boolean; back: () => void; replace: (href: "/") => void }
+
+// 履歴が無い (deep link / 通知からの cold start) と back() は何も起きないので、一覧へ置き換える。
+export function leaveDetail(nav: Nav): void {
+  if (nav.canGoBack()) nav.back()
+  else nav.replace("/")
+}
+
+export type ConfirmEnv = {
+  os: string
+  // react-native-web の Alert.alert は何もせず解決しないので、web は window.confirm を使う
+  webConfirm: (message: string) => boolean
+  alert: typeof Alert.alert
+}
+
+export function createConfirmDiscard(env: ConfirmEnv): (quantity: number) => Promise<boolean> {
+  return (quantity) => {
+    const title = "在庫を廃棄しますか？"
+    const message = `${formatQuantity(quantity)} を廃棄します。この操作は取り消せません。`
+    if (env.os === "web") return Promise.resolve(env.webConfirm(`${title}\n${message}`))
+    return new Promise((resolve) => {
+      env.alert(
+        title,
+        message,
+        [
+          { text: "キャンセル", style: "cancel", onPress: () => resolve(false) },
+          { text: "廃棄する", style: "destructive", onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      )
+    })
   }
 }
 
@@ -123,7 +159,14 @@ export function createStockActions(deps: StockActionDeps) {
         const why = parseReason(reasonInput)
         if (!why.ok) return fail(why.message)
         // 廃棄は取り消せないので、入力が通ってから確認を挟む。確認中も二重起動を弾く
-        if (!(await deps.confirmDiscard(qty.value))) return
+        deps.setBusy(true)
+        let confirmed = false
+        try {
+          confirmed = await deps.confirmDiscard(qty.value)
+        } finally {
+          if (!confirmed) deps.setBusy(false)
+        }
+        if (!confirmed) return
         await perform(
           "廃棄しました",
           () => discardStock(client, stock.id, qty.value, why.value),
