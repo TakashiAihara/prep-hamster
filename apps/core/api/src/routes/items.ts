@@ -145,7 +145,7 @@ const listItemsRoute = createRoute({
   path: "/",
   tags: ["items"],
   summary: "group 単位で item 一覧 (categoryId / barcode 絞り込み可)",
-  middleware: [withGroupAccess((c) => c.req.query("groupId"))] as const,
+  middleware: [withGroupAccess({ in: "query", name: "groupId" })] as const,
   request: { query: ListQuerySchema },
   responses: {
     200: {
@@ -222,6 +222,10 @@ const getItemRoute = createRoute({
     },
     404: {
       description: "存在しない",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    422: {
+      description: "パラメータ不正",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },

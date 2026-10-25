@@ -47,7 +47,7 @@ const createInvitationRoute = createRoute({
   path: "/groups/{groupId}/invitations",
   tags: ["invitations"],
   summary: "招待トークンを発行 (OWNER のみ)",
-  middleware: [withGroupAccess((c) => c.req.param("groupId"), "OWNER")] as const,
+  middleware: [withGroupAccess({ in: "param", name: "groupId" }, "OWNER")] as const,
   request: {
     params: GroupParamSchema,
     body: { content: { "application/json": { schema: createInvitationBodyDtoSchema } } },

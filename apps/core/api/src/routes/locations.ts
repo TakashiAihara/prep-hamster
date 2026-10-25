@@ -36,7 +36,7 @@ const listLocationsRoute = createRoute({
   path: "/",
   tags: ["locations"],
   summary: "group 単位で location 一覧",
-  middleware: [withGroupAccess((c) => c.req.query("groupId"))] as const,
+  middleware: [withGroupAccess({ in: "query", name: "groupId" })] as const,
   request: { query: ListQuerySchema },
   responses: {
     200: {
@@ -115,6 +115,10 @@ const getLocationRoute = createRoute({
     },
     404: {
       description: "存在しない",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    422: {
+      description: "パラメータ不正",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },

@@ -68,7 +68,7 @@ test("POST /v1/groups with empty name returns 422", async () => {
     body: JSON.stringify({ name: "" }),
   })
 
-  expect(res.status).toBe(400)
+  expect(res.status).toBe(422)
 })
 
 test("GET /v1/groups returns only groups the user is a member of", async () => {

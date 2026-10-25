@@ -27,12 +27,12 @@ test("POST /v1/stocks without x-user-id returns 401", async () => {
   expect(res.status).toBe(401)
 })
 
-test("GET /v1/stocks with invalid groupId returns 400", async () => {
+test("GET /v1/stocks with invalid groupId returns 422", async () => {
   const app = createApp({ db: mockDb })
   const res = await app.request("/v1/stocks?groupId=not-a-uuid", {
     headers: { "x-user-id": "00000000-0000-0000-0000-000000000000" },
   })
-  expect(res.status).toBe(400)
+  expect(res.status).toBe(422)
 })
 
 test("GET /openapi.json returns OpenAPI 3.1 spec", async () => {

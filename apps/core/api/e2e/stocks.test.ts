@@ -49,13 +49,13 @@ test("POST /v1/stocks creates a stock and GET returns it", async () => {
   expect(listed.stocks[0]?.id).toBe(created.stock.id)
 })
 
-test("GET /v1/stocks with invalid groupId returns 400", async () => {
+test("GET /v1/stocks with invalid groupId returns 422", async () => {
   const { userId } = await seedBaseFixture()
   const app = createApp({ db: testDb })
   const res = await app.request("/v1/stocks?groupId=not-a-uuid", {
     headers: { "x-user-id": userId },
   })
-  expect(res.status).toBe(400)
+  expect(res.status).toBe(422)
 })
 
 test("GET /v1/stocks returns empty list for empty group", async () => {
