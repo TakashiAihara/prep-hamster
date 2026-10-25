@@ -42,6 +42,7 @@ export async function truncateAll() {
       invitations,
       memberships,
       notification_settings,
+      push_tokens,
       groups,
       users
     RESTART IDENTITY CASCADE
