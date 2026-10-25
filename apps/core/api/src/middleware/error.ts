@@ -14,6 +14,7 @@ import type { AppEnv } from "../app"
 //   401 - 認証情報なし / 失効
 //   403 - 認可不足 (role 不一致)
 //   404 - 対象リソース不在
+//   413 - ボディサイズ上限超過 (bodyLimit。middleware/body-limit.ts が直接返す)
 //   415 - JSON body route への content-type 不正 (HTTPException 経由)
 //   422 - バリデーション失敗 (body / query / path param。validationHook と groupId 検査)
 //   500 - 想定外
@@ -166,7 +167,7 @@ export const createOnError =
         {
           error: {
             code: codeForStatus(status),
-            message: err.message,
+            message: messageForStatus(status, err.message),
           },
         },
         status,
@@ -188,6 +189,20 @@ export const createOnError =
 
 export const onError = createOnError(console.error)
 
+// hono の validator (400 "Malformed JSON in request body") と @hono/zod-openapi の
+// mediaTypeGate (415 "Unsupported Media Type") はライブラリ固定の英語 message を持つので、
+// 他の ApiError と揃う日本語の固定文に置き換える。それ以外の status は throw 元の message を生かす。
+const messageForStatus = (status: number, fallback: string): string => {
+  switch (status) {
+    case 400:
+      return "JSON の形式が不正です"
+    case 415:
+      return "Content-Type は application/json を指定してください"
+    default:
+      return fallback
+  }
+}
+
 const codeForStatus = (status: number): string => {
   switch (status) {
     case 400:
@@ -198,6 +213,8 @@ const codeForStatus = (status: number): string => {
       return "FORBIDDEN"
     case 404:
       return "NOT_FOUND"
+    case 413:
+      return "PAYLOAD_TOO_LARGE"
     case 415:
       return "UNSUPPORTED_MEDIA_TYPE"
     case 422:
