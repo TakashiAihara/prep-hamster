@@ -161,3 +161,79 @@ test("a plain error keeps name, message and frames", async () => {
   expect(logged).toContain("boom-plain")
   expect(logged).toContain("error-log.test.ts")
 })
+
+test("a DrizzleQueryError-shaped error from a second drizzle copy is redacted the same way", async () => {
+  // drizzle-orm が 2 コピー入ると instanceof が外れる。形 (query: string, params: array) で判定する
+  const foreign = Object.assign(new Error(`Failed query: ${QUERY}\nparams: ${SECRET}`), {
+    name: "DrizzleQueryError",
+    query: QUERY,
+    params: [SECRET],
+    cause: driverLike(),
+  })
+  const { status, logged } = await logOf(foreign)
+
+  expect(status).toBe(500)
+  expect(logged).toContain("unhandled database error")
+  expect(logged).toContain(QUERY)
+  expect(logged).toContain("23505")
+  expect(logged).not.toContain(SECRET)
+  expect(logged).not.toContain("params:")
+})
+
+test("an error name containing a newline does not leak its extra lines into frames", async () => {
+  const err = new TypeError("plain-msg")
+  err.name = `Forged\nLEAK ${SECRET}`
+  const { logged } = await logOf(err)
+
+  expect(logged).toContain("Forged")
+  expect(logged).toContain("plain-msg")
+  expect(logged).not.toContain("LEAK")
+  expect(logged).not.toContain(SECRET)
+  expect(logged).toContain("error-log.test.ts")
+})
+
+// 方針 (#137): driver 以外の cause の message はそのままログに出す。Bun 組み込みエラー
+// (ERR_INVALID_ARG_TYPE 等) が値を引用する message を持ち得るリスクは受け入れる。
+// 根拠は middleware/error.ts のコメント参照。
+test("a non-driver cause's message is logged by policy", async () => {
+  const cause = new TypeError('The "payload" argument must be of type string. Received undefined')
+  const { logged } = await logOf(new Error("wrapper-msg", { cause }))
+
+  expect(logged).toContain("wrapper-msg")
+  expect(logged).toContain("Received undefined")
+})
+
+test("a 42P01 driver error logs its message since it only names the missing table", async () => {
+  const err = driverLike({
+    code: "42P01",
+    message: 'relation "missing_table" does not exist',
+  })
+  const { logged } = await logOf(err)
+
+  expect(logged).toContain("unhandled database error")
+  expect(logged).toContain("42P01")
+  expect(logged).toContain("missing_table")
+  expect(logged).not.toContain(SECRET)
+})
+
+test("a driver error with any other SQLSTATE keeps dropping its message", async () => {
+  const err = driverLike({ code: "42P02", message: `msg ${SECRET}` })
+  const { logged } = await logOf(err)
+
+  expect(logged).toContain("42P02")
+  expect(logged).not.toContain(SECRET)
+})
+
+test.each([
+  "table_name",
+  "constraint_name",
+  "column_name",
+  "schema_name",
+  "routine",
+  "severity",
+  "name",
+])("a non-string driver field %s is not logged", async (field) => {
+  const { logged } = await logOf(driverLike({ [field]: { v: SECRET } }))
+
+  expect(logged).not.toContain(SECRET)
+})
