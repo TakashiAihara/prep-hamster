@@ -15,6 +15,13 @@
       "when": 1792905463902,
       "tag": "0001_clever_spyke",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792907983181,
+      "tag": "0002_magenta_sentinels",
+      "breakpoints": true
     }
   ]
 }

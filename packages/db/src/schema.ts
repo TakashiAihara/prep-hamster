@@ -307,6 +307,14 @@ export const pushTokens = pgTable(
   (t) => [index("push_tokens_user_idx").on(t.userId)],
 )
 
+// 期限通知をユーザーごとに JST の暦日 1 回に抑える記録 (ジョブを再実行しても二重送信しない)。
+export const expiryNotifications = pgTable("expiry_notifications", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  notifiedOn: date("notified_on").notNull(),
+})
+
 // ============================================================================
 // Relations
 // ============================================================================

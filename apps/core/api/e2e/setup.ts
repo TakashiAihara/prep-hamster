@@ -43,6 +43,7 @@ export async function truncateAll() {
       memberships,
       notification_settings,
       push_tokens,
+      expiry_notifications,
       groups,
       users
     RESTART IDENTITY CASCADE

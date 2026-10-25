@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
 import { eq } from "drizzle-orm"
-import { pushTokens } from "@prep-hamster/db"
+import { pushTokens, users } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import { seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
@@ -113,4 +113,84 @@ test("DELETE does not remove another user's token and is idempotent for unknown 
   const rows = await testDb.select().from(pushTokens)
   expect(rows).toHaveLength(1)
   expect(rows[0]?.userId).toBe(owner)
+})
+
+test("POST rejects tokens outside the Expo token charset or longer than 200 characters with 422", async () => {
+  const userId = await seedUser()
+  const rejected = [
+    "ExponentPushToken[a]b]",
+    "ExponentPushToken[has space]",
+    "ExponentPushToken[]",
+    `ExponentPushToken[${"a".repeat(201)}]`,
+    "ExponentPushToken[ok]\nExponentPushToken[second]",
+    "xExponentPushToken[ok]",
+  ]
+
+  const statuses = await Promise.all(
+    rejected.map(async (token) => (await call("POST", { token }, userId)).status),
+  )
+  expect(statuses).toEqual(rejected.map(() => 422))
+  expect((await call("POST", { token: `ExpoPushToken[${"a".repeat(200)}]` }, userId)).status).toBe(
+    200,
+  )
+  expect((await call("POST", { token: "ExpoPushToken[legacy-1]" }, userId)).status).toBe(200)
+  expect(await testDb.select().from(pushTokens)).toHaveLength(2)
+})
+
+test("POST keeps at most 10 tokens per user by evicting the one with the oldest updated_at", async () => {
+  const userId = await seedUser()
+  const other = await seedUser("other")
+  const base = Date.parse("2026-10-01T00:00:00Z")
+  const seed = (owner: string, i: number) => ({
+    id: crypto.randomUUID(),
+    userId: owner,
+    token: `ExponentPushToken[${owner === userId ? "mine" : "theirs"}-${i}]`,
+    createdAt: new Date(base),
+    updatedAt: new Date(base + i * 1000),
+  })
+  await testDb
+    .insert(pushTokens)
+    .values([...Array.from({ length: 10 }, (_, i) => seed(userId, i)), seed(other, 50)])
+
+  const res = await call("POST", { token: TOKEN_A }, userId)
+
+  expect(res.status).toBe(200)
+  const mine = await testDb.select().from(pushTokens).where(eq(pushTokens.userId, userId))
+  expect(mine).toHaveLength(10)
+  expect(mine.map((r) => r.token)).toContain(TOKEN_A)
+  expect(mine.map((r) => r.token)).not.toContain("ExponentPushToken[mine-0]")
+  expect(mine.map((r) => r.token)).toContain("ExponentPushToken[mine-1]")
+  expect(await testDb.select().from(pushTokens).where(eq(pushTokens.userId, other))).toHaveLength(1)
+})
+
+test("re-registering an existing token refreshes it so it is not the one evicted", async () => {
+  const userId = await seedUser()
+  const base = Date.parse("2026-10-01T00:00:00Z")
+  await testDb.insert(pushTokens).values(
+    Array.from({ length: 10 }, (_, i) => ({
+      id: crypto.randomUUID(),
+      userId,
+      token: `ExponentPushToken[mine-${i}]`,
+      createdAt: new Date(base),
+      updatedAt: new Date(base + i * 1000),
+    })),
+  )
+
+  await call("POST", { token: "ExponentPushToken[mine-0]" }, userId)
+  await call("POST", { token: TOKEN_A }, userId)
+
+  const tokens = (await testDb.select().from(pushTokens)).map((r) => r.token)
+  expect(tokens).toHaveLength(10)
+  expect(tokens).toContain("ExponentPushToken[mine-0]")
+  expect(tokens).not.toContain("ExponentPushToken[mine-1]")
+})
+
+test("POST for a soft-deleted user returns 404", async () => {
+  const userId = await seedUser()
+  await testDb.update(users).set({ deletedAt: new Date() }).where(eq(users.id, userId))
+
+  const res = await call("POST", { token: TOKEN_A }, userId)
+
+  expect(res.status).toBe(404)
+  expect(await testDb.select().from(pushTokens)).toHaveLength(0)
 })
