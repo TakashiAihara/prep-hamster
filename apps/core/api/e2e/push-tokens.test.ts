@@ -71,12 +71,13 @@ test("POST of a token held by another user moves it to the caller", async () => 
   expect(rows[0]?.userId).toBe(current)
 })
 
-test("POST rejects a string that is not an Expo push token with 400", async () => {
+test("POST rejects a string that is not an Expo push token with 422", async () => {
   const userId = await seedUser()
 
   const res = await call("POST", { token: "not-a-push-token" }, userId)
 
-  expect(res.status).toBe(400)
+  expect(res.status).toBe(422)
+  expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_ERROR")
   expect(await testDb.select().from(pushTokens)).toHaveLength(0)
 })
 

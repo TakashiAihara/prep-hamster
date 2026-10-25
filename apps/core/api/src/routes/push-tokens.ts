@@ -32,7 +32,7 @@ const registerRoute = createRoute({
       description: "user が存在しない",
       content: { "application/json": { schema: errorResponseSchema } },
     },
-    400: {
+    422: {
       description: "token の形式不正",
       content: { "application/json": { schema: errorResponseSchema } },
     },
@@ -51,7 +51,7 @@ const removeRoute = createRoute({
       description: "未認証",
       content: { "application/json": { schema: errorResponseSchema } },
     },
-    400: {
+    422: {
       description: "token の形式不正",
       content: { "application/json": { schema: errorResponseSchema } },
     },
