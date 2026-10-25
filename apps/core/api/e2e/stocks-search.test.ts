@@ -80,7 +80,7 @@ test("PATCH /v1/stocks/:id rejects quantity in body", async () => {
     body: JSON.stringify({ quantity: 99, note: "memo" }),
   })
   // .strict() で unrecognized_keys を投げ、422 で reject される
-  expect(res.status).toBe(400)
+  expect(res.status).toBe(422)
 })
 
 test("PATCH /v1/stocks/:id updates note / unit / dates without changing quantity", async () => {

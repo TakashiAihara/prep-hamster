@@ -45,7 +45,7 @@ test("GET /v1/stocks?groupId=X by non-member returns 403", async () => {
   expect(body.error.code).toBe("FORBIDDEN_GROUP_ACCESS")
 })
 
-test("GET /v1/stocks with malformed groupId returns 400", async () => {
+test("GET /v1/stocks with malformed groupId returns 422", async () => {
   const userId = await seedUser()
 
   const app = createApp({ db: testDb })
@@ -53,9 +53,9 @@ test("GET /v1/stocks with malformed groupId returns 400", async () => {
     headers: { "x-user-id": userId },
   })
 
-  expect(res.status).toBe(400)
+  expect(res.status).toBe(422)
   const body = (await res.json()) as { error: { code: string } }
-  expect(body.error.code).toBe("BAD_REQUEST")
+  expect(body.error.code).toBe("VALIDATION_ERROR")
 })
 
 test("GET /v1/stocks with soft-deleted membership returns 403", async () => {
@@ -100,7 +100,7 @@ test("PATCH /v1/groups/:id by VIEWER returns 403 INSUFFICIENT_ROLE", async () =>
 })
 
 // mobile の stub id (auth.ts / config.ts) は RFC 9562 の version を持たない。
-// zod 4 の uuid() は弾くので、path / query の両方で 400 にならないことを固定する。
+// zod 4 の uuid() は弾くので、path / query の両方で 422 にならないことを固定する。
 test("stub ids without a UUID version are accepted on path and query", async () => {
   const userId = "00000000-0000-0000-0000-000000000001"
   const groupId = "00000000-0000-0000-0000-000000000010"
@@ -133,7 +133,7 @@ test("stub ids without a UUID version are accepted on path and query", async () 
   })
   expect(invite.status).toBe(201)
 
-  // 存在しない stub id は形式エラー (400) ではなく 404 になる。
+  // 存在しない stub id は形式エラー (422) ではなく 404 になる。
   const missingId = "00000000-0000-0000-0000-000000000099"
   const resources = ["categories", "items", "locations", "stocks"]
   const statuses = await Promise.all(

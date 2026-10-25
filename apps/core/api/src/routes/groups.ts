@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, eq, inArray, isNull } from "drizzle-orm"
 import { groups, memberships } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
+import { validationHook } from "../middleware/error"
 import { withGroupAccess } from "../middleware/group-access"
 import {
   createGroupBodyDtoSchema,
@@ -103,7 +104,7 @@ const getGroupRoute = createRoute({
   path: "/{id}",
   tags: ["groups"],
   summary: "group 単件取得（member のみ）",
-  middleware: [withGroupAccess((c) => c.req.param("id"))] as const,
+  middleware: [withGroupAccess((c) => c.req.param("id"), undefined, "id")] as const,
   request: { params: IdParamSchema },
   responses: {
     200: {
@@ -134,7 +135,7 @@ const patchGroupRoute = createRoute({
   path: "/{id}",
   tags: ["groups"],
   summary: "group の名前変更（OWNER のみ）",
-  middleware: [withGroupAccess((c) => c.req.param("id"), "OWNER")] as const,
+  middleware: [withGroupAccess((c) => c.req.param("id"), "OWNER", "id")] as const,
   request: {
     params: IdParamSchema,
     body: {
@@ -173,7 +174,7 @@ const patchGroupRoute = createRoute({
   },
 })
 
-export const groupsRouter = new OpenAPIHono<AppEnv>()
+export const groupsRouter = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
   .openapi(listGroupsRoute, async (c) => {
     const db = c.get("db")
     const userId = c.get("userId")

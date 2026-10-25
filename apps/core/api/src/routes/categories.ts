@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, asc, eq, isNull } from "drizzle-orm"
 import { categories, items } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
+import { validationHook } from "../middleware/error"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
   categoryDtoSchema,
@@ -182,7 +183,7 @@ const deleteCategoryRoute = createRoute({
   },
 })
 
-export const categoriesRouter = new OpenAPIHono<AppEnv>()
+export const categoriesRouter = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
   .openapi(listCategoriesRoute, async (c) => {
     const { groupId } = c.req.valid("query")
     const db = c.get("db")

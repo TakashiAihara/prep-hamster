@@ -4,7 +4,7 @@ import { and, eq, isNull } from "drizzle-orm"
 import { z } from "@hono/zod-openapi"
 import { type Db, memberships } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
-import type { ApiErrorBody } from "./error"
+import { type ApiErrorBody, validationErrorResponse } from "./error"
 
 // 全 groupId-scoped endpoint で「current user がその group の member であること」を強制する。
 // 個別 route の handler から DB アクセス権チェックを取り除き、漏れを防ぐ。
@@ -94,19 +94,18 @@ export async function checkGroupAccess(
   return { ok: true, membership: member }
 }
 
-export const withGroupAccess = (extractGroupId: ExtractGroupId, requiredRole?: Role) =>
+// field は groupId を取り出す元の query / path param の名前。422 の details に載せる。
+export const withGroupAccess = (
+  extractGroupId: ExtractGroupId,
+  requiredRole?: Role,
+  field = "groupId",
+) =>
   createMiddleware<AppEnv & GroupAccessEnv>(async (c, next) => {
-    const groupId = extractGroupId(c)
-    if (!groupId || !uuidSchema.safeParse(groupId).success) {
-      return c.json<ApiErrorBody>(
-        {
-          error: {
-            code: "BAD_REQUEST",
-            message: "有効な groupId が必要です",
-          },
-        },
-        400,
-      )
+    const groupId = extractGroupId(c) ?? ""
+    // route の validator より前に走るので、ここでも validationHook と同じ 422 を返す。
+    const parsed = z.object({ [field]: uuidSchema }).safeParse({ [field]: groupId })
+    if (!parsed.success) {
+      return validationErrorResponse(c, parsed.error)
     }
 
     const db = c.get("db")

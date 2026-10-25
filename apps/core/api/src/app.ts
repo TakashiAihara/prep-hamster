@@ -4,7 +4,7 @@ import type { Db } from "@prep-hamster/db"
 import { createJanApiClient, type JanApiClient } from "@prep-hamster/jan-api"
 import { withUserAuth } from "./middleware/auth"
 import { withDb } from "./middleware/db"
-import { onError } from "./middleware/error"
+import { onError, validationHook } from "./middleware/error"
 import { categoriesRouter } from "./routes/categories"
 import { groupsRouter } from "./routes/groups"
 import { invitationsRouter } from "./routes/invitations"
@@ -29,7 +29,7 @@ export type CreateAppOptions = {
 }
 
 export function createApp(opts: CreateAppOptions) {
-  const app = new OpenAPIHono<AppEnv>()
+  const app = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
   const janApi = opts.janApi ?? createJanApiClient()
 
   app.onError(onError)

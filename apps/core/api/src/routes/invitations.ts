@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, eq, isNull } from "drizzle-orm"
 import { invitations, memberships } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
+import { validationHook } from "../middleware/error"
 import { withGroupAccess } from "../middleware/group-access"
 import {
   createInvitationBodyDtoSchema,
@@ -110,7 +111,7 @@ const acceptInvitationRoute = createRoute({
   },
 })
 
-export const invitationsRouter = new OpenAPIHono<AppEnv>()
+export const invitationsRouter = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
   .openapi(createInvitationRoute, async (c) => {
     const { groupId } = c.req.valid("param")
     const body = c.req.valid("json")

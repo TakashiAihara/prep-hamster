@@ -1,17 +1,19 @@
+import type { Hook } from "@hono/zod-openapi"
 import type { Context } from "hono"
 import { HTTPException } from "hono/http-exception"
-import { ZodError } from "zod"
+import { z } from "zod"
+import type { AppEnv } from "../app"
 
 // 全 endpoint の error response 統一フォーマット。
 //
 //   { error: { code: string; message: string; details?: unknown } }
 //
 // status code:
-//   400 - リクエスト構文不正 / クエリ・ボディが parse 不能
+//   400 - リクエスト構文不正 (HTTPException 経由)
 //   401 - 認証情報なし / 失効
 //   403 - 認可不足 (role 不一致)
 //   404 - 対象リソース不在
-//   422 - バリデーション失敗 (ZodError)
+//   422 - バリデーション失敗 (body / query / path param。validationHook と groupId 検査)
 //   500 - 想定外
 //
 // Problem Details (RFC 7807) は v1.0.0 ではオーバーキル。
@@ -22,6 +24,25 @@ export type ApiErrorBody = {
     message: string
     details?: unknown
   }
+}
+
+export const validationErrorResponse = (c: Context, error: z.ZodError): Response =>
+  c.json<ApiErrorBody>(
+    {
+      error: {
+        code: "VALIDATION_ERROR",
+        message: error.issues[0]?.message ?? "リクエストの形式が不正です",
+        details: z.flattenError(error),
+      },
+    },
+    422,
+  )
+
+// 全 OpenAPIHono インスタンスの defaultHook に渡す。
+// handler 内で ZodError を throw する経路は無いので、onError は ZodError を扱わない。
+export const validationHook: Hook<unknown, AppEnv, string, Response | undefined> = (result, c) => {
+  if (!result.success) return validationErrorResponse(c, result.error)
+  return undefined
 }
 
 export const onError = (err: Error, c: Context): Response => {
@@ -40,19 +61,6 @@ export const onError = (err: Error, c: Context): Response => {
         },
       },
       status,
-    )
-  }
-
-  if (err instanceof ZodError) {
-    return c.json<ApiErrorBody>(
-      {
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "リクエストの形式が不正です",
-          details: err.flatten(),
-        },
-      },
-      422,
     )
   }
 

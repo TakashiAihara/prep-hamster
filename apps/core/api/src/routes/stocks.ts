@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm"
 import { items, locations, memberships, stockEvents, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
+import { validationHook } from "../middleware/error"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
   createStockBodyDtoSchema,
@@ -339,7 +340,7 @@ const deleteStockRoute = createRoute({
   },
 })
 
-export const stocksRouter = new OpenAPIHono<AppEnv>()
+export const stocksRouter = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
   .openapi(listStocksRoute, async (c) => {
     const { groupId, categoryId, locationId, expiringBefore, includeExpired } = c.req.valid("query")
     const db = c.get("db")
