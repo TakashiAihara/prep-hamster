@@ -1,47 +1,44 @@
-# 追加 → 一覧 → 詳細 → 移動で場所が変わる
+# 追加 → 一覧 → 詳細 → 移動で場所が選んだ移動先に変わる
 #
-# 前提 (consume / discard / move 共通):
+# 前提 (consume / discard / edit / move 共通):
+#   - Android 専用。画面を戻すのに Maestro の `back` (Android のみ) を使う。
+#     stack の header の戻るボタンには安定した testID が無く、iOS では `back` が使えない。
 #   - API がローカルで起動 (PORT 3000) し、EXPO_PUBLIC_API_BASE_URL が emulator から到達できる
-#   - API の DB は在庫 0 件の状態 (一覧の先頭行 = この flow で追加した在庫になる)
 #   - EXPO_PUBLIC_STUB_USER_ID の user が EXPO_PUBLIC_STUB_GROUP_ID の EDITOR 以上
+#   - DB の状態に依存しない: 在庫ごとに実行時刻入りの barcode / 商品名 (scripts/unique-stock.js)
+#     を使い、商品名のテキストでその在庫の行だけを開く。他の flow が残した在庫があってもよい
 #   - 場所が 2 件以上ある (移動先に現在地以外が必要)
 appId: com.example.prephamster
 ---
 - launchApp:
     clearState: true
 - waitForAnimationToEnd
+- runScript:
+    file: scripts/unique-stock.js
+    env:
+      PREFIX: move
+- runFlow:
+    file: subflows/add-unique-stock.yaml
+    env:
+      BARCODE: ${output.barcode}
+      NAME: ${output.name}
+      QUANTITY: "1"
+# 他の在庫が残っていても、新しい在庫は期限なしで一覧の末尾に来るので画面外にあるかもしれない
+- scrollUntilVisible:
+    element:
+      text: ${output.name}
 - tapOn:
-    text: "追加"
-- waitForAnimationToEnd
-- tapOn:
-    text: "手動で barcode を入力 (debug)"
-- waitForAnimationToEnd
-- tapOn:
-    id: "input"
-- inputText: "4901234567894"
-- tapOn:
-    text: "送信"
-- waitForAnimationToEnd:
-    timeout: 5000
-- tapOn:
-    id: "add-quantity-input"
-- eraseText
-- inputText: "1"
-- hideKeyboard
-- tapOn:
-    id: "add-save"
-- waitForAnimationToEnd:
-    timeout: 5000
-- tapOn:
-    id: "stock-row-.*"
+    text: ${output.name}
 - waitForAnimationToEnd:
     timeout: 5000
 - assertVisible:
     id: "detail-quantity"
-- copyTextFrom:
-    id: "detail-location"
+# 移動先の名前は正規表現にせず、コピーした文字列どうしを式で比べる (名前の記号で当たり外れが出ない)
 - tapOn:
     id: "detail-move-target-.*"
+- copyTextFrom:
+    id: "detail-move-selected-name"
+- evalScript: ${output.target = maestro.copiedText}
 - tapOn:
     id: "detail-move"
 - waitForAnimationToEnd:
@@ -49,7 +46,7 @@ appId: com.example.prephamster
 - assertVisible:
     id: "detail-message"
     text: "移動しました"
-- assertNotVisible:
+- copyTextFrom:
     id: "detail-location"
-    text: "${maestro.copiedText}"
+- assertTrue: ${maestro.copiedText == output.target}
 - takeScreenshot: stock-detail-after-move

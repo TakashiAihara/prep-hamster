@@ -13,6 +13,7 @@ import {
 } from "react-native"
 import { getApiClient } from "@/api"
 import { getCurrentGroupId } from "@/config"
+import { parsePositive } from "@/stock-detail"
 
 // 詳細入力 + 保存画面。
 // 受け取る params:
@@ -125,11 +126,13 @@ export default function AddDetailsScreen() {
       setSaveError("場所を選択してください")
       return
     }
-    const parsedQty = Number(quantity)
-    if (!Number.isFinite(parsedQty) || parsedQty < 0) {
-      setSaveError("数量は 0 以上の数値で入力してください")
+    // 数量 0 の在庫は一覧から隠れて見えなくなるので登録させない
+    const qty = parsePositive(quantity)
+    if (!qty.ok) {
+      setSaveError(qty.message)
       return
     }
+    const parsedQty = qty.value
     setSaving(true)
     setSaveError(null)
     try {
@@ -177,7 +180,12 @@ export default function AddDetailsScreen() {
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Section title={`商品 (${labelForLookup(productLookup)})`}>
         {canEditName ? (
-          <TextInput value={name} onChangeText={setName} style={styles.input} />
+          <TextInput
+            testID="add-name-input"
+            value={name}
+            onChangeText={setName}
+            style={styles.input}
+          />
         ) : (
           <Text style={styles.staticText}>{name}</Text>
         )}

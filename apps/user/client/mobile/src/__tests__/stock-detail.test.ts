@@ -5,11 +5,14 @@ import {
   consumeStock,
   discardStock,
   editStock,
+  formatQuantity,
+  isEmptyQuantity,
   loadStockDetail,
   moveStock,
   moveTargets,
   parseAmount,
   parseDateField,
+  parsePositive,
   parseReason,
   shouldSuggestShopping,
 } from "../stock-detail"
@@ -141,6 +144,43 @@ test("shouldSuggestShopping is true only when nothing is left", () => {
   expect(shouldSuggestShopping(3)).toBe(false)
 })
 
+test("a float residue from repeated consumption counts as empty and displays as 0", () => {
+  const residue = 1 - 0.7 - 0.3
+  expect(residue).not.toBe(0)
+  expect(shouldSuggestShopping(residue)).toBe(true)
+  expect(isEmptyQuantity(residue)).toBe(true)
+  expect(formatQuantity(residue)).toBe("0")
+  expect(shouldSuggestShopping(0.001)).toBe(false)
+})
+
+test("formatQuantity rounds float noise and keeps real fractions", () => {
+  expect(formatQuantity(0.1 + 0.2)).toBe("0.3")
+  expect(formatQuantity(2)).toBe("2")
+  expect(formatQuantity(1.5)).toBe("1.5")
+})
+
+test("parsePositive accepts only numbers above zero", () => {
+  expect(parsePositive(" 2.5 ")).toEqual({ ok: true, value: 2.5 })
+  expect(parsePositive("0").ok).toBe(false)
+  expect(parsePositive("-1").ok).toBe(false)
+  expect(parsePositive("").ok).toBe(false)
+  expect(parsePositive("abc")).toEqual({
+    ok: false,
+    message: "数量は 0 より大きい数値で入力してください",
+  })
+})
+
+test("buildEditPatch trims the note it sends and treats a trailing space as no change", () => {
+  const original = { useByDate: null, bestBeforeDate: null, note: "memo" }
+  expect(buildEditPatch(original, { useByDate: "", bestBeforeDate: "", note: "memo " })).toEqual({
+    ok: false,
+    message: "変更がありません",
+  })
+  expect(
+    buildEditPatch(original, { useByDate: "", bestBeforeDate: "", note: "  new note \n" }),
+  ).toEqual({ ok: true, value: { note: "new note" } })
+})
+
 test("moveTargets excludes the current location", () => {
   const locs = [
     { id: LOC_A, name: "Pantry" },
@@ -171,6 +211,16 @@ test("discardStock sends the reason and returns an empty stock as quantity 0", a
     param: { id: STOCK_ID },
     json: { quantityDelta: 5, reason: "期限切れ" },
   })
+})
+
+test("discardStock omits reason entirely when there is none", async () => {
+  const { client, calls } = fakeClient({
+    "stock.discard": () => json({ stock: stockDto({ quantity: 4 }), event: {} }),
+  })
+  await discardStock(client, STOCK_ID, 1, null)
+  expect(calls[0]?.args).toEqual({ param: { id: STOCK_ID }, json: { quantityDelta: 1 } })
+  const args = calls[0]?.args as { json: object }
+  expect(Object.keys(args.json)).toEqual(["quantityDelta"])
 })
 
 test("moveStock posts toLocationId and returns the new location", async () => {
@@ -205,6 +255,21 @@ test("action failures return the API error message, or the HTTP status without a
   expect(await moveStock(noBody.client, STOCK_ID, LOC_B)).toEqual({
     ok: false,
     message: "HTTP 500",
+  })
+})
+
+test("a JSON error body without a message, or with an empty one, falls back to the HTTP status", async () => {
+  const noMessage = fakeClient({ "stock.consume": () => json({ error: { code: "X" } }, 400) })
+  expect(await consumeStock(noMessage.client, STOCK_ID, 1)).toEqual({
+    ok: false,
+    message: "HTTP 400",
+  })
+  const emptyMessage = fakeClient({
+    "stock.consume": () => json({ error: { code: "X", message: "" } }, 422),
+  })
+  expect(await consumeStock(emptyMessage.client, STOCK_ID, 1)).toEqual({
+    ok: false,
+    message: "HTTP 422",
   })
 })
 
@@ -259,4 +324,36 @@ test("loadStockDetail reports a missing stock as a failed result", async () => {
     ok: false,
     message: "stock が見つかりません",
   })
+})
+
+const detailResponses = (over: Record<string, () => Response> = {}) => ({
+  "stock.get": () => json({ stock: stockDto() }),
+  "item.get": () => json({ item: { id: ITEM_ID, name: "Tomato" } }),
+  "locations.list": () => json({ locations: [{ id: LOC_A, name: "Pantry" }] }),
+  ...over,
+})
+
+test("loadStockDetail fails when the item lookup fails with a non-404 error", async () => {
+  const { client } = fakeClient(
+    detailResponses({ "item.get": () => new Response("boom", { status: 500 }) }),
+  )
+  expect(await loadStockDetail(client, STOCK_ID)).toEqual({ ok: false, message: "HTTP 500" })
+})
+
+test("loadStockDetail opens a stock whose item was soft-deleted under a placeholder name", async () => {
+  const { client } = fakeClient(
+    detailResponses({
+      "item.get": () =>
+        json({ error: { code: "NOT_FOUND", message: "item が見つかりません" } }, 404),
+    }),
+  )
+  const r = await loadStockDetail(client, STOCK_ID)
+  expect(r.ok && r.detail.itemName).toBe("(unknown item)")
+})
+
+test("loadStockDetail fails when the locations lookup fails", async () => {
+  const { client } = fakeClient(
+    detailResponses({ "locations.list": () => new Response("boom", { status: 503 }) }),
+  )
+  expect(await loadStockDetail(client, STOCK_ID)).toEqual({ ok: false, message: "HTTP 503" })
 })

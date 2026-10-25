@@ -1,7 +1,8 @@
-import { useLocalSearchParams } from "expo-router"
-import { useCallback, useEffect, useState } from "react"
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router"
+import { useCallback, useReducer, useState } from "react"
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,52 +12,49 @@ import {
 } from "react-native"
 import { getApiClient } from "@/api"
 import {
-  buildEditPatch,
-  consumeStock,
-  discardStock,
-  editStock,
+  formatQuantity,
   loadStockDetail,
-  moveStock,
   moveTargets,
-  parseAmount,
-  parseReason,
   shouldSuggestShopping,
-  type ActionResult,
   type StockDetail,
   type StockDto,
 } from "@/stock-detail"
+import { loadReducer } from "@/stock-detail-controller"
+import { useStockActions } from "@/use-stock-actions"
 
 // 在庫詳細画面 (M-05)。消費 / 廃棄 / 移動 / 編集を 1 画面にまとめる。
-// 操作後は画面に留まり、最新の stock で表示を差し替える (一覧は戻った時の focus で reload)。
-// 残量 0 になったら買い物リスト追加の提案を表示する (表示のみ。買い物リスト本体は v1.2.0)。
-
-type LoadState =
-  | { status: "loading" }
-  | { status: "ok"; detail: StockDetail }
-  | { status: "error"; message: string }
+// 消費 / 廃棄で残量が残れば一覧へ戻り、0 になったら留まって買い物リスト追加の提案を表示する
+// (screen-flow 2.3.2。表示のみ。買い物リスト本体は v1.2.0)。
+// 移動 / 編集は画面に留まり、最新の stock で表示を差し替える。
 
 export default function StockDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const [load, setLoad] = useState<LoadState>({ status: "loading" })
+  const [load, dispatch] = useReducer(loadReducer, { status: "loading" })
+  const [reloadKey, setReloadKey] = useState(0)
 
-  useEffect(() => {
-    if (!id) return
-    let cancelled = false
-    void (async () => {
-      const r = await loadStockDetail(getApiClient(), id)
-      if (cancelled) return
-      setLoad(r.ok ? { status: "ok", detail: r.detail } : { status: "error", message: r.message })
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [id])
+  // focus のたびに取り直す (他のメンバーが変えた在庫を古いまま操作しない)。再試行は reloadKey で再実行する
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return
+      let cancelled = false
+      dispatch({ type: "start", id })
+      void (async () => {
+        const r = await loadStockDetail(getApiClient(), id)
+        if (cancelled) return
+        dispatch(
+          r.ok ? { type: "loaded", detail: r.detail } : { type: "failed", message: r.message },
+        )
+      })()
+      return () => {
+        cancelled = true
+      }
+    }, [id, reloadKey]),
+  )
 
-  const onStockChanged = useCallback((stock: StockDto) => {
-    setLoad((prev) =>
-      prev.status === "ok" ? { status: "ok", detail: { ...prev.detail, stock } } : prev,
-    )
-  }, [])
+  const onStockChanged = useCallback(
+    (stock: StockDto) => dispatch({ type: "stock-changed", stock }),
+    [],
+  )
 
   if (!id) {
     return (
@@ -78,10 +76,34 @@ export default function StockDetailScreen() {
         <Text style={styles.error} testID="detail-load-error">
           取得失敗: {load.message}
         </Text>
+        <Pressable
+          testID="detail-retry"
+          accessibilityRole="button"
+          style={styles.retry}
+          onPress={() => setReloadKey((n) => n + 1)}
+        >
+          <Text style={styles.primaryLabel}>再試行</Text>
+        </Pressable>
       </View>
     )
   }
-  return <DetailBody detail={load.detail} onStockChanged={onStockChanged} />
+  return (
+    <DetailBody key={load.detail.stock.id} detail={load.detail} onStockChanged={onStockChanged} />
+  )
+}
+
+function confirmDiscard(quantity: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      "在庫を廃棄しますか？",
+      `${formatQuantity(quantity)} を廃棄します。この操作は取り消せません。`,
+      [
+        { text: "キャンセル", style: "cancel", onPress: () => resolve(false) },
+        { text: "廃棄する", style: "destructive", onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    )
+  })
 }
 
 function DetailBody({
@@ -98,54 +120,18 @@ function DetailBody({
   const [useBy, setUseBy] = useState(stock.useByDate ?? "")
   const [bestBefore, setBestBefore] = useState(stock.bestBeforeDate ?? "")
   const [note, setNote] = useState(stock.note ?? "")
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null)
+  const { busy, message, consume, discard, move, edit } = useStockActions({
+    stock,
+    onStockChanged,
+    onMoved: () => setTargetId(null),
+    confirmDiscard,
+    leave: () => router.back(),
+  })
 
   const empty = shouldSuggestShopping(stock.quantity)
   const currentLocation = locations.find((l) => l.id === stock.locationId)?.name ?? "(unknown)"
   const targets = moveTargets(locations, stock.locationId)
-
-  async function run(okText: string, action: () => Promise<ActionResult>) {
-    setBusy(true)
-    setMessage(null)
-    const r = await action()
-    setBusy(false)
-    if (!r.ok) {
-      setMessage({ kind: "error", text: r.message })
-      return
-    }
-    onStockChanged(r.stock)
-    setMessage({ kind: "ok", text: okText })
-  }
-
-  function onConsume() {
-    const qty = parseAmount(amount, stock.quantity)
-    if (!qty.ok) return setMessage({ kind: "error", text: qty.message })
-    void run("消費しました", () => consumeStock(getApiClient(), stock.id, qty.value))
-  }
-
-  function onDiscard() {
-    const qty = parseAmount(amount, stock.quantity)
-    if (!qty.ok) return setMessage({ kind: "error", text: qty.message })
-    const why = parseReason(reason)
-    if (!why.ok) return setMessage({ kind: "error", text: why.message })
-    void run("廃棄しました", () => discardStock(getApiClient(), stock.id, qty.value, why.value))
-  }
-
-  function onMove() {
-    if (!targetId) return setMessage({ kind: "error", text: "移動先を選択してください" })
-    void run("移動しました", async () => {
-      const r = await moveStock(getApiClient(), stock.id, targetId)
-      if (r.ok) setTargetId(null)
-      return r
-    })
-  }
-
-  function onEdit() {
-    const patch = buildEditPatch(stock, { useByDate: useBy, bestBeforeDate: bestBefore, note })
-    if (!patch.ok) return setMessage({ kind: "error", text: patch.message })
-    void run("保存しました", () => editStock(getApiClient(), stock.id, patch.value))
-  }
+  const targetName = targets.find((l) => l.id === targetId)?.name
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
@@ -157,7 +143,7 @@ function DetailBody({
           {currentLocation}
         </Text>
         <Text style={styles.quantity} testID="detail-quantity">
-          {stock.quantity} {stock.unit}
+          {formatQuantity(stock.quantity)} {stock.unit}
         </Text>
       </View>
 
@@ -201,7 +187,7 @@ function DetailBody({
             testID="detail-consume"
             accessibilityRole="button"
             style={[styles.primary, (busy || empty) && styles.disabled]}
-            onPress={onConsume}
+            onPress={() => void consume(amount)}
             disabled={busy || empty}
           >
             <Text style={styles.primaryLabel}>消費</Text>
@@ -210,7 +196,7 @@ function DetailBody({
             testID="detail-discard"
             accessibilityRole="button"
             style={[styles.danger, (busy || empty) && styles.disabled]}
-            onPress={onDiscard}
+            onPress={() => void discard(amount, reason)}
             disabled={busy || empty}
           >
             <Text style={styles.primaryLabel}>廃棄</Text>
@@ -241,11 +227,16 @@ function DetailBody({
             ))}
           </View>
         )}
+        {targetName ? (
+          <Text style={styles.meta} testID="detail-move-selected-name">
+            {targetName}
+          </Text>
+        ) : null}
         <Pressable
           testID="detail-move"
           accessibilityRole="button"
           style={[styles.primary, (busy || targets.length === 0) && styles.disabled]}
-          onPress={onMove}
+          onPress={() => void move(targetId)}
           disabled={busy || targets.length === 0}
         >
           <Text style={styles.primaryLabel}>移動</Text>
@@ -259,6 +250,7 @@ function DetailBody({
           value={useBy}
           onChangeText={setUseBy}
           style={styles.input}
+          keyboardType="numbers-and-punctuation"
           placeholder="使用期限 YYYY-MM-DD"
         />
         <TextInput
@@ -266,6 +258,7 @@ function DetailBody({
           value={bestBefore}
           onChangeText={setBestBefore}
           style={styles.input}
+          keyboardType="numbers-and-punctuation"
           placeholder="賞味期限 YYYY-MM-DD"
         />
         <TextInput
@@ -280,7 +273,7 @@ function DetailBody({
           testID="detail-edit-save"
           accessibilityRole="button"
           style={[styles.primary, busy && styles.disabled]}
-          onPress={onEdit}
+          onPress={() => void edit({ useByDate: useBy, bestBeforeDate: bestBefore, note })}
           disabled={busy}
         >
           <Text style={styles.primaryLabel}>保存</Text>
@@ -321,6 +314,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: "center",
+  },
+  retry: {
+    marginTop: 12,
+    backgroundColor: "#2c7be5",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
   },
   disabled: { opacity: 0.4 },
   primaryLabel: { color: "#fff", fontSize: 16, fontWeight: "600" },

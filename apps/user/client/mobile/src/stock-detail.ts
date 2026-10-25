@@ -30,13 +30,24 @@ export type EditPatch = {
 export type ActionResult = { ok: true; stock: StockDto } | { ok: false; message: string }
 
 const REASON_MAX = 500
+export const UNKNOWN_ITEM_NAME = "(unknown item)"
 
-export function parseAmount(input: string, remaining: number): Result<number> {
+// 浮動小数の消費を繰り返すと 1 - 0.7 - 0.3 = 5.55e-17 のような残りが出るので、これ未満は 0 と読む。
+const QUANTITY_EPSILON = 1e-9
+
+export function parsePositive(input: string): Result<number> {
   const trimmed = input.trim()
   const value = trimmed === "" ? Number.NaN : Number(trimmed)
   if (!Number.isFinite(value) || value <= 0) {
     return { ok: false, message: "数量は 0 より大きい数値で入力してください" }
   }
+  return { ok: true, value }
+}
+
+export function parseAmount(input: string, remaining: number): Result<number> {
+  const parsed = parsePositive(input)
+  if (!parsed.ok) return parsed
+  const value = parsed.value
   if (value > remaining) return { ok: false, message: `残量 ${remaining} を超えています` }
   return { ok: true, value }
 }
@@ -70,7 +81,7 @@ export function buildEditPatch(
   if (!useBy.ok) return { ok: false, message: `使用期限: ${useBy.message}` }
   const bestBefore = parseDateField(form.bestBeforeDate)
   if (!bestBefore.ok) return { ok: false, message: `賞味期限: ${bestBefore.message}` }
-  const note = form.note.trim() === "" ? null : form.note
+  const note = form.note.trim() === "" ? null : form.note.trim()
 
   const patch: EditPatch = {}
   if (useBy.value !== original.useByDate) patch.useByDate = useBy.value
@@ -82,7 +93,17 @@ export function buildEditPatch(
 
 // screen-flow.md 2.3.2: 残量 0 で買い物リスト追加を提案する (表示のみ)。
 export function shouldSuggestShopping(quantity: number): boolean {
-  return quantity <= 0
+  return quantity < QUANTITY_EPSILON
+}
+
+// 一覧で隠す / 詳細で提案を出す判定は同じ「残量なし」を使う。
+export function isEmptyQuantity(quantity: number): boolean {
+  return shouldSuggestShopping(quantity)
+}
+
+export function formatQuantity(quantity: number): string {
+  // toFixed が float 残り (5.55e-17) も 0 に丸める
+  return String(Number(quantity.toFixed(6)))
 }
 
 export function moveTargets(locations: LocationDto[], currentLocationId: string): LocationDto[] {
@@ -116,11 +137,12 @@ export async function loadStockDetail(
       client.v1.items[":id"].$get({ param: { id: stock.itemId } }),
       client.v1.locations.$get({ query: { groupId: stock.groupId } }),
     ])
-    if (!itemRes.ok) return await failure(itemRes)
+    // soft delete 済みの item は 404 になるが、一覧は join の fallback で行を出すので同じ名前で開く
+    if (!itemRes.ok && itemRes.status !== 404) return await failure(itemRes)
     if (!locsRes.ok) return await failure(locsRes)
-    const { item } = await itemRes.json()
+    const itemName = itemRes.ok ? (await itemRes.json()).item.name : UNKNOWN_ITEM_NAME
     const { locations } = await locsRes.json()
-    return { ok: true, detail: { stock, itemName: item.name, locations } }
+    return { ok: true, detail: { stock, itemName, locations } }
   } catch (err) {
     return errorMessage(err)
   }
