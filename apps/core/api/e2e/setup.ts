@@ -3,9 +3,13 @@ import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { fileURLToPath } from "node:url"
 import { dirname, resolve } from "node:path"
 import { createDb } from "@prep-hamster/db"
+import { installJaErrorMap } from "@prep-hamster/schema"
 
 const TEST_DB_URL =
   process.env["TEST_DATABASE_URL"] ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+
+// createApp は error map を入れない (index.ts の起動時だけ)。e2e は全ファイルで同じ zod 設定にそろえる。
+installJaErrorMap()
 
 const here = dirname(fileURLToPath(import.meta.url))
 const MIGRATIONS_FOLDER = resolve(here, "../../../../packages/db/drizzle")

@@ -72,7 +72,7 @@ const listStocksRoute = createRoute({
   path: "/",
   tags: ["stocks"],
   summary: "在庫一覧を取得 (categoryId / locationId / 期限で絞り込み可)",
-  middleware: [withGroupAccess((c) => c.req.query("groupId"))] as const,
+  middleware: [withGroupAccess({ in: "query", name: "groupId" })] as const,
   request: {
     query: ListQuerySchema,
   },
@@ -125,6 +125,10 @@ const getStockRoute = createRoute({
     },
     404: {
       description: "存在しない",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    422: {
+      description: "パラメータ不正",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },
@@ -334,6 +338,10 @@ const deleteStockRoute = createRoute({
     },
     404: {
       description: "存在しない",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    422: {
+      description: "パラメータ不正",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },

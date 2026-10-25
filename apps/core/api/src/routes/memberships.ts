@@ -45,7 +45,7 @@ const listMembershipsRoute = createRoute({
   path: "/groups/{groupId}/memberships",
   tags: ["memberships"],
   summary: "group の member 一覧 (member 全員に open)",
-  middleware: [withGroupAccess((c) => c.req.param("groupId"))] as const,
+  middleware: [withGroupAccess({ in: "param", name: "groupId" })] as const,
   request: { params: GroupParamSchema },
   responses: {
     200: {
@@ -64,6 +64,10 @@ const listMembershipsRoute = createRoute({
       description: "未参加",
       content: { "application/json": { schema: errorResponseSchema } },
     },
+    422: {
+      description: "パラメータ不正",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
   },
 })
 
@@ -72,7 +76,7 @@ const patchMembershipRoute = createRoute({
   path: "/groups/{groupId}/memberships/{userId}",
   tags: ["memberships"],
   summary: "メンバーの role を変更 (OWNER のみ、自分の OWNER 剥奪不可)",
-  middleware: [withGroupAccess((c) => c.req.param("groupId"), "OWNER")] as const,
+  middleware: [withGroupAccess({ in: "param", name: "groupId" }, "OWNER")] as const,
   request: {
     params: GroupAndUserParamSchema,
     body: { content: { "application/json": { schema: updateMembershipRoleBodyDtoSchema } } },
@@ -110,7 +114,7 @@ const deleteMembershipRoute = createRoute({
   path: "/groups/{groupId}/memberships/{userId}",
   tags: ["memberships"],
   summary: "メンバーを削除 (OWNER のみ、最後の OWNER は削除不可)",
-  middleware: [withGroupAccess((c) => c.req.param("groupId"), "OWNER")] as const,
+  middleware: [withGroupAccess({ in: "param", name: "groupId" }, "OWNER")] as const,
   request: { params: GroupAndUserParamSchema },
   responses: {
     204: { description: "削除成功" },

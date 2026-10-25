@@ -40,6 +40,7 @@ export const validationErrorResponse = (c: Context, error: z.ZodError): Response
 
 // createApp の OpenAPIHono の defaultHook に渡す。app.route() で載せた sub-router の
 // route にも効く (sub-router 側に設定が無ければ親の hook が使われる。実測)。
+// sub-router は module-level の singleton で、親は最初に route() で載せた app になる。hook 無しの app を先に作ると効かない。
 // handler 内で ZodError を throw する経路は無いので、onError は ZodError を扱わない。
 export const validationHook: Hook<unknown, AppEnv, string, Response | undefined> = (result, c) => {
   if (!result.success) return validationErrorResponse(c, result.error)

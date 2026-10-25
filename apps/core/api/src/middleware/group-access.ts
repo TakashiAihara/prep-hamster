@@ -1,4 +1,3 @@
-import type { Context } from "hono"
 import { createMiddleware } from "hono/factory"
 import { and, eq, isNull } from "drizzle-orm"
 import { z } from "@hono/zod-openapi"
@@ -20,7 +19,8 @@ export type GroupAccessEnv = {
   Variables: AppEnv["Variables"] & { membership: Membership }
 }
 
-export type ExtractGroupId = (c: Context) => string | undefined
+// groupId をどこから取るか。name は query / path param の名前で、422 の details のキーにもなる。
+export type GroupIdSource = { in: "query" | "param"; name: string }
 
 const uuidSchema = z.string().guid()
 
@@ -94,19 +94,18 @@ export async function checkGroupAccess(
   return { ok: true, membership: member }
 }
 
-// field は groupId を取り出す元の query / path param の名前。422 の details に載せる。
-export const withGroupAccess = (
-  extractGroupId: ExtractGroupId,
-  requiredRole?: Role,
-  field = "groupId",
-) =>
+// route の validator より前に走るので、groupId が不正なときは validationHook と同じ 422 をここで返す。
+// その場合 details に載るのは groupId の誤りだけで、同じリクエストの他の query / body の誤りは含まない
+// (groupId を直した次のリクエストで validator が報告する)。
+export const withGroupAccess = (source: GroupIdSource, requiredRole?: Role) =>
   createMiddleware<AppEnv & GroupAccessEnv>(async (c, next) => {
-    const groupId = extractGroupId(c) ?? ""
-    // route の validator より前に走るので、ここでも validationHook と同じ 422 を返す。
-    const parsed = z.object({ [field]: uuidSchema }).safeParse({ [field]: groupId })
+    const raw = source.in === "query" ? c.req.query(source.name) : c.req.param(source.name)
+    // raw を空文字に丸めない: 未指定は error map の必須エラーで報告する。
+    const parsed = z.object({ [source.name]: uuidSchema }).safeParse({ [source.name]: raw })
     if (!parsed.success) {
       return validationErrorResponse(c, parsed.error)
     }
+    const groupId = parsed.data[source.name] as string
 
     const db = c.get("db")
     const userId = c.get("userId")

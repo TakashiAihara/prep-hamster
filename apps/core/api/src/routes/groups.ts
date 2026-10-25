@@ -103,7 +103,7 @@ const getGroupRoute = createRoute({
   path: "/{id}",
   tags: ["groups"],
   summary: "group 単件取得（member のみ）",
-  middleware: [withGroupAccess((c) => c.req.param("id"), undefined, "id")] as const,
+  middleware: [withGroupAccess({ in: "param", name: "id" })] as const,
   request: { params: IdParamSchema },
   responses: {
     200: {
@@ -126,6 +126,10 @@ const getGroupRoute = createRoute({
       description: "存在しない",
       content: { "application/json": { schema: errorResponseSchema } },
     },
+    422: {
+      description: "パラメータ不正",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
   },
 })
 
@@ -134,7 +138,7 @@ const patchGroupRoute = createRoute({
   path: "/{id}",
   tags: ["groups"],
   summary: "group の名前変更（OWNER のみ）",
-  middleware: [withGroupAccess((c) => c.req.param("id"), "OWNER", "id")] as const,
+  middleware: [withGroupAccess({ in: "param", name: "id" }, "OWNER")] as const,
   request: {
     params: IdParamSchema,
     body: {

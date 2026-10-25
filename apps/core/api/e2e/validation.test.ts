@@ -1,5 +1,4 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
-import { installJaErrorMap } from "@prep-hamster/schema"
 import { createApp } from "../src/app"
 import { errorResponseSchema } from "../src/routes/schemas"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
@@ -11,21 +10,25 @@ type ValidationBody = {
 
 beforeAll(async () => {
   await ensureMigrated()
-  // createApp は error map を入れない (index.ts の起動時だけ)。message の言語まで固定するため明示する。
-  installJaErrorMap()
 })
 
 beforeEach(async () => {
   await truncateAll()
 })
 
+const FALLBACK_MESSAGE = "リクエストの形式が不正です"
+
 async function expectValidationError(res: Response, field: string) {
   expect(res.status).toBe(422)
   const body = (await res.json()) as ValidationBody
   expect(errorResponseSchema.safeParse(body).success).toBe(true)
   expect(body.error.code).toBe("VALIDATION_ERROR")
+  const messages = body.error.details.fieldErrors[field]
+  expect(messages?.length).toBeGreaterThan(0)
+  // e2e/setup.ts が入れた ja error map の文言であって、validationErrorResponse のフォールバックではない。
+  expect(messages?.[0]).toBe(body.error.message)
+  expect(body.error.message).not.toBe(FALLBACK_MESSAGE)
   expect(body.error.message).toMatch(/[ぁ-んァ-ン一-龥]/)
-  expect(Object.keys(body.error.details.fieldErrors)).toContain(field)
 }
 
 test("invalid body returns 422 VALIDATION_ERROR with the field in details", async () => {
@@ -85,15 +88,46 @@ test("malformed group id in path is reported under the path param name", async (
   await expectValidationError(byGroupId, "groupId")
 })
 
-test("/openapi.json declares the same ApiError schema for 422", async () => {
+test("missing groupId is reported with the required-field message, not the UUID one", async () => {
+  const { userId } = await seedBaseFixture()
   const app = createApp({ db: testDb })
 
+  const missing = await app.request("/v1/stocks", { headers: { "x-user-id": userId } })
+  const missingBody = (await missing.clone().json()) as ValidationBody
+  await expectValidationError(missing, "groupId")
+
+  const malformed = await app.request("/v1/stocks?groupId=not-a-uuid", {
+    headers: { "x-user-id": userId },
+  })
+  const malformedBody = (await malformed.json()) as ValidationBody
+  expect(missingBody.error.message).not.toBe(malformedBody.error.message)
+})
+
+test("every operation with parameters or a request body declares 422 as ApiError in /openapi.json", async () => {
+  const app = createApp({ db: testDb })
+
+  type Operation = {
+    parameters?: unknown[]
+    requestBody?: unknown
+    responses: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>
+  }
   const spec = (await (await app.request("/openapi.json")).json()) as {
-    paths: Record<string, Record<string, { responses: Record<string, unknown> }>>
+    paths: Record<string, Record<string, Operation>>
   }
 
-  expect(spec.paths["/v1/groups"]?.["post"]?.responses["422"]).toEqual({
-    description: expect.any(String),
-    content: { "application/json": { schema: { $ref: "#/components/schemas/ApiError" } } },
-  })
+  const validated = Object.entries(spec.paths).flatMap(([path, methods]) =>
+    Object.entries(methods)
+      .filter(([, op]) => (op.parameters?.length ?? 0) > 0 || op.requestBody)
+      .map(([method, op]) => ({ name: `${method.toUpperCase()} ${path}`, op })),
+  )
+  expect(validated.length).toBeGreaterThan(20)
+
+  const missing = validated
+    .filter(
+      ({ op }) =>
+        op.responses["422"]?.content?.["application/json"]?.schema?.$ref !==
+        "#/components/schemas/ApiError",
+    )
+    .map(({ name }) => name)
+  expect(missing).toEqual([])
 })
