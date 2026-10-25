@@ -6,6 +6,7 @@ import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
   createLocationBodyDtoSchema,
   errorResponseSchema,
+  jsonBodyErrorResponses,
   locationDtoSchema,
   updateLocationBodyDtoSchema,
 } from "./schemas"
@@ -71,6 +72,7 @@ const createLocationRoute = createRoute({
     body: { content: { "application/json": { schema: createLocationBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     201: {
       description: "作成成功",
       content: {
@@ -134,6 +136,7 @@ const patchLocationRoute = createRoute({
     body: { content: { "application/json": { schema: updateLocationBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     200: {
       description: "更新成功",
       content: {

@@ -5,6 +5,7 @@ import type { AppEnv } from "../app"
 import { withGroupAccess } from "../middleware/group-access"
 import {
   errorResponseSchema,
+  jsonBodyErrorResponses,
   membershipDtoSchema,
   updateMembershipRoleBodyDtoSchema,
 } from "./schemas"
@@ -82,6 +83,7 @@ const patchMembershipRoute = createRoute({
     body: { content: { "application/json": { schema: updateMembershipRoleBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     200: {
       description: "更新成功",
       content: {

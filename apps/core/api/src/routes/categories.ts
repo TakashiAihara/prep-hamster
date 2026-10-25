@@ -7,6 +7,7 @@ import {
   categoryDtoSchema,
   createCategoryBodyDtoSchema,
   errorResponseSchema,
+  jsonBodyErrorResponses,
   updateCategoryBodyDtoSchema,
 } from "./schemas"
 
@@ -71,6 +72,7 @@ const createCategoryRoute = createRoute({
     body: { content: { "application/json": { schema: createCategoryBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     201: {
       description: "作成成功",
       content: {
@@ -134,6 +136,7 @@ const patchCategoryRoute = createRoute({
     body: { content: { "application/json": { schema: updateCategoryBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     200: {
       description: "更新成功",
       content: {
