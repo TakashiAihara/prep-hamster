@@ -1,0 +1,54 @@
+# 追加 → 一覧 → 詳細 → 消費で数量が減る
+#
+# 前提 (consume / discard / move 共通):
+#   - API がローカルで起動 (PORT 3000) し、EXPO_PUBLIC_API_BASE_URL が emulator から到達できる
+#   - API の DB は在庫 0 件の状態 (一覧の先頭行 = この flow で追加した在庫になる)
+#   - EXPO_PUBLIC_STUB_USER_ID の user が EXPO_PUBLIC_STUB_GROUP_ID の EDITOR 以上
+#   - 場所が 1 件以上ある
+appId: com.example.prephamster
+---
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd
+- tapOn:
+    text: "追加"
+- waitForAnimationToEnd
+- tapOn:
+    text: "手動で barcode を入力 (debug)"
+- waitForAnimationToEnd
+- tapOn:
+    id: "input"
+- inputText: "4901234567894"
+- tapOn:
+    text: "送信"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    id: "add-quantity-input"
+- eraseText
+- inputText: "3"
+- hideKeyboard
+- tapOn:
+    id: "add-save"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    id: "stock-row-.*"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    id: "detail-quantity"
+- takeScreenshot: stock-detail
+- tapOn:
+    id: "detail-amount-input"
+- eraseText
+- inputText: "1"
+- hideKeyboard
+- tapOn:
+    id: "detail-consume"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    id: "detail-quantity"
+    text: "2 個"
+- takeScreenshot: stock-detail-after-consume

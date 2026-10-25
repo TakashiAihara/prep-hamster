@@ -210,6 +210,7 @@ export default function AddDetailsScreen() {
       <Section title="数量 / 単位">
         <View style={styles.row}>
           <TextInput
+            testID="add-quantity-input"
             value={quantity}
             onChangeText={setQuantity}
             keyboardType="decimal-pad"
@@ -248,6 +249,7 @@ export default function AddDetailsScreen() {
       {saveError ? <Text style={styles.error}>{saveError}</Text> : null}
 
       <Pressable
+        testID="add-save"
         style={[styles.primary, saving && styles.primaryDisabled]}
         onPress={onSave}
         disabled={saving}

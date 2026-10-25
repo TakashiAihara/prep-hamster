@@ -1,6 +1,14 @@
-import { useFocusEffect } from "expo-router"
+import { router, useFocusEffect } from "expo-router"
 import { useCallback } from "react"
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native"
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native"
 import { useStocks, type StockListItem } from "@/use-stocks"
 
 // 在庫一覧画面 (/(tabs)/index)。
@@ -54,13 +62,18 @@ export default function StocksIndex() {
 function StockRow({ row }: { row: StockListItem }) {
   const expiry = row.useByDate ?? row.bestBeforeDate
   return (
-    <View style={styles.row}>
+    <Pressable
+      testID={`stock-row-${row.id}`}
+      accessibilityRole="button"
+      style={styles.row}
+      onPress={() => router.push({ pathname: "/stocks/[id]", params: { id: row.id } })}
+    >
       <Text style={styles.itemName}>{row.itemName}</Text>
       <Text style={styles.meta}>
         {row.locationName} ・ {row.quantity} {row.unit}
         {expiry ? ` ・ 期限 ${expiry}` : ""}
       </Text>
-    </View>
+    </Pressable>
   )
 }
 

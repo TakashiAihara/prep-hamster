@@ -51,6 +51,11 @@ export function joinStocksWithMasters(
   }))
 }
 
+// 残量 0 (消費 / 廃棄し切った在庫) は API が行を残すので、一覧では隠す。
+export function visibleStocks(rows: StockListItem[]): StockListItem[] {
+  return rows.filter((r) => r.quantity > 0)
+}
+
 export function useStocks(): { state: State; reload: () => void } {
   const [state, setState] = useState<State>({ status: "loading" })
   const [reloadKey, setReloadKey] = useState(0)
@@ -84,7 +89,10 @@ export function useStocks(): { state: State; reload: () => void } {
         const stocks = (await stocksRes.json()).stocks
         const items = (await itemsRes.json()).items
         const locations = (await locationsRes.json()).locations
-        setState({ status: "ok", rows: joinStocksWithMasters(stocks, items, locations) })
+        setState({
+          status: "ok",
+          rows: visibleStocks(joinStocksWithMasters(stocks, items, locations)),
+        })
       } catch (err) {
         if (cancelled) return
         const message = err instanceof Error ? err.message : "unknown"
