@@ -14,14 +14,22 @@ export const errorResponseSchema = z
   })
   .openapi("ApiError")
 
-// JSON body を取る route が schema 検証の手前で返す失敗 (壊れた JSON = 400 / content-type 不正 = 415)。
+// JSON body を取る route が schema 検証の手前で返す失敗
+// (壊れた JSON = 400 / body 1 MiB 超過 = 413 / content-type 不正 = 415)。
 export const jsonBodyErrorResponses = {
   400: {
     description: "JSON として読めないボディ",
     content: { "application/json": { schema: errorResponseSchema } },
   },
+  413: {
+    description: "ボディが上限 (1 MiB) を超過",
+    content: { "application/json": { schema: errorResponseSchema } },
+  },
   415: {
-    description: "content-type が application/json でない",
+    // JSON 系は application/json と application/*+json を受け付ける (`; charset=utf-8` 等の
+    // parameter 付きも可)。content-type なし + 空ボディは 415 にならず {} として検証される。
+    description:
+      "JSON 系 content-type (application/json / application/*+json) 以外、または content-type なしでボディあり",
     content: { "application/json": { schema: errorResponseSchema } },
   },
 }

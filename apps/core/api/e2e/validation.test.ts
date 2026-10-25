@@ -132,7 +132,7 @@ test("every operation with parameters or a request body declares 422 as ApiError
   expect(missing).toEqual([])
 })
 
-test("every operation with a JSON request body declares 400 and 415 as ApiError in /openapi.json", async () => {
+test("every operation with a JSON request body declares 400, 413 and 415 as ApiError in /openapi.json", async () => {
   const app = createApp({ db: testDb })
 
   type Operation = {
@@ -151,7 +151,7 @@ test("every operation with a JSON request body declares 400 and 415 as ApiError 
   expect(jsonBodyOps.length).toBe(16)
 
   const missing = jsonBodyOps.flatMap(({ name, op }) =>
-    ["400", "415"]
+    ["400", "413", "415"]
       .filter(
         (status) =>
           op.responses[status]?.content?.["application/json"]?.schema?.$ref !==
@@ -162,11 +162,37 @@ test("every operation with a JSON request body declares 400 and 415 as ApiError 
   expect(missing).toEqual([])
 })
 
-async function expectApiError(res: Response, status: number, code: string) {
+test("operations without a JSON request body declare neither 400 nor 415 in /openapi.json", async () => {
+  const app = createApp({ db: testDb })
+
+  type Operation = {
+    requestBody?: { content?: Record<string, unknown> }
+    responses: Record<string, unknown>
+  }
+  const spec = (await (await app.request("/openapi.json")).json()) as {
+    paths: Record<string, Record<string, Operation>>
+  }
+
+  const noJsonBodyOps = Object.entries(spec.paths).flatMap(([path, methods]) =>
+    Object.entries(methods)
+      .filter(([, op]) => !op.requestBody?.content?.["application/json"])
+      .map(([method, op]) => ({ name: `${method.toUpperCase()} ${path}`, op })),
+  )
+  expect(noJsonBodyOps.length).toBeGreaterThan(10)
+
+  const declared = noJsonBodyOps.flatMap(({ name, op }) =>
+    ["400", "415"].filter((status) => status in op.responses).map((status) => `${name} ${status}`),
+  )
+  expect(declared).toEqual([])
+})
+
+async function expectApiError(res: Response, status: number, code: string, message: string) {
   expect(res.status).toBe(status)
   const body = await res.json()
   expect(errorResponseSchema.safeParse(body).success).toBe(true)
-  expect((body as { error: { code: string } }).error.code).toBe(code)
+  const error = (body as { error: { code: string; message: string } }).error
+  expect(error.code).toBe(code)
+  expect(error.message).toBe(message)
 }
 
 test("malformed JSON body returns 400 BAD_REQUEST", async () => {
@@ -179,20 +205,36 @@ test("malformed JSON body returns 400 BAD_REQUEST", async () => {
     body: "{not json",
   })
 
-  await expectApiError(res, 400, "BAD_REQUEST")
+  await expectApiError(res, 400, "BAD_REQUEST", "JSON の形式が不正です")
 })
 
 test("JSON body without content-type returns 415 UNSUPPORTED_MEDIA_TYPE", async () => {
   const { userId } = await seedBaseFixture()
   const app = createApp({ db: testDb })
 
+  // ReadableStream の body には runtime が content-type を自動付与しない
+  // (文字列 body だと Node の undici は text/plain を付けてしまう)。
+  // 「content-type なし」を runtime 非依存にするため stream で送る。
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(JSON.stringify({ name: "x" })))
+      controller.close()
+    },
+  })
+
   const res = await app.request("/v1/groups", {
     method: "POST",
     headers: { "x-user-id": userId },
-    body: JSON.stringify({ name: "x" }),
+    body,
+    duplex: "half",
   })
 
-  await expectApiError(res, 415, "UNSUPPORTED_MEDIA_TYPE")
+  await expectApiError(
+    res,
+    415,
+    "UNSUPPORTED_MEDIA_TYPE",
+    "Content-Type は application/json を指定してください",
+  )
 })
 
 test("JSON body with text/plain content-type returns 415 UNSUPPORTED_MEDIA_TYPE", async () => {
@@ -205,5 +247,23 @@ test("JSON body with text/plain content-type returns 415 UNSUPPORTED_MEDIA_TYPE"
     body: JSON.stringify({ name: "x" }),
   })
 
-  await expectApiError(res, 415, "UNSUPPORTED_MEDIA_TYPE")
+  await expectApiError(
+    res,
+    415,
+    "UNSUPPORTED_MEDIA_TYPE",
+    "Content-Type は application/json を指定してください",
+  )
+})
+
+test("body over 1 MiB returns 413 PAYLOAD_TOO_LARGE", async () => {
+  const { userId } = await seedBaseFixture()
+  const app = createApp({ db: testDb })
+
+  const res = await app.request("/v1/groups", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-user-id": userId },
+    body: "a".repeat(1024 * 1024 + 1),
+  })
+
+  await expectApiError(res, 413, "PAYLOAD_TOO_LARGE", "リクエストが大きすぎます")
 })

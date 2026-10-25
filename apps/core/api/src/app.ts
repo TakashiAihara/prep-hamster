@@ -3,6 +3,7 @@ import { Scalar } from "@scalar/hono-api-reference"
 import type { Db } from "@prep-hamster/db"
 import { createJanApiClient, type JanApiClient } from "@prep-hamster/jan-api"
 import { withUserAuth } from "./middleware/auth"
+import { withBodyLimit } from "./middleware/body-limit"
 import { withDb } from "./middleware/db"
 import { onError, validationHook } from "./middleware/error"
 import { categoriesRouter } from "./routes/categories"
@@ -38,6 +39,7 @@ export function createApp(opts: CreateAppOptions) {
     c.set("janApi", janApi)
     await next()
   })
+  app.use("/v1/*", withBodyLimit)
   app.use("/v1/*", withUserAuth)
 
   app.doc("/openapi.json", {
