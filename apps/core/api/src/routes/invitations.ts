@@ -6,6 +6,7 @@ import { withGroupAccess } from "../middleware/group-access"
 import {
   createInvitationBodyDtoSchema,
   errorResponseSchema,
+  jsonBodyErrorResponses,
   invitationDtoSchema,
   membershipDtoSchema,
 } from "./schemas"
@@ -53,6 +54,7 @@ const createInvitationRoute = createRoute({
     body: { content: { "application/json": { schema: createInvitationBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     201: {
       description: "発行成功",
       content: {

@@ -14,6 +14,18 @@ export const errorResponseSchema = z
   })
   .openapi("ApiError")
 
+// JSON body を取る route が schema 検証の手前で返す失敗 (壊れた JSON = 400 / content-type 不正 = 415)。
+export const jsonBodyErrorResponses = {
+  400: {
+    description: "JSON として読めないボディ",
+    content: { "application/json": { schema: errorResponseSchema } },
+  },
+  415: {
+    description: "content-type が application/json でない",
+    content: { "application/json": { schema: errorResponseSchema } },
+  },
+}
+
 export const roleSchema = z.enum(["OWNER", "EDITOR", "VIEWER"]).openapi("Role")
 
 export const groupDtoSchema = z

@@ -6,6 +6,7 @@ import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
   createStockBodyDtoSchema,
   errorResponseSchema,
+  jsonBodyErrorResponses,
   stockDtoSchema,
   stockEventDtoSchema,
   stockMoveBodyDtoSchema,
@@ -144,6 +145,7 @@ const patchStockRoute = createRoute({
     body: { content: { "application/json": { schema: updateStockBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     200: {
       description: "更新成功",
       content: {
@@ -186,6 +188,7 @@ const createStockRoute = createRoute({
     },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     201: {
       description: "作成成功",
       content: {
@@ -219,6 +222,7 @@ const consumeStockRoute = createRoute({
     body: { content: { "application/json": { schema: stockQuantityDeltaBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     200: {
       description: "消費成功",
       content: {
@@ -256,6 +260,7 @@ const discardStockRoute = createRoute({
     body: { content: { "application/json": { schema: stockQuantityDeltaBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     200: {
       description: "廃棄成功",
       content: {
@@ -293,6 +298,7 @@ const moveStockRoute = createRoute({
     body: { content: { "application/json": { schema: stockMoveBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     200: {
       description: "移動成功",
       content: {

@@ -131,3 +131,79 @@ test("every operation with parameters or a request body declares 422 as ApiError
     .map(({ name }) => name)
   expect(missing).toEqual([])
 })
+
+test("every operation with a JSON request body declares 400 and 415 as ApiError in /openapi.json", async () => {
+  const app = createApp({ db: testDb })
+
+  type Operation = {
+    requestBody?: { content?: Record<string, unknown> }
+    responses: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>
+  }
+  const spec = (await (await app.request("/openapi.json")).json()) as {
+    paths: Record<string, Record<string, Operation>>
+  }
+
+  const jsonBodyOps = Object.entries(spec.paths).flatMap(([path, methods]) =>
+    Object.entries(methods)
+      .filter(([, op]) => op.requestBody?.content?.["application/json"])
+      .map(([method, op]) => ({ name: `${method.toUpperCase()} ${path}`, op })),
+  )
+  expect(jsonBodyOps.length).toBe(16)
+
+  const missing = jsonBodyOps.flatMap(({ name, op }) =>
+    ["400", "415"]
+      .filter(
+        (status) =>
+          op.responses[status]?.content?.["application/json"]?.schema?.$ref !==
+          "#/components/schemas/ApiError",
+      )
+      .map((status) => `${name} ${status}`),
+  )
+  expect(missing).toEqual([])
+})
+
+async function expectApiError(res: Response, status: number, code: string) {
+  expect(res.status).toBe(status)
+  const body = await res.json()
+  expect(errorResponseSchema.safeParse(body).success).toBe(true)
+  expect((body as { error: { code: string } }).error.code).toBe(code)
+}
+
+test("malformed JSON body returns 400 BAD_REQUEST", async () => {
+  const { userId } = await seedBaseFixture()
+  const app = createApp({ db: testDb })
+
+  const res = await app.request("/v1/groups", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-user-id": userId },
+    body: "{not json",
+  })
+
+  await expectApiError(res, 400, "BAD_REQUEST")
+})
+
+test("JSON body without content-type returns 415 UNSUPPORTED_MEDIA_TYPE", async () => {
+  const { userId } = await seedBaseFixture()
+  const app = createApp({ db: testDb })
+
+  const res = await app.request("/v1/groups", {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify({ name: "x" }),
+  })
+
+  await expectApiError(res, 415, "UNSUPPORTED_MEDIA_TYPE")
+})
+
+test("JSON body with text/plain content-type returns 415 UNSUPPORTED_MEDIA_TYPE", async () => {
+  const { userId } = await seedBaseFixture()
+  const app = createApp({ db: testDb })
+
+  const res = await app.request("/v1/groups", {
+    method: "POST",
+    headers: { "content-type": "text/plain", "x-user-id": userId },
+    body: JSON.stringify({ name: "x" }),
+  })
+
+  await expectApiError(res, 415, "UNSUPPORTED_MEDIA_TYPE")
+})

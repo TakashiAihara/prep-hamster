@@ -14,6 +14,7 @@ import type { AppEnv } from "../app"
 //   401 - 認証情報なし / 失効
 //   403 - 認可不足 (role 不一致)
 //   404 - 対象リソース不在
+//   415 - JSON body route への content-type 不正 (HTTPException 経由)
 //   422 - バリデーション失敗 (body / query / path param。validationHook と groupId 検査)
 //   500 - 想定外
 //
@@ -163,6 +164,8 @@ const codeForStatus = (status: number): string => {
       return "FORBIDDEN"
     case 404:
       return "NOT_FOUND"
+    case 415:
+      return "UNSUPPORTED_MEDIA_TYPE"
     case 422:
       return "VALIDATION_ERROR"
     default:

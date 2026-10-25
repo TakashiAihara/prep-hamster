@@ -6,6 +6,7 @@ import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
   createItemBodyDtoSchema,
   errorResponseSchema,
+  jsonBodyErrorResponses,
   itemByBarcodeBodyDtoSchema,
   itemByBarcodeResponseDtoSchema,
   itemDtoSchema,
@@ -178,6 +179,7 @@ const createItemRoute = createRoute({
     body: { content: { "application/json": { schema: createItemBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     201: {
       description: "作成成功",
       content: {
@@ -241,6 +243,7 @@ const patchItemRoute = createRoute({
     body: { content: { "application/json": { schema: updateItemBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     200: {
       description: "更新成功",
       content: {
@@ -275,6 +278,7 @@ const itemByBarcodeRoute = createRoute({
     body: { content: { "application/json": { schema: itemByBarcodeBodyDtoSchema } } },
   },
   responses: {
+    ...jsonBodyErrorResponses,
     200: {
       description: "既存 item を返却",
       content: {
