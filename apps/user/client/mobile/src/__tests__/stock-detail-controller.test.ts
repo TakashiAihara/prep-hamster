@@ -131,14 +131,15 @@ test("consume that leaves stock goes back to the list without a success message"
   expect(h.messages.some((m) => m?.kind === "ok")).toBe(false)
 })
 
+const emptiedResult = () => json({ stock: stock({ quantity: 0 }), event: {} })
+
 test("consume or discard that empties the stock stays and reports success", async () => {
-  const empty = () => json({ stock: stock({ quantity: 0 }), event: {} })
-  const c = harness({ result: empty })
+  const c = harness({ result: emptiedResult })
   await c.actions.consume("5")
   expect(c.events).toEqual([])
   expect(lastMessage(c)).toEqual({ kind: "ok", text: "消費しました" })
 
-  const d = harness({ result: empty })
+  const d = harness({ result: emptiedResult })
   await d.actions.discard("5", "")
   expect(d.events).toEqual(["confirm"])
   expect(lastMessage(d)).toEqual({ kind: "ok", text: "廃棄しました" })
