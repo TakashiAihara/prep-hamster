@@ -181,7 +181,9 @@ test("operations without a JSON request body declare neither 400 nor 415 in /ope
   expect(noJsonBodyOps.length).toBeGreaterThan(10)
 
   const declared = noJsonBodyOps.flatMap(({ name, op }) =>
-    ["400", "415"].filter((status) => status in op.responses).map((status) => `${name} ${status}`),
+    ["400", "413", "415"]
+      .filter((status) => status in op.responses)
+      .map((status) => `${name} ${status}`),
   )
   expect(declared).toEqual([])
 })

@@ -179,6 +179,8 @@ const codeForStatus = (status: number): string => {
       return "FORBIDDEN"
     case 404:
       return "NOT_FOUND"
+    case 413:
+      return "PAYLOAD_TOO_LARGE"
     case 415:
       return "UNSUPPORTED_MEDIA_TYPE"
     case 422:
