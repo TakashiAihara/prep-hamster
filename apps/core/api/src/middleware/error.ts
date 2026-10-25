@@ -1,4 +1,5 @@
 import type { Hook } from "@hono/zod-openapi"
+import { DrizzleQueryError } from "drizzle-orm"
 import type { Context } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
@@ -47,37 +48,110 @@ export const validationHook: Hook<unknown, AppEnv, string, Response | undefined>
   return undefined
 }
 
-export const onError = (err: Error, c: Context): Response => {
-  if (err instanceof HTTPException) {
-    const res = err.getResponse()
-    // HTTPException は独自に Response を持っているが、本 API では JSON 統一フォーマットに乗せる
-    if (res.headers.get("content-type")?.includes("application/json")) {
-      return res
+type ErrorLogger = (...args: unknown[]) => void
+
+const MAX_CAUSE_DEPTH = 5
+const SQLSTATE = /^[0-9A-Z]{5}$/
+
+const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined)
+
+// driver (postgres-js) の PostgresError は drizzle の wrap を通らずに届くことがあるので、形で見分ける。
+const isDriverError = (e: unknown): e is Record<string, unknown> =>
+  typeof e === "object" &&
+  e !== null &&
+  SQLSTATE.test(str((e as Record<string, unknown>)["code"]) ?? "") &&
+  ("severity" in e || "detail" in e || "routine" in e)
+
+const causeChain = (err: unknown): unknown[] => {
+  const links: unknown[] = []
+  const seen = new Set<unknown>()
+  let cur: unknown = err
+  while (cur !== undefined && cur !== null && links.length < MAX_CAUSE_DEPTH && !seen.has(cur)) {
+    links.push(cur)
+    seen.add(cur)
+    cur = typeof cur === "object" ? (cur as { cause?: unknown }).cause : undefined
+  }
+  return links
+}
+
+// 1 つの link から値を含まない項目だけを取り出す。DB 由来の link は message / detail / params を一切出さない。
+const describeLink = (e: unknown): Record<string, unknown> => {
+  if (e instanceof DrizzleQueryError) return { name: "DrizzleQueryError", query: e.query }
+  if (isDriverError(e)) {
+    return {
+      name: str(e["name"]),
+      code: e["code"],
+      severity: str(e["severity"]),
+      constraint: str(e["constraint_name"]),
+      table: str(e["table_name"]),
+      column: str(e["column_name"]),
+      schema: str(e["schema_name"]),
+      routine: str(e["routine"]),
     }
-    const status = err.status
+  }
+  if (e instanceof Error) {
+    return { name: e.name, message: e.message, code: str((e as { code?: unknown }).code) }
+  }
+  return { type: typeof e }
+}
+
+// stack の先頭 (name: message) は message の行数だけ続く。message に bind した値の改行が入っても
+// 行数で数えて落とせば、値の中の "    at " は frame として残らない。
+const framesOf = (err: unknown): string =>
+  err instanceof Error && err.stack
+    ? err.stack.split("\n").slice(err.message.split("\n").length).join("\n")
+    : ""
+
+// DrizzleQueryError は message に bind した値 (params:) を、driver の PostgresError は message と detail に
+// 行の値 (`Key (barcode)=(...)` / `invalid input syntax for type uuid: "..."`) を含む。
+// 生の error は cause を再帰して Bun が全部印字するので渡さず、cause の連鎖も link ごとに絞って出す。
+// ログに出すのは値を含まない項目 (SQL テキスト / SQLSTATE / 制約・表・列・schema・routine の名前 / stack frame) だけ。
+// SQL テキストが値を含まないのは、sql.raw や値を埋め込んだ文字列でクエリを組まない間だけ (今は grep で 0 件)。
+const logUnhandled = (log: ErrorLogger, err: Error): void => {
+  const [top, ...causes] = causeChain(err)
+  const isDb = err instanceof DrizzleQueryError || isDriverError(err)
+  log(isDb ? "[api] unhandled database error:" : "[api] unhandled error:", {
+    ...describeLink(top),
+    frames: framesOf(err),
+    cause: causes.length > 0 ? causes.map(describeLink) : undefined,
+  })
+}
+
+export const createOnError =
+  (log: ErrorLogger) =>
+  (err: Error, c: Context): Response => {
+    if (err instanceof HTTPException) {
+      const res = err.getResponse()
+      // HTTPException は独自に Response を持っているが、本 API では JSON 統一フォーマットに乗せる
+      if (res.headers.get("content-type")?.includes("application/json")) {
+        return res
+      }
+      const status = err.status
+      return c.json<ApiErrorBody>(
+        {
+          error: {
+            code: codeForStatus(status),
+            message: err.message,
+          },
+        },
+        status,
+      )
+    }
+
+    // 想定外エラー: 詳細はサーバ側ログにだけ出し、レスポンスには固定の message のみ返す
+    logUnhandled(log, err)
     return c.json<ApiErrorBody>(
       {
         error: {
-          code: codeForStatus(status),
-          message: err.message,
+          code: "INTERNAL_ERROR",
+          message: "サーバ内部エラーが発生しました",
         },
       },
-      status,
+      500,
     )
   }
 
-  // 想定外エラー: stack はサーバ側ログに出し、レスポンスには message のみ返す
-  console.error("[api] unhandled error:", err)
-  return c.json<ApiErrorBody>(
-    {
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "サーバ内部エラーが発生しました",
-      },
-    },
-    500,
-  )
-}
+export const onError = createOnError(console.error)
 
 const codeForStatus = (status: number): string => {
   switch (status) {
