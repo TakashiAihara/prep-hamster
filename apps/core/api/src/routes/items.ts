@@ -2,7 +2,6 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, asc, eq, isNull } from "drizzle-orm"
 import { categories, items, productMasters, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
-import { validationHook } from "../middleware/error"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
   createItemBodyDtoSchema,
@@ -326,7 +325,7 @@ const deleteItemRoute = createRoute({
   },
 })
 
-export const itemsRouter = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
+export const itemsRouter = new OpenAPIHono<AppEnv>()
   .openapi(listItemsRoute, async (c) => {
     const { groupId, categoryId, barcode } = c.req.valid("query")
     const db = c.get("db")

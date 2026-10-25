@@ -2,7 +2,6 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, count, eq, isNull, ne } from "drizzle-orm"
 import { memberships } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
-import { validationHook } from "../middleware/error"
 import { withGroupAccess } from "../middleware/group-access"
 import {
   errorResponseSchema,
@@ -134,7 +133,7 @@ const deleteMembershipRoute = createRoute({
   },
 })
 
-export const membershipsRouter = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
+export const membershipsRouter = new OpenAPIHono<AppEnv>()
   .openapi(listMembershipsRoute, async (c) => {
     const { groupId } = c.req.valid("param")
     const db = c.get("db")

@@ -2,7 +2,6 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, eq, inArray, isNull } from "drizzle-orm"
 import { groups, memberships } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
-import { validationHook } from "../middleware/error"
 import { withGroupAccess } from "../middleware/group-access"
 import {
   createGroupBodyDtoSchema,
@@ -174,7 +173,7 @@ const patchGroupRoute = createRoute({
   },
 })
 
-export const groupsRouter = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
+export const groupsRouter = new OpenAPIHono<AppEnv>()
   .openapi(listGroupsRoute, async (c) => {
     const db = c.get("db")
     const userId = c.get("userId")
