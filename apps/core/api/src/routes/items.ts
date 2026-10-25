@@ -84,12 +84,16 @@ async function assertCategoryInGroup(
 
 // Postgres unique violation (SQLSTATE 23505) かを判定する。
 // 事前 check と INSERT/UPDATE の間に race が発生した場合の最終防衛で使う。
-function isUniqueViolation(err: unknown): boolean {
+// drizzle-orm 0.44 以降は driver のエラーを DrizzleQueryError で包み、SQLSTATE は cause 側に載る。
+const hasUniqueViolationCode = (e: unknown): boolean =>
+  typeof e === "object" && e !== null && "code" in e && (e as { code: unknown }).code === "23505"
+
+export function isUniqueViolation(err: unknown): boolean {
   return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code: unknown }).code === "23505"
+    hasUniqueViolationCode(err) ||
+    (typeof err === "object" &&
+      err !== null &&
+      hasUniqueViolationCode((err as { cause?: unknown }).cause))
   )
 }
 
