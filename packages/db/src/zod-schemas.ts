@@ -31,11 +31,11 @@ import {
 } from "./schema"
 
 // uuid 列を branded uuid に置換するヘルパ。関数で渡すと drizzle-zod が列属性
-// (optional / nullable) を outer 側で再適用する。`s` は zod 4 の厳密な uuid() を
-// 既に持つので chain せず、zod 3 と同じ緩い guid() から作り直す。
+// (optional / nullable) を outer 側で再適用する。drizzle-zod が渡す schema は zod 4 の
+// 厳密な uuid() を既に持つので使わず、zod 3 と同じ緩い guid() から作り直す。
 const brandUuid =
   <const TName extends string>(_name: TName) =>
-  (_s: z.ZodString) =>
+  () =>
     z.string().guid().brand<TName>()
 
 // users
