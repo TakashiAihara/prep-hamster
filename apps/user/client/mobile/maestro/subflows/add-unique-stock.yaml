@@ -1,0 +1,36 @@
+# 追加タブから在庫を 1 件作り、一覧に戻るところまで進める。
+# env: BARCODE / NAME (scripts/unique-stock.js の出力) / QUANTITY。
+# BARCODE が外部 lookup に当たると商品名を編集できず NAME が付かないので、add-name-input が
+# 見つからずここで失敗する (名前が一意にならない状態で先へ進めない)。
+appId: com.example.prephamster
+---
+- tapOn:
+    text: "追加"
+- waitForAnimationToEnd
+- tapOn:
+    text: "手動で barcode を入力 (debug)"
+- waitForAnimationToEnd
+- tapOn:
+    id: "input"
+- inputText: ${BARCODE}
+- tapOn:
+    text: "送信"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    id: "add-name-input"
+- eraseText
+- inputText: ${NAME}
+- hideKeyboard
+- tapOn:
+    id: "add-quantity-input"
+- eraseText
+- inputText: ${QUANTITY}
+- hideKeyboard
+- tapOn:
+    id: "add-save"
+- waitForAnimationToEnd:
+    timeout: 5000
+- scrollUntilVisible:
+    element:
+      text: ${NAME}

@@ -1,7 +1,16 @@
-import { useFocusEffect } from "expo-router"
+import { router, useFocusEffect } from "expo-router"
 import { useCallback } from "react"
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native"
-import { useStocks, type StockListItem } from "@/use-stocks"
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native"
+import { formatQuantity } from "@/stock-detail"
+import { isExpired, todayUtc, useStocks, type StockListItem } from "@/use-stocks"
 
 // 在庫一覧画面 (/(tabs)/index)。
 // 追加画面 (#77) からの導線で「保存後に一覧に反映」を満たすためのシンプル表示。
@@ -32,7 +41,7 @@ export default function StocksIndex() {
   }
   if (state.rows.length === 0) {
     return (
-      <View style={styles.center}>
+      <View style={styles.center} testID="stock-list-empty">
         <Text style={styles.empty}>在庫はまだありません</Text>
         <Text style={styles.empty}>「追加」タブから登録してください</Text>
       </View>
@@ -41,6 +50,7 @@ export default function StocksIndex() {
 
   return (
     <FlatList
+      testID="stock-list"
       data={state.rows}
       keyExtractor={(row) => row.id}
       contentContainerStyle={styles.listContent}
@@ -53,14 +63,21 @@ export default function StocksIndex() {
 
 function StockRow({ row }: { row: StockListItem }) {
   const expiry = row.useByDate ?? row.bestBeforeDate
+  const expired = isExpired(row, todayUtc())
   return (
-    <View style={styles.row}>
+    <Pressable
+      testID={`stock-row-${row.id}`}
+      accessibilityRole="button"
+      style={styles.row}
+      onPress={() => router.push({ pathname: "/stocks/[id]", params: { id: row.id } })}
+    >
       <Text style={styles.itemName}>{row.itemName}</Text>
       <Text style={styles.meta}>
-        {row.locationName} ・ {row.quantity} {row.unit}
+        {row.locationName} ・ {formatQuantity(row.quantity)} {row.unit}
         {expiry ? ` ・ 期限 ${expiry}` : ""}
+        {expired ? " ・ 期限切れ" : ""}
       </Text>
-    </View>
+    </Pressable>
   )
 }
 
