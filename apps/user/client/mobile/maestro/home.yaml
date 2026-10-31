@@ -8,7 +8,11 @@ appId: com.example.prephamster
     clearState: true
 # サインイン済みで始める (scripts/capture-screens.ts が scripts/dev-session.ts の deep link を渡す)
 - openLink: ${DEV_SESSION_URL}
-- waitForAnimationToEnd
+# タブはサインイン後にだけ出る。session の設定が終わる前に撮らない
+- extendedWaitUntil:
+    visible:
+      text: "追加"
+    timeout: 15000
 - takeScreenshot: home-stocks-list
 - tapOn:
     text: "追加"

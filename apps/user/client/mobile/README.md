@@ -59,8 +59,9 @@ EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase の publishable key>
 emulator -avd <name>  # or Android Studio から起動
 adb devices            # 1 台以上認識していること
 
-# 2. app をビルド & インストール (初回 / app が無い時のみ)
-bun run --filter @prep-hamster/mobile android
+# 2. app をビルド & インストール (初回 / app が無い時のみ)。Expo Go ではなく、
+#    com.example.prephamster として入り prep-hamster:// を受ける debug build を作る
+bun run --filter @prep-hamster/mobile android:build
 
 # 3. flow を実行してキャプチャ取得
 bun run --filter @prep-hamster/mobile capture

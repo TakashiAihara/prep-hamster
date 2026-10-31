@@ -82,11 +82,12 @@ function runFlows(): string[] {
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
 
-  const sessionUrl = devSessionUrl()
   const captured: string[] = []
   for (const flow of flows) {
     const flowPath = join(flowsDir, flow)
     console.log(`[capture-screens] running ${flow}`)
+    // refresh token は 1 回しか使えないので、flow ごとに新しい組を発行する
+    const sessionUrl = devSessionUrl()
     const r = spawnSync("maestro", ["test", "-e", `DEV_SESSION_URL=${sessionUrl}`, flowPath], {
       cwd: outDir,
       stdio: "inherit",

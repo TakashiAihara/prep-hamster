@@ -7,6 +7,7 @@
     "dev": "expo start",
     "start": "expo start",
     "android": "expo start --android",
+    "android:build": "expo run:android",
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsgo --noEmit",
