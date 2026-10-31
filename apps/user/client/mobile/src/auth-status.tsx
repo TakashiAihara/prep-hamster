@@ -17,7 +17,8 @@ export function AuthStatusProvider({ children }: { children: ReactNode }) {
       })
       unsubscribe = () => data.subscription.unsubscribe()
     }
-    void subscribe()
+    // supabase.ts の読み込み (env の検査) が落ちたらセッションは作れないので、サインアウト扱いにする。
+    subscribe().catch(() => setStatus("signed-out"))
     // 起動時の読み出しが遅いと、先に届いた onAuthStateChange (サインイン完了など) を古い結果で
     // 上書きしてしまう。まだ決まっていないときだけ採る。
     void initialAuthStatus().then((s) => setStatus((prev) => (prev === "loading" ? s : prev)))
