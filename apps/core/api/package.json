@@ -31,9 +31,9 @@
     "@prep-hamster/db": "workspace:*",
     "@prep-hamster/jan-api": "workspace:*",
     "@prep-hamster/schema": "workspace:*",
-    "@scalar/hono-api-reference": "^0.12.13",
+    "@scalar/hono-api-reference": "^0.12.14",
     "drizzle-orm": "^0.45.4",
-    "hono": "^4.13.13",
+    "hono": "^4.13.14",
     "zod": "^4.6.7"
   }
 }
