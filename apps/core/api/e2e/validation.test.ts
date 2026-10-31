@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
+import { sql } from "drizzle-orm"
 import { createApp } from "../src/app"
 import { errorResponseSchema } from "../src/routes/schemas"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
@@ -330,4 +331,15 @@ test("body over 1 MiB returns 413 PAYLOAD_TOO_LARGE", async () => {
   })
 
   await expectApiError(res, 413, "PAYLOAD_TOO_LARGE", "リクエストが大きすぎます")
+})
+
+// 新しい表を足した migration が RLS を入れ忘れると、Supabase の Data API から anon で読める表になる。
+test("every table in the public schema has row level security enabled", async () => {
+  const rows = (await testDb.execute(
+    sql`select c.relname as name, c.relrowsecurity as rls from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r', 'p') order by c.relname`,
+  )) as unknown as { name: string; rls: boolean }[]
+
+  // 表を足しても直さなくてよいよう件数は固定しない。0 件 (query の誤り) だけは通さない。
+  expect(rows.length).toBeGreaterThan(0)
+  expect(rows.filter((r) => !r.rls).map((r) => r.name)).toEqual([])
 })
