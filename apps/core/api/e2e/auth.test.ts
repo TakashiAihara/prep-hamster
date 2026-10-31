@@ -153,7 +153,7 @@ test("returns 503 AUTH_UNAVAILABLE when no signing keys can be loaded", async ()
     db: testDb,
     auth: {
       ...e2eAuth,
-      getKeys: async () => {
+      getKeys: async (): Promise<never> => {
         throw new Error("JWKS fetch failed with status 503")
       },
     },
@@ -164,4 +164,15 @@ test("returns 503 AUTH_UNAVAILABLE when no signing keys can be loaded", async ()
 
   expect(res.status).toBe(503)
   expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AUTH_UNAVAILABLE")
+})
+
+test("a token signed with an RS256 key from the JWKS is accepted", async () => {
+  const rsa = await createTestKey("rsa", "RS256")
+  const app = createApp({ db: testDb, auth: { ...e2eAuth, getKeys: async () => [rsa.publicJwk] } })
+  const userId = await seedUser()
+  const jwt = await signAccessToken(rsa.privateJwk, { sub: userId })
+
+  const res = await app.request("/v1/groups", { headers: { authorization: `Bearer ${jwt}` } })
+
+  expect(res.status).toBe(200)
 })

@@ -24,8 +24,10 @@
 ### users の行
 
 - 検証が通ったら `users` に `(id = sub, email = token の email, display_name = email の @ より前)` を `on conflict do nothing` で入れる
-- 同じ email の別 id の行が既にあると入らない。その場合は今までどおり各 route が 404 を返す (seed で作った開発用の行と衝突したときに起きる。本番には無い)
-- token に email が無い (匿名サインインなど) → 401
+- 同じ email の別 id の行が既にあると入らない。その場合は middleware が 409 `EMAIL_IN_USE` を返す (seed で作った開発用の行や、Supabase のアカウントを作り直したときに起きる)。同じ user の初回リクエストが同時に来て、片方が先に行を作った場合は通す
+- token に email が無い (匿名サインインなど) / `sub` が UUID でない → 401
+- 鍵を 1 度も取れていない (Supabase に届かない) → 503 `AUTH_UNAVAILABLE`。取れた後の取り直しに失敗したときは手持ちの鍵で検証を続ける
+- 409 と 503 は全 `/v1` route で起きうるが、OpenAPI にはまだ宣言していない (follow-up)
 
 ## クライアント
 

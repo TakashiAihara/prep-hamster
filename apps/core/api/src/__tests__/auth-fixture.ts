@@ -7,16 +7,22 @@ export const AUDIENCE = "authenticated"
 export const USER_ID = "11111111-1111-4111-8111-111111111111"
 export const USER_EMAIL = "user@example.test"
 
-export const createTestKey = async (kid: string) => {
-  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
-    "sign",
-    "verify",
-  ])
+export const createTestKey = async (kid: string, alg: "ES256" | "RS256" = "ES256") => {
+  const params =
+    alg === "ES256"
+      ? { name: "ECDSA", namedCurve: "P-256" }
+      : {
+          name: "RSASSA-PKCS1-v1_5",
+          modulusLength: 2048,
+          publicExponent: new Uint8Array([1, 0, 1]),
+          hash: "SHA-256",
+        }
+  const pair = (await crypto.subtle.generateKey(params, true, ["sign", "verify"])) as CryptoKeyPair
   const privateKey = await crypto.subtle.exportKey("jwk", pair.privateKey)
   const publicKey = await crypto.subtle.exportKey("jwk", pair.publicKey)
   return {
-    privateJwk: { ...privateKey, kid, alg: "ES256" } as HonoJsonWebKey,
-    publicJwk: { ...publicKey, kid, alg: "ES256" } as HonoJsonWebKey,
+    privateJwk: { ...privateKey, kid, alg } as HonoJsonWebKey,
+    publicJwk: { ...publicKey, kid, alg } as HonoJsonWebKey,
   }
 }
 
