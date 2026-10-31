@@ -78,6 +78,7 @@ export const withUserAuth = (auth: AuthOptions) =>
       // 同じ email の行が別 id で既にある (seed の行や、作り直した Supabase のアカウント)。
       // 黙って進むと後段の外部キーで 500 になるので、ここで 409 にする。
       if (created.length === 0) {
+        // id が一致すれば同じアカウントなので通す (email はプロフィールで、食い違っても本人の判定には使わない)。
         const [raced] = await db.select({ id: users.id }).from(users).where(eq(users.id, sub))
         if (!raced) {
           return c.json(

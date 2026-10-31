@@ -32,7 +32,11 @@ export const createJwksKeys = (
   // 手持ちに無い kid は鍵ローテーション直後の可能性があるので、キャッシュが新しくても取り直す。
   // 取り直しに失敗したら手持ちの鍵で検証を続ける (Supabase が一時的に落ちても、有効な token は通す)。
   return async (kid: string): Promise<HonoJsonWebKey[]> => {
-    if (!cache) return load()
+    if (!cache) {
+      // 1 度も取れていないうちも間隔を守る。届かない相手に毎リクエスト取りに行かない。
+      if (now() - attemptedAt < MIN_REFETCH_MS) throw new Error("JWKS fetch failed recently")
+      return load()
+    }
     const stale = now() - cache.fetchedAt >= TTL_MS || !cache.keys.some((k) => k.kid === kid)
     if (!stale || now() - attemptedAt < MIN_REFETCH_MS) return cache.keys
     const kept = cache.keys

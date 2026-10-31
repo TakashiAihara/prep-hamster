@@ -137,3 +137,26 @@ test("rejects when the first fetch fails and there is no cache", async () => {
   const getKeys = createJwksKeys(JWKS_URL, async () => new Response("down", { status: 503 }))
   await expect(getKeys("k1")).rejects.toThrow("JWKS fetch failed with status 503")
 })
+
+test("while the first fetch keeps failing, it is retried at most once a minute", async () => {
+  const clock = fakeClock()
+  let count = 0
+  const getKeys = createJwksKeys(
+    JWKS_URL,
+    async () => {
+      count++
+      return new Response("down", { status: 503 })
+    },
+    clock.now,
+  )
+
+  await expect(getKeys("k1")).rejects.toThrow("JWKS fetch failed with status 503")
+  await expect(getKeys("k1")).rejects.toThrow("JWKS fetch failed recently")
+  clock.advance(59_999)
+  await expect(getKeys("k1")).rejects.toThrow("JWKS fetch failed recently")
+  expect(count).toBe(1)
+
+  clock.advance(1)
+  await expect(getKeys("k1")).rejects.toThrow("JWKS fetch failed with status 503")
+  expect(count).toBe(2)
+})
