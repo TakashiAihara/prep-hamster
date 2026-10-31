@@ -4,6 +4,7 @@ import { memberships } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { withGroupAccess } from "../middleware/group-access"
 import {
+  authErrorResponses,
   errorResponseSchema,
   jsonBodyErrorResponses,
   membershipDtoSchema,
@@ -49,6 +50,7 @@ const listMembershipsRoute = createRoute({
   middleware: [withGroupAccess({ in: "param", name: "groupId" })] as const,
   request: { params: GroupParamSchema },
   responses: {
+    ...authErrorResponses,
     200: {
       description: "member 一覧",
       content: {
@@ -86,6 +88,7 @@ const patchMembershipRoute = createRoute({
     },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     200: {
       description: "更新成功",
@@ -122,6 +125,7 @@ const deleteMembershipRoute = createRoute({
   middleware: [withGroupAccess({ in: "param", name: "groupId" }, "OWNER")] as const,
   request: { params: GroupAndUserParamSchema },
   responses: {
+    ...authErrorResponses,
     204: { description: "削除成功" },
     401: {
       description: "未認証",

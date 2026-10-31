@@ -4,6 +4,7 @@ import { categories, items, productMasters, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
+  authErrorResponses,
   createItemBodyDtoSchema,
   errorResponseSchema,
   jsonBodyErrorResponses,
@@ -149,6 +150,7 @@ const listItemsRoute = createRoute({
   middleware: [withGroupAccess({ in: "query", name: "groupId" })] as const,
   request: { query: ListQuerySchema },
   responses: {
+    ...authErrorResponses,
     200: {
       description: "一覧",
       content: {
@@ -179,6 +181,7 @@ const createItemRoute = createRoute({
     body: { content: { "application/json": { schema: createItemBodyDtoSchema } } },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     201: {
       description: "作成成功",
@@ -208,6 +211,7 @@ const getItemRoute = createRoute({
   summary: "item 単件取得",
   request: { params: IdParamSchema },
   responses: {
+    ...authErrorResponses,
     200: {
       description: "取得成功",
       content: {
@@ -243,6 +247,7 @@ const patchItemRoute = createRoute({
     body: { content: { "application/json": { schema: updateItemBodyDtoSchema } }, required: true },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     200: {
       description: "更新成功",
@@ -278,6 +283,7 @@ const itemByBarcodeRoute = createRoute({
     body: { content: { "application/json": { schema: itemByBarcodeBodyDtoSchema } } },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     200: {
       description: "既存 item を返却",
@@ -313,6 +319,7 @@ const deleteItemRoute = createRoute({
   summary: "item を soft delete (EDITOR 以上)",
   request: { params: IdParamSchema },
   responses: {
+    ...authErrorResponses,
     204: { description: "削除成功" },
     401: {
       description: "未認証",

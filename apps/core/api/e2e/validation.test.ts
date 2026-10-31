@@ -218,6 +218,38 @@ test("operations without a JSON request body declare neither 400 nor 415 in /ope
   expect(declared).toEqual([])
 })
 
+test("every /v1 operation declares 409 and 503 as ApiError in /openapi.json", async () => {
+  const app = createApp({ db: testDb, auth: e2eAuth })
+
+  type Operation = {
+    responses: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>
+  }
+  const spec = (await (await app.request("/openapi.json")).json()) as {
+    paths: Record<string, Record<string, Operation>>
+  }
+
+  const v1Ops = Object.entries(spec.paths)
+    .filter(([path]) => path.startsWith("/v1/"))
+    .flatMap(([path, methods]) =>
+      Object.entries(methods).map(([method, op]) => ({
+        name: `${method.toUpperCase()} ${path}`,
+        op,
+      })),
+    )
+  expect(v1Ops.length).toBe(35)
+
+  const missing = v1Ops.flatMap(({ name, op }) =>
+    ["409", "503"]
+      .filter(
+        (status) =>
+          op.responses[status]?.content?.["application/json"]?.schema?.$ref !==
+          "#/components/schemas/ApiError",
+      )
+      .map((status) => `${name} ${status}`),
+  )
+  expect(missing).toEqual([])
+})
+
 async function expectApiError(res: Response, status: number, code: string, message: string) {
   expect(res.status).toBe(status)
   const body = await res.json()
