@@ -23,6 +23,11 @@ updates:
       - dependency-name: "react-native"
       - dependency-name: "react-native-*"
       - dependency-name: "@react-native-community/*"
+      # 型検査は tsgo (@typescript/native-preview) で行い、`typescript` を読むのは Expo の CLI
+      # (tsconfig の評価) だけ。TypeScript 7 は Expo の CLI が使う JS API を持たず、mobile の
+      # bundle が作れなくなる (#25 で上げて壊れた)。Expo が 7 に対応するまで major は上げない。
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       bun-minor-and-patch:
         applies-to: version-updates
