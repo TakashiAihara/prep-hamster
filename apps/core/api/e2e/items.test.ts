@@ -196,6 +196,53 @@ test("PATCH /v1/items/:id with empty body returns 422 and updates nothing", asyn
   expect(row?.name).toBe("Apple")
 })
 
+test("PATCH /v1/items/:id with memo null clears the memo", async () => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const itemId = await seedItem(groupId, "Apple")
+
+  const app = createApp({ db: testDb })
+  const headers = { "content-type": "application/json", "x-user-id": userId }
+  const setRes = await app.request(`/v1/items/${itemId}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ memo: "冷蔵庫" }),
+  })
+  expect(setRes.status).toBe(200)
+
+  const clearRes = await app.request(`/v1/items/${itemId}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ memo: null }),
+  })
+  expect(clearRes.status).toBe(200)
+  const body = (await clearRes.json()) as { item: { memo: string | null } }
+  expect(body.item.memo).toBeNull()
+
+  const [row] = await testDb.select().from(items).where(eq(items.id, itemId))
+  expect(row?.memo).toBeNull()
+})
+
+test("PATCH /v1/items/:id without content-type and body returns 422 and updates nothing", async () => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const itemId = await seedItem(groupId, "Apple")
+
+  const app = createApp({ db: testDb })
+  const res = await app.request(`/v1/items/${itemId}`, {
+    method: "PATCH",
+    headers: { "x-user-id": userId },
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string; message: string } }
+  expect(body.error.code).toBe("VALIDATION_ERROR")
+  expect(body.error.message).toBe("更新する項目がありません")
+
+  const [row] = await testDb.select().from(items).where(eq(items.id, itemId))
+  expect(row?.name).toBe("Apple")
+})
+
 test("DELETE /v1/items/:id without active stock returns 204 + soft-delete", async () => {
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Home")

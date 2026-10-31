@@ -80,7 +80,10 @@ const patchMembershipRoute = createRoute({
   middleware: [withGroupAccess({ in: "param", name: "groupId" }, "OWNER")] as const,
   request: {
     params: GroupAndUserParamSchema,
-    body: { content: { "application/json": { schema: updateMembershipRoleBodyDtoSchema } } },
+    body: {
+      content: { "application/json": { schema: updateMembershipRoleBodyDtoSchema } },
+      required: true,
+    },
   },
   responses: {
     ...jsonBodyErrorResponses,

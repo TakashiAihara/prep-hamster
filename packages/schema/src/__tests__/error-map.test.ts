@@ -61,6 +61,28 @@ test("invalid_enum_value → 候補リストを表示", () => {
   }
 })
 
+test("invalid_value (enum の欠落) → 必須項目です", () => {
+  const r = z
+    .object({ role: z.enum(["OWNER", "EDITOR", "VIEWER"]) })
+    .safeParse({}, { error: jaErrorMap })
+  expect(r.success).toBe(false)
+  if (!r.success) {
+    expect(r.error.issues[0]?.message).toBe("必須項目です")
+  }
+})
+
+test("invalid_value (enum の不正値) → 候補リストを表示", () => {
+  const r = z
+    .object({ role: z.enum(["OWNER", "EDITOR", "VIEWER"]) })
+    .safeParse({ role: "ADMIN" }, { error: jaErrorMap })
+  expect(r.success).toBe(false)
+  if (!r.success) {
+    expect(r.error.issues[0]?.message).toBe(
+      "次のいずれかを指定してください: OWNER / EDITOR / VIEWER",
+    )
+  }
+})
+
 test("invalid_type の受信型は null と配列を区別する", () => {
   const s = z.object({ name: z.string() })
   const n = s.safeParse({ name: null }, { error: jaErrorMap })

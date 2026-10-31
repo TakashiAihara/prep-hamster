@@ -76,7 +76,7 @@ test("PATCH /v1/groups/:groupId/memberships/:userId with empty body returns 422 
   expect(res.status).toBe(422)
   const body = (await res.json()) as { error: { code: string; message: string } }
   expect(body.error.code).toBe("VALIDATION_ERROR")
-  expect(body.error.message).toBe("更新する項目がありません")
+  expect(body.error.message).toBe("必須項目です")
 
   const [row] = await testDb
     .select()

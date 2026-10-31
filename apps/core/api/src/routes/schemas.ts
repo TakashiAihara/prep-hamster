@@ -27,7 +27,8 @@ export const jsonBodyErrorResponses = {
   },
   415: {
     // JSON 系は application/json と application/*+json を受け付ける (`; charset=utf-8` 等の
-    // parameter 付きも可)。content-type なし + 空ボディは 415 にならず {} として検証される。
+    // parameter 付きも可)。content-type なし + 空ボディは 415 にならず {} として検証される
+    // (body を `required: true` にした route だけ。required で無いと検証自体が飛ばされる)。
     description:
       "JSON 系 content-type (application/json / application/*+json) 以外、または content-type なしでボディあり",
     content: { "application/json": { schema: errorResponseSchema } },
@@ -36,11 +37,10 @@ export const jsonBodyErrorResponses = {
 
 export const roleSchema = z.enum(["OWNER", "EDITOR", "VIEWER"]).openapi("Role")
 
-// PATCH body の共通制約: 更新対象のフィールドが 1 つも無い ({} や、content-type なしの
-// 空ボディが {} として検証される場合) は 422 VALIDATION_ERROR「更新する項目がありません」。
-// 全 PATCH body schema に共通で付け、validationHook から 422 を返す。
-// 全フィールド optional (指定するなら型制約は効く) にした上で「1 つ以上」をここで担保する
-// (#139)。undefined のみのキー (JSON では表現できない) も「無い」扱いにする。
+// 全フィールド optional な PATCH body で「更新対象が 1 つ以上」を担保する。{} は 422
+// VALIDATION_ERROR「更新する項目がありません」になる。
+// 必須フィールドを持つ body (group name / membership role) には付けない: 必須検査が先に効く。
+// undefined のみのキー (JSON では表現できない) も「無い」扱いにする。
 // message は issue を 1 つだけ持たせ、validationErrorResponse の error.message にそのまま出る。
 export const requireUpdatableField = <T extends z.ZodType<Record<string, unknown>>>(schema: T) =>
   schema.refine((value) => Object.values(value).some((v) => v !== undefined), {
@@ -98,11 +98,11 @@ export const createInvitationBodyDtoSchema = z
   })
   .openapi("CreateInvitationBody")
 
-export const updateMembershipRoleBodyDtoSchema = requireUpdatableField(
-  z.object({
-    role: roleSchema.optional(),
-  }),
-).openapi("UpdateMembershipRoleBody")
+export const updateMembershipRoleBodyDtoSchema = z
+  .object({
+    role: roleSchema,
+  })
+  .openapi("UpdateMembershipRoleBody")
 
 export const createGroupBodyDtoSchema = z
   .object({
@@ -110,11 +110,11 @@ export const createGroupBodyDtoSchema = z
   })
   .openapi("CreateGroupBody")
 
-export const updateGroupBodyDtoSchema = requireUpdatableField(
-  z.object({
-    name: z.string().min(1).max(100).optional(),
-  }),
-).openapi("UpdateGroupBody")
+export const updateGroupBodyDtoSchema = z
+  .object({
+    name: z.string().min(1).max(100),
+  })
+  .openapi("UpdateGroupBody")
 
 export const locationDtoSchema = z
   .object({

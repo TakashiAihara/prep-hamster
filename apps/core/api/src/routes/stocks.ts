@@ -142,7 +142,7 @@ const patchStockRoute = createRoute({
   summary: "在庫の属性を部分更新 (EDITOR 以上、quantity は対象外)",
   request: {
     params: IdParamSchema,
-    body: { content: { "application/json": { schema: updateStockBodyDtoSchema } } },
+    body: { content: { "application/json": { schema: updateStockBodyDtoSchema } }, required: true },
   },
   responses: {
     ...jsonBodyErrorResponses,

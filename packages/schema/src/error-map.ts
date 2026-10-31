@@ -67,6 +67,10 @@ export const jaErrorMap: z.core.$ZodErrorMap = (issue) => {
       break
 
     case "invalid_value":
+      // enum の欠落 (キーが無い) は候補リストではなく「必須」として返す。
+      if (issue.input === undefined) {
+        return { message: "必須項目です" }
+      }
       return {
         message: `次のいずれかを指定してください: ${issue.values.join(" / ")}`,
       }
