@@ -105,7 +105,8 @@ export async function runExpiryNotify(
   }
   if (dueByUser.size === 0) return nothing
 
-  // 同じ JST 暦日に通知済みのユーザーは飛ばす (ジョブの再実行・二重起動で二重送信しない)。
+  // 同じ JST 暦日に通知済みのユーザーは飛ばす (ジョブを順に再実行しても二重送信しない)。
+  // 判定と記録は送信の前後に分かれているので、同時に 2 本走ると二重に送りうる (日次 1 本の運用を前提にする)。
   const alreadyNotified = await opts.db
     .select({ userId: notificationSettings.userId })
     .from(notificationSettings)
