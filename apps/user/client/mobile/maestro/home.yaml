@@ -6,6 +6,8 @@ appId: com.example.prephamster
 ---
 - launchApp:
     clearState: true
+# サインイン済みで始める (scripts/capture-screens.ts が scripts/dev-session.ts の deep link を渡す)
+- openLink: ${DEV_SESSION_URL}
 - waitForAnimationToEnd
 - takeScreenshot: home-stocks-list
 - tapOn:

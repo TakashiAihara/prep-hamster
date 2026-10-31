@@ -74,4 +74,10 @@ curl -Ls "https://get.maestro.mobile.dev" | bash
 ```
 
 flow 定義は `apps/user/client/mobile/maestro/*.yaml`。新画面追加時はここに flow を増やす。
+
+flow はサインイン済みで始める。Google の画面は Maestro では通れないので、`capture` は先に `scripts/dev-session.ts` で
+テスト用ユーザー (`maestro@example.test`) の session を Supabase の Admin API で発行し、その deep link
+(`prep-hamster://auth/dev-session?...`) を各 flow の先頭で開く。受け口は dev build (`__DEV__`) でだけ token を使う。
+`capture` を流すシェルに `SUPABASE_URL` と `SUPABASE_SECRET_KEY` (Supabase の secret key。アプリには入れない) を渡す。
+新しい flow も `launchApp` の直後に `- openLink: ${DEV_SESSION_URL}` を置く。
 iOS / 実機・本物の barcode 読取は別 Issue で扱う (本仕組みは Android emulator 前提)。
