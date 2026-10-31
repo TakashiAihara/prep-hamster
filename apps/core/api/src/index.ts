@@ -21,7 +21,7 @@ const app = createApp({
     getKeys: createJwksKeys(`${supabaseUrl}/auth/v1/.well-known/jwks.json`),
     // 手元の supabase start は iss を外向きの URL (127.0.0.1) で発行する。API がコンテナから
     // 別の名前で Supabase に届く構成では、iss だけを上書きする。
-    issuer: process.env["SUPABASE_JWT_ISSUER"] ?? `${supabaseUrl}/auth/v1`,
+    issuer: process.env["SUPABASE_JWT_ISSUER"]?.replace(/\/+$/, "") ?? `${supabaseUrl}/auth/v1`,
     audience: "authenticated",
   },
 })

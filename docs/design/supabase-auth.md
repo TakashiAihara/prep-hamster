@@ -13,13 +13,14 @@
 
 - `Authorization` が `Bearer <token>` でない / 署名・`exp`・`iss`・`aud` のどれかが合わない → 401 `UNAUTHORIZED`
 - 受ける alg は `ES256` と `RS256` (Supabase の非対称鍵)。`HS256` (旧来の共有鍵) は受けない
-- `iss` は `<SUPABASE_URL>/auth/v1`、`aud` は `authenticated`
+- `iss` は env `SUPABASE_JWT_ISSUER`、無ければ `<SUPABASE_URL>/auth/v1`。`aud` は `authenticated`
 - 検証は hono の `verifyWithJwks` (追加の依存なし)。JWKS は `<SUPABASE_URL>/auth/v1/.well-known/jwks.json` から取り、10 分持つ。手持ちの鍵に無い `kid` が来たら取り直す (鍵の入れ替えに追従する)。ただし直前の取得から 1 分以内なら取り直さない (でたらめな `kid` で Supabase への取得を増やされないため)
 
 ### 設定
 
 - `createApp` は `auth` を必須で受ける: 公開鍵の取得関数・`issuer`・`audience`
 - 起動口 (`src/index.ts`) は env `SUPABASE_URL` から組み立てる。無ければ起動しない
+- `SUPABASE_JWT_ISSUER` は、API が token の発行元と別の名前で Supabase に届く構成のためのもの。compose は API コンテナから `host.docker.internal:54321` で手元の `supabase start` に届き、token の `iss` は `http://127.0.0.1:54321/auth/v1` (supabase/config.toml の `auth.jwt_issuer` の既定) なので、compose の既定はこの値にしている
 
 ### users の行
 
