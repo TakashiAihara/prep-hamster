@@ -103,3 +103,37 @@ test("rejects when the JWKS response has no keys array", async () => {
 
   await expect(getKeys("k1")).rejects.toThrow("JWKS response has no keys array")
 })
+
+test("keeps serving the cached keys when a refresh fails, and retries after one minute", async () => {
+  const clock = fakeClock()
+  let count = 0
+  let up = true
+  const getKeys = createJwksKeys(
+    JWKS_URL,
+    async () => {
+      count++
+      return up ? jwksResponse(["k1"]) : new Response("down", { status: 503 })
+    },
+    clock.now,
+  )
+
+  await getKeys("k1")
+  up = false
+  clock.advance(600_000)
+  const stale = await getKeys("k1")
+  clock.advance(30_000)
+  await getKeys("k1")
+
+  expect(stale.map((k) => k.kid)).toEqual(["k1"])
+  expect(count).toBe(2)
+
+  clock.advance(30_000)
+  up = true
+  await getKeys("k1")
+  expect(count).toBe(3)
+})
+
+test("rejects when the first fetch fails and there is no cache", async () => {
+  const getKeys = createJwksKeys(JWKS_URL, async () => new Response("down", { status: 503 }))
+  await expect(getKeys("k1")).rejects.toThrow("JWKS fetch failed with status 503")
+})

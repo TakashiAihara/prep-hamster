@@ -3,9 +3,9 @@ import type { Db } from "@prep-hamster/db"
 import { createApp } from "../app"
 import { createTestKey, signAccessToken, testAuth } from "./auth-fixture"
 
-// 認証 middleware が users 行を upsert するため insert チェーンだけ持たせる
+// 認証 middleware は users 行の有無を select するので、行が既にある user として返す
 const mockDb = {
-  insert: () => ({ values: () => ({ onConflictDoNothing: async () => undefined }) }),
+  select: () => ({ from: () => ({ where: async () => [{ id: "existing" }] }) }),
 } as unknown as Db
 
 const { privateJwk, publicJwk } = await createTestKey("smoke-key")

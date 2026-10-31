@@ -125,3 +125,43 @@ test("the first request of an unknown user creates the users row from the token"
   expect(row?.email).toBe("first.visit@example.test")
   expect(row?.displayName).toBe("first.visit")
 })
+
+test("a non-UUID sub returns 401", async () => {
+  const jwt = await signAccessToken(e2eKey.privateJwk, { sub: "not-a-uuid" })
+  expect((await get(`Bearer ${jwt}`)).status).toBe(401)
+})
+
+test("a new account whose email is taken by another user returns 409 EMAIL_IN_USE", async () => {
+  const takenId = await seedUser()
+  const [taken] = await testDb.select().from(users).where(eq(users.id, takenId))
+  const newcomer = crypto.randomUUID()
+  const jwt = await signAccessToken(e2eKey.privateJwk, { sub: newcomer, email: taken?.email })
+
+  const res = await createApp({ db: testDb, auth: e2eAuth }).request("/v1/groups", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({ name: "g" }),
+  })
+
+  expect(res.status).toBe(409)
+  expect(((await res.json()) as { error: { code: string } }).error.code).toBe("EMAIL_IN_USE")
+  expect(await testDb.select().from(users).where(eq(users.id, newcomer))).toHaveLength(0)
+})
+
+test("returns 503 AUTH_UNAVAILABLE when no signing keys can be loaded", async () => {
+  const app = createApp({
+    db: testDb,
+    auth: {
+      ...e2eAuth,
+      getKeys: async () => {
+        throw new Error("JWKS fetch failed with status 503")
+      },
+    },
+  })
+  const res = await app.request("/v1/groups", {
+    headers: { authorization: await bearer(crypto.randomUUID()) },
+  })
+
+  expect(res.status).toBe(503)
+  expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AUTH_UNAVAILABLE")
+})

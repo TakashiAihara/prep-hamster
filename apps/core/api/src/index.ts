@@ -8,7 +8,8 @@ installJaErrorMap()
 const DEFAULT_DB_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
 const db = createDb(process.env["DATABASE_URL"] ?? DEFAULT_DB_URL)
-const supabaseUrl = process.env["SUPABASE_URL"]
+// 末尾の / があると iss が `//auth/v1` になって全 token が 401 になるので落とす。
+const supabaseUrl = process.env["SUPABASE_URL"]?.replace(/\/+$/, "")
 if (!supabaseUrl) {
   console.error("[api] SUPABASE_URL is required")
   process.exit(1)

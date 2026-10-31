@@ -1,4 +1,5 @@
 import { users } from "@prep-hamster/db"
+import { eq } from "drizzle-orm"
 import { createMiddleware } from "hono/factory"
 import { HTTPException } from "hono/http-exception"
 import { Jwt } from "hono/utils/jwt"
@@ -12,6 +13,8 @@ export type AuthOptions = {
 }
 
 const BEARER_PREFIX = "Bearer "
+// users.id は uuid 型。形の違う sub を通すと insert が DB エラー (500) になる。
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const unauthorized = () => new HTTPException(401, { message: "valid access token required" })
 
@@ -35,7 +38,16 @@ export const withUserAuth = (auth: AuthOptions) =>
       throw unauthorized()
     }
 
-    const keys = await auth.getKeys(kid)
+    // 鍵が 1 度も取れていない (Supabase に届かない) ときだけここに来る。token の誤りではないので 503。
+    let keys: HonoJsonWebKey[]
+    try {
+      keys = await auth.getKeys(kid)
+    } catch {
+      return c.json(
+        { error: { code: "AUTH_UNAVAILABLE", message: "認証サーバに接続できません" } },
+        503,
+      )
+    }
 
     let payload: Awaited<ReturnType<typeof Jwt.verifyWithJwks>>
     try {
@@ -50,18 +62,37 @@ export const withUserAuth = (auth: AuthOptions) =>
 
     const sub = payload["sub"]
     const email = payload["email"]
-    if (typeof sub !== "string" || typeof email !== "string" || email === "") {
+    if (typeof sub !== "string" || !UUID.test(sub) || typeof email !== "string" || email === "") {
       throw unauthorized()
     }
 
-    // アプリ側の users 行は初回リクエストで作る。既に同じ email が別 id で居る場合はスキップし、
-    // そのユーザーの一覧や権限は従来どおり 404 になる (本番では起きない dev seed 行だけが対象)。
-    await c
-      .get("db")
-      .insert(users)
-      .values({ id: sub, email, displayName: email.replace(/@.*$/s, "") })
-      .onConflictDoNothing()
+    // アプリ側の users 行は初回リクエストで作る。行がある user は select 1 回で済ませる。
+    const db = c.get("db")
+    const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.id, sub))
+    if (!existing) {
+      const created = await db
+        .insert(users)
+        .values({ id: sub, email, displayName: email.replace(/@.*$/s, "") })
+        .onConflictDoNothing()
+        .returning({ id: users.id })
+      // 同じ email の行が別 id で既にある (seed の行や、作り直した Supabase のアカウント)。
+      // 黙って進むと後段の外部キーで 500 になるので、ここで 409 にする。
+      if (created.length === 0) {
+        const [raced] = await db.select({ id: users.id }).from(users).where(eq(users.id, sub))
+        if (!raced) {
+          return c.json(
+            {
+              error: {
+                code: "EMAIL_IN_USE",
+                message: "このメールアドレスは別のアカウントで使われています",
+              },
+            },
+            409,
+          )
+        }
+      }
+    }
 
     c.set("userId", sub)
-    await next()
+    return next()
   })

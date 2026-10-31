@@ -2,7 +2,7 @@ import type { HonoJsonWebKey } from "hono/utils/jwt/jws"
 
 // NOTE: Supabase は署名鍵をローテーションするため、キャッシュは 10 分で捨てる。
 const TTL_MS = 10 * 60 * 1000
-// 未知の kid による取り直しの間隔。でたらめな kid を送り続けられても、取りに行くのはこの間隔に 1 回まで。
+// 取り直しの間隔。でたらめな kid を送り続けられても、取得に失敗し続けても、取りに行くのはこの間隔に 1 回まで。
 const MIN_REFETCH_MS = 60 * 1000
 
 export type FetchJwks = (url: string) => Promise<Response>
@@ -13,8 +13,10 @@ export const createJwksKeys = (
   now: () => number = Date.now,
 ) => {
   let cache: { keys: HonoJsonWebKey[]; fetchedAt: number } | undefined
+  let attemptedAt = Number.NEGATIVE_INFINITY
 
   const load = async (): Promise<HonoJsonWebKey[]> => {
+    attemptedAt = now()
     const res = await fetchJwks(jwksUrl)
     if (!res.ok) {
       throw new Error(`JWKS fetch failed with status ${res.status}`)
@@ -28,11 +30,12 @@ export const createJwksKeys = (
   }
 
   // 手持ちに無い kid は鍵ローテーション直後の可能性があるので、キャッシュが新しくても取り直す。
+  // 取り直しに失敗したら手持ちの鍵で検証を続ける (Supabase が一時的に落ちても、有効な token は通す)。
   return async (kid: string): Promise<HonoJsonWebKey[]> => {
     if (!cache) return load()
-    const age = now() - cache.fetchedAt
-    if (age >= TTL_MS) return load()
-    if (cache.keys.some((k) => k.kid === kid) || age < MIN_REFETCH_MS) return cache.keys
-    return load()
+    const stale = now() - cache.fetchedAt >= TTL_MS || !cache.keys.some((k) => k.kid === kid)
+    if (!stale || now() - attemptedAt < MIN_REFETCH_MS) return cache.keys
+    const kept = cache.keys
+    return load().catch(() => kept)
   }
 }
