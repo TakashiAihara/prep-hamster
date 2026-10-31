@@ -34,10 +34,47 @@
 
 - `@prep-hamster/api-client` の `userId` を `accessToken` に置き換え、`Authorization` ヘッダで送る
 - CLI は env `PREP_HAMSTER_ACCESS_TOKEN` を読む (`PREP_HAMSTER_USER_ID` の置き換え)。login コマンドは別 PR
-- mobile は `src/auth.ts` の `getCurrentUserId()` を `getAccessToken()` に置き換え、当面は env `EXPO_PUBLIC_DEV_ACCESS_TOKEN` を返す。サインイン画面 (M-01) を入れる PR でこの 1 ファイルを Supabase のセッションに差し替える
+- mobile は `src/auth.ts` の `getAccessToken()` が Supabase のセッションの token を返す (下の「mobile のサインイン」)
 
 ## テスト
 
 - E2E は ES256 の鍵の組をテストの中で作り、公開鍵を `createApp` の `auth` に渡す。token は helper で発行する
 - 受け入れ: token なし 401 / 署名の違う token 401 / 期限切れ 401 / `iss` 違い 401 / `aud` 違い 401 / 正しい token 200 / 初回で users の行ができる / 他人のグループ 403 (既存のまま)
 - 既存の E2E の `x-user-id` は全部 token の helper に置き換える
+
+## mobile のサインイン (M-01)
+
+v1.1.0 は Android と Google だけ (判断キュー Q-01)。Apple は #149。
+
+### To-Be
+
+- 起動時にセッションが無ければ M-01 (サインイン) を出す。「Google でサインイン」の 1 ボタンだけ
+- ボタンでブラウザ (Custom Tabs) が開き、Google で選んだアカウントでそのままアプリに戻る。戻ったら一覧のタブを出す
+- サインアウトは設定の 1 ボタン。mobile が push token を登録するようになったら (#128 の mobile 側)、サインアウトでは自分の push token を `DELETE /v1/push-tokens` で消してからセッションを消す (#133 の契約)。今はまだ登録していないので、セッションを消すだけ
+
+### 流れ
+
+- `@supabase/supabase-js` の `signInWithOAuth({ provider: "google", options: { redirectTo, skipBrowserRedirect: true } })` で URL を得て、`expo-web-browser` の `openAuthSessionAsync(url, redirectTo)` で開く
+- `flowType: "pkce"` にし、戻ってきた URL の `code` を `exchangeCodeForSession(code)` でセッションにする。URL に token を載せない (Redirect URLs の `exp://**` は Expo Go を指すので、届いた code は verifier を持つアプリでしか使えない形にしておく)
+- `redirectTo` は `expo-linking` の `createURL("auth/callback")`。dev build と本番は `prep-hamster://auth/callback`、Expo Go は `exp://…/--/auth/callback` になる
+- Supabase の Redirect URLs (設定済み): `prep-hamster://**`, `exp://**`
+
+### セッションの保存
+
+- Supabase の Expo の手順にある `LargeSecureStore` の形: セッションは AES で暗号化して AsyncStorage に置き、鍵だけを `expo-secure-store` に置く (secure-store は 1 値 2048 byte までで、セッションが入らない)
+- `autoRefreshToken: true` / `persistSession: true` / `detectSessionInUrl: false`。`AppState` が active になったら `startAutoRefresh()`、裏に回ったら `stopAutoRefresh()`
+
+### API への token
+
+- `src/auth.ts` の `getAccessToken()` を、Supabase の現在のセッションの `access_token` を返す形に差し替える (非同期になるので、`getApiClient()` は呼ぶたびに token を取る形にする)
+- `EXPO_PUBLIC_DEV_ACCESS_TOKEN` は消す
+- 追加の env: `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (publishable key は端末に配る前提の公開鍵)
+
+### 追加する依存
+
+- `@supabase/supabase-js`、`expo-web-browser`、`expo-secure-store`、`@react-native-async-storage/async-storage`、`aes-js`、`react-native-get-random-values` (Expo の公式手順と同じ組)。Expo の管理下のものは `npx expo install` で SDK 52 に合う版を入れる
+
+### 確かめ方
+
+- d1 には Android の SDK も端末も無いので、サインインの往復は手元の Android 端末 (Expo Go) で確かめる。API は d1 で `SUPABASE_URL` を Supabase の project に向けて LAN に出す
+- 自動テストは、`getAccessToken()` がセッションの token を返すこと / 戻り URL の `code` の取り出し (code が無い・error 付きを含む) / セッションが無いとき M-01 に回す判定、を unit で押さえる

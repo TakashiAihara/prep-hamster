@@ -25,7 +25,8 @@
         {
           "cameraPermission": "JAN コードを読み取って商品を登録するためにカメラを使用します"
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true

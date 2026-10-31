@@ -6,7 +6,7 @@
 
 最小スコープでカメラ読取 → 在庫追加までを成立させる MVP。
 
-- 認証は env の access token を `Authorization: Bearer` で送る暫定 (サインイン画面は v1.1.0 の別 PR)
+- 認証は Supabase の Google サインイン (M-01)。API には現在のセッションの access token を `Authorization: Bearer` で送る
 - 画面: 在庫一覧 placeholder + 追加導線 (#77 で本実装)
 - API は `@prep-hamster/api-client` の `hc<AppType>` を経由
 
@@ -32,14 +32,16 @@ iOS Simulator なら `i`、Android Emulator なら `a` を押す。
 
 ```env
 EXPO_PUBLIC_API_BASE_URL=http://192.168.x.y:3000
-EXPO_PUBLIC_DEV_ACCESS_TOKEN=<Supabase の access token>
+EXPO_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase の publishable key>
 ```
 
 - `EXPO_PUBLIC_API_BASE_URL`: Expo Go / 実機からは LAN IP 必須（localhost は届かない）
   - iOS Simulator: `http://localhost:3000`
   - Android Emulator: `http://10.0.2.2:3000`
   - 実機 (Expo Go): 開発機の LAN IP
-- `EXPO_PUBLIC_DEV_ACCESS_TOKEN`: サインイン画面 (M-01) が入るまでの暫定。Supabase でサインインして得た access token を入れる。未設定だと API は 401 を返す
+- `EXPO_PUBLIC_SUPABASE_URL`: Supabase project の URL。未設定だとアプリは起動時に例外を投げる
+- `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: Supabase の publishable key (端末に配る前提の公開鍵)。未設定だとアプリは起動時に例外を投げる
 
 ## v1.0.0 で動作確認するもの
 
@@ -73,9 +75,3 @@ curl -Ls "https://get.maestro.mobile.dev" | bash
 
 flow 定義は `apps/user/client/mobile/maestro/*.yaml`。新画面追加時はここに flow を増やす。
 iOS / 実機・本物の barcode 読取は別 Issue で扱う (本仕組みは Android emulator 前提)。
-
-## v1.1.0 以降の差し替えポイント
-
-- `src/auth.ts` の `getAccessToken()` を Supabase のセッションに置換
-- 残りの mobile コードは `getAccessToken()` 経由でのみ token を参照しているので、
-  この 1 ファイルの差し替えで Supabase Auth 移行が完了する想定
