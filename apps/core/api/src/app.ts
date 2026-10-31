@@ -12,6 +12,7 @@ import { invitationsRouter } from "./routes/invitations"
 import { itemsRouter } from "./routes/items"
 import { locationsRouter } from "./routes/locations"
 import { membershipsRouter } from "./routes/memberships"
+import { pushTokensRouter } from "./routes/push-tokens"
 import { stocksRouter } from "./routes/stocks"
 
 export type AppEnv = {
@@ -64,6 +65,7 @@ export function createApp(opts: CreateAppOptions) {
       .route("/v1/categories", categoriesRouter)
       .route("/v1/items", itemsRouter)
       .route("/v1/stocks", stocksRouter)
+      .route("/v1/push-tokens", pushTokensRouter)
       // memberships / invitations は full-path (`/v1/groups/{groupId}/...` and
       // `/v1/invitations/{token}/accept`) で書いているため `/v1` 直下にまとめてマウント。
       .route("/v1", membershipsRouter)

@@ -21,6 +21,7 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
+    "job:expiry-notify": "bun run src/jobs/expiry-notify.ts",
     "typecheck": "tsgo --noEmit",
     "test": "bun test src",
     "test:e2e": "bun test e2e"

@@ -288,8 +288,26 @@ export const notificationSettings = pgTable("notification_settings", {
   shortageNotifyEnabled: boolean("shortage_notify_enabled").notNull().default(true),
   invitationNotifyEnabled: boolean("invitation_notify_enabled").notNull().default(true),
   pushToken: text("push_token"),
+  // 期限通知を JST の暦日 1 回に抑えるための、直近に通知した日付
+  expiryNotifiedOn: date("expiry_notified_on"),
   ...timestamps,
 })
+
+// 端末ごとの Expo push token。1 ユーザーが複数端末を持てるよう
+// notification_settings.push_token (1 本のみ) とは別に持つ。
+export const pushTokens = pgTable(
+  "push_tokens",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    token: text("token").notNull().unique(),
+    createdAt: tsCol("created_at").notNull().defaultNow(),
+    updatedAt: tsCol("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("push_tokens_user_idx").on(t.userId)],
+)
 
 // ============================================================================
 // Relations
@@ -393,6 +411,10 @@ export const shoppingListItemsRelations = relations(shoppingListItems, ({ one })
   group: one(groups, { fields: [shoppingListItems.groupId], references: [groups.id] }),
   item: one(items, { fields: [shoppingListItems.itemId], references: [items.id] }),
   addedByUser: one(users, { fields: [shoppingListItems.addedBy], references: [users.id] }),
+}))
+
+export const pushTokensRelations = relations(pushTokens, ({ one }) => ({
+  user: one(users, { fields: [pushTokens.userId], references: [users.id] }),
 }))
 
 export const notificationSettingsRelations = relations(notificationSettings, ({ one }) => ({

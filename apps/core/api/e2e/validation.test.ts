@@ -171,7 +171,7 @@ test("every operation with a JSON request body declares 400, 413 and 415 as ApiE
       .filter(([, op]) => op.requestBody?.content?.["application/json"])
       .map(([method, op]) => ({ name: `${method.toUpperCase()} ${path}`, op })),
   )
-  expect(jsonBodyOps.length).toBe(16)
+  expect(jsonBodyOps.length).toBe(18)
 
   const missing = jsonBodyOps.flatMap(({ name, op }) =>
     ["400", "413", "415"]
