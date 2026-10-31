@@ -4,12 +4,18 @@ import type { Db } from "@prep-hamster/db"
 import { createApiClient, type ClientFetch } from "../index"
 
 const mockDb = {} as Db
+// /health は認証の外なので鍵は使われない。
+const auth = {
+  getKeys: async () => [],
+  issuer: "https://auth.test/auth/v1",
+  audience: "authenticated",
+}
 
 test("client integrates with createApp via shared fetch", async () => {
-  const app = createApp({ db: mockDb })
+  const app = createApp({ db: mockDb, auth })
   const client = createApiClient({
     baseUrl: "http://localhost",
-    userId: "00000000-0000-0000-0000-000000000000",
+    accessToken: "access-health",
     fetch: app.request,
   })
 
@@ -19,7 +25,7 @@ test("client integrates with createApp via shared fetch", async () => {
   expect(data).toEqual({ ok: true })
 })
 
-test("client propagates x-user-id header to fetch", async () => {
+test("client sends the access token as a bearer Authorization header", async () => {
   let receivedHeaders: Headers | undefined
   const mockFetch: ClientFetch = async (input, init) => {
     if (input instanceof Request) {
@@ -35,11 +41,11 @@ test("client propagates x-user-id header to fetch", async () => {
 
   const client = createApiClient({
     baseUrl: "http://localhost",
-    userId: "user-abc",
+    accessToken: "access-abc",
     fetch: mockFetch,
   })
 
   await client.health.$get()
 
-  expect(receivedHeaders?.get("x-user-id")).toBe("user-abc")
+  expect(receivedHeaders?.get("authorization")).toBe("Bearer access-abc")
 })

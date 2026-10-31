@@ -3,6 +3,7 @@ import { createApp } from "../src/app"
 import { errorResponseSchema } from "../src/routes/schemas"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
 import { seedBaseFixture } from "./seed"
+import { bearer, e2eAuth } from "./auth-helper"
 
 type ValidationBody = {
   error: { code: string; message: string; details: { fieldErrors: Record<string, string[]> } }
@@ -33,11 +34,11 @@ async function expectValidationError(res: Response, field: string) {
 
 test("invalid body returns 422 VALIDATION_ERROR with the field in details", async () => {
   const { userId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   const res = await app.request("/v1/groups", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ name: "" }),
   })
 
@@ -46,10 +47,10 @@ test("invalid body returns 422 VALIDATION_ERROR with the field in details", asyn
 
 test("invalid query returns 422 VALIDATION_ERROR with the field in details", async () => {
   const { userId, groupId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   const res = await app.request(`/v1/stocks?groupId=${groupId}&expiringBefore=not-a-date`, {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
 
   await expectValidationError(res, "expiringBefore")
@@ -57,19 +58,21 @@ test("invalid query returns 422 VALIDATION_ERROR with the field in details", asy
 
 test("invalid path param returns 422 VALIDATION_ERROR with the field in details", async () => {
   const { userId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
-  const res = await app.request("/v1/stocks/not-a-uuid", { headers: { "x-user-id": userId } })
+  const res = await app.request("/v1/stocks/not-a-uuid", {
+    headers: { authorization: await bearer(userId) },
+  })
 
   await expectValidationError(res, "id")
 })
 
 test("malformed groupId in query is reported as groupId", async () => {
   const { userId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   const res = await app.request("/v1/stocks?groupId=not-a-uuid", {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
 
   await expectValidationError(res, "groupId")
@@ -77,34 +80,38 @@ test("malformed groupId in query is reported as groupId", async () => {
 
 test("malformed group id in path is reported under the path param name", async () => {
   const { userId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
-  const byId = await app.request("/v1/groups/not-a-uuid", { headers: { "x-user-id": userId } })
+  const byId = await app.request("/v1/groups/not-a-uuid", {
+    headers: { authorization: await bearer(userId) },
+  })
   await expectValidationError(byId, "id")
 
   const byGroupId = await app.request("/v1/groups/not-a-uuid/memberships", {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   await expectValidationError(byGroupId, "groupId")
 })
 
 test("missing groupId is reported with the required-field message, not the UUID one", async () => {
   const { userId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
-  const missing = await app.request("/v1/stocks", { headers: { "x-user-id": userId } })
+  const missing = await app.request("/v1/stocks", {
+    headers: { authorization: await bearer(userId) },
+  })
   const missingBody = (await missing.clone().json()) as ValidationBody
   await expectValidationError(missing, "groupId")
 
   const malformed = await app.request("/v1/stocks?groupId=not-a-uuid", {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   const malformedBody = (await malformed.json()) as ValidationBody
   expect(missingBody.error.message).not.toBe(malformedBody.error.message)
 })
 
 test("every operation with parameters or a request body declares 422 as ApiError in /openapi.json", async () => {
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   type Operation = {
     parameters?: unknown[]
@@ -133,7 +140,7 @@ test("every operation with parameters or a request body declares 422 as ApiError
 })
 
 test("PATCH bodies declare only their always-required fields as required in /openapi.json", async () => {
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   const spec = (await (await app.request("/openapi.json")).json()) as {
     components: { schemas: Record<string, { required?: string[]; minProperties?: number }> }
@@ -156,7 +163,7 @@ test("PATCH bodies declare only their always-required fields as required in /ope
 })
 
 test("every operation with a JSON request body declares 400, 413 and 415 as ApiError in /openapi.json", async () => {
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   type Operation = {
     requestBody?: { content?: Record<string, unknown> }
@@ -186,7 +193,7 @@ test("every operation with a JSON request body declares 400, 413 and 415 as ApiE
 })
 
 test("operations without a JSON request body declare neither 400 nor 415 in /openapi.json", async () => {
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   type Operation = {
     requestBody?: { content?: Record<string, unknown> }
@@ -222,11 +229,11 @@ async function expectApiError(res: Response, status: number, code: string, messa
 
 test("malformed JSON body returns 400 BAD_REQUEST", async () => {
   const { userId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   const res = await app.request("/v1/groups", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: "{not json",
   })
 
@@ -235,7 +242,7 @@ test("malformed JSON body returns 400 BAD_REQUEST", async () => {
 
 test("JSON body without content-type returns 415 UNSUPPORTED_MEDIA_TYPE", async () => {
   const { userId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   // ReadableStream の body には runtime が content-type を自動付与しない
   // (文字列 body だと Node の undici は text/plain を付けてしまう)。
@@ -249,7 +256,7 @@ test("JSON body without content-type returns 415 UNSUPPORTED_MEDIA_TYPE", async 
 
   const res = await app.request("/v1/groups", {
     method: "POST",
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
     body,
     duplex: "half",
   })
@@ -264,11 +271,11 @@ test("JSON body without content-type returns 415 UNSUPPORTED_MEDIA_TYPE", async 
 
 test("JSON body with text/plain content-type returns 415 UNSUPPORTED_MEDIA_TYPE", async () => {
   const { userId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   const res = await app.request("/v1/groups", {
     method: "POST",
-    headers: { "content-type": "text/plain", "x-user-id": userId },
+    headers: { "content-type": "text/plain", authorization: await bearer(userId) },
     body: JSON.stringify({ name: "x" }),
   })
 
@@ -282,11 +289,11 @@ test("JSON body with text/plain content-type returns 415 UNSUPPORTED_MEDIA_TYPE"
 
 test("body over 1 MiB returns 413 PAYLOAD_TOO_LARGE", async () => {
   const { userId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   const res = await app.request("/v1/groups", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: "a".repeat(1024 * 1024 + 1),
   })
 

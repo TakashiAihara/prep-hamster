@@ -1,13 +1,27 @@
 import { createDb } from "@prep-hamster/db"
 import { installJaErrorMap } from "@prep-hamster/schema"
 import { createApp } from "./app"
+import { createJwksKeys } from "./auth/jwks"
 
 installJaErrorMap()
 
 const DEFAULT_DB_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
 const db = createDb(process.env["DATABASE_URL"] ?? DEFAULT_DB_URL)
-const app = createApp({ db })
+const supabaseUrl = process.env["SUPABASE_URL"]
+if (!supabaseUrl) {
+  console.error("[api] SUPABASE_URL is required")
+  process.exit(1)
+}
+
+const app = createApp({
+  db,
+  auth: {
+    getKeys: createJwksKeys(`${supabaseUrl}/auth/v1/.well-known/jwks.json`),
+    issuer: `${supabaseUrl}/auth/v1`,
+    audience: "authenticated",
+  },
+})
 
 const port = Number(process.env["PORT"] ?? 3000)
 

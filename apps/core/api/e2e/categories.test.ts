@@ -4,6 +4,7 @@ import { categories } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import { seedCategory, seedGroupWithMembership, seedItem, seedMembership, seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
+import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -17,10 +18,10 @@ test("POST /v1/categories by OWNER returns 201", async () => {
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Home")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request("/v1/categories", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ groupId, name: "Food", sortOrder: 1 }),
   })
 
@@ -36,10 +37,10 @@ test("POST /v1/categories by VIEWER returns 403 INSUFFICIENT_ROLE", async () => 
   const groupId = await seedGroupWithMembership(ownerId, "Home")
   await seedMembership(viewerId, groupId, "VIEWER")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request("/v1/categories", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": viewerId },
+    headers: { "content-type": "application/json", authorization: await bearer(viewerId) },
     body: JSON.stringify({ groupId, name: "Food" }),
   })
 
@@ -55,9 +56,9 @@ test("GET /v1/categories?groupId=X returns ordered list (sortOrder asc, NULL las
   await seedCategory(groupId, "Food", 1)
   await seedCategory(groupId, "Drink", 2)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/categories?groupId=${groupId}`, {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
 
   expect(res.status).toBe(200)
@@ -70,9 +71,9 @@ test("GET /v1/categories?groupId=X by non-member returns 403", async () => {
   const outsiderId = await seedUser("Outsider")
   const groupId = await seedGroupWithMembership(ownerId, "Home")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/categories?groupId=${groupId}`, {
-    headers: { "x-user-id": outsiderId },
+    headers: { authorization: await bearer(outsiderId) },
   })
 
   expect(res.status).toBe(403)
@@ -85,10 +86,10 @@ test("PATCH /v1/categories/:id by EDITOR returns 200", async () => {
   await seedMembership(editorId, groupId, "EDITOR")
   const categoryId = await seedCategory(groupId, "Food")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/categories/${categoryId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": editorId },
+    headers: { "content-type": "application/json", authorization: await bearer(editorId) },
     body: JSON.stringify({ name: "Food & Drink" }),
   })
 
@@ -102,10 +103,10 @@ test("PATCH /v1/categories/:id with empty body returns 422 and updates nothing",
   const groupId = await seedGroupWithMembership(userId, "Home")
   const categoryId = await seedCategory(groupId, "Food")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/categories/${categoryId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({}),
   })
 
@@ -123,10 +124,10 @@ test("DELETE /v1/categories/:id without children returns 204 + soft-delete", asy
   const groupId = await seedGroupWithMembership(userId, "Home")
   const categoryId = await seedCategory(groupId, "Food")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/categories/${categoryId}`, {
     method: "DELETE",
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
 
   expect(res.status).toBe(204)
@@ -140,10 +141,10 @@ test("DELETE /v1/categories/:id with referencing item returns 422 CATEGORY_IN_US
   const categoryId = await seedCategory(groupId, "Food")
   await seedItem(groupId, "Canned Tomato", categoryId)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/categories/${categoryId}`, {
     method: "DELETE",
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
 
   expect(res.status).toBe(422)

@@ -119,7 +119,7 @@ docker compose --profile prod up --build
 curl -s http://localhost:3000/health
 # → {"ok":true}
 
-# CLI で叩く（PREP_HAMSTER_USER_ID は stub 認証ヘッダ用）
-PREP_HAMSTER_USER_ID=00000000-0000-0000-0000-000000000001 \
+# CLI で叩く（PREP_HAMSTER_ACCESS_TOKEN は Supabase の access token。API は SUPABASE_URL で起動する）
+PREP_HAMSTER_ACCESS_TOKEN=<access token> \
   bun run --filter @prep-hamster/cli-user start stock list
 ```

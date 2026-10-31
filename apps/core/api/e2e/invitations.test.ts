@@ -4,6 +4,7 @@ import { invitations } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import { seedGroupWithMembership, seedMembership, seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
+import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -18,10 +19,10 @@ async function createInvitation(
   groupId: string,
   role: "EDITOR" | "VIEWER" = "EDITOR",
 ) {
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/invitations`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": ownerId },
+    headers: { "content-type": "application/json", authorization: await bearer(ownerId) },
     body: JSON.stringify({ role }),
   })
   if (res.status !== 201) {
@@ -34,10 +35,10 @@ test("POST /v1/groups/:groupId/invitations issues a token (OWNER only)", async (
   const ownerId = await seedUser("owner")
   const groupId = await seedGroupWithMembership(ownerId)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/invitations`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": ownerId },
+    headers: { "content-type": "application/json", authorization: await bearer(ownerId) },
     body: JSON.stringify({ role: "EDITOR" }),
   })
   expect(res.status).toBe(201)
@@ -59,10 +60,10 @@ test("POST /v1/groups/:groupId/invitations by EDITOR returns 403", async () => {
   const groupId = await seedGroupWithMembership(ownerId)
   await seedMembership(editorId, groupId, "EDITOR")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/invitations`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": editorId },
+    headers: { "content-type": "application/json", authorization: await bearer(editorId) },
     body: JSON.stringify({ role: "EDITOR" }),
   })
   expect(res.status).toBe(403)
@@ -74,10 +75,10 @@ test("POST /v1/invitations/:token/accept creates membership and marks token used
   const groupId = await seedGroupWithMembership(ownerId)
   const created = await createInvitation(ownerId, groupId, "EDITOR")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/invitations/${created.invitation.token}/accept`, {
     method: "POST",
-    headers: { "x-user-id": newcomerId },
+    headers: { authorization: await bearer(newcomerId) },
   })
   expect(res.status).toBe(201)
   const body = (await res.json()) as { membership: { userId: string; role: string } }
@@ -101,16 +102,16 @@ test("accept on used token returns 409 INVITATION_USED", async () => {
   const groupId = await seedGroupWithMembership(ownerId)
   const created = await createInvitation(ownerId, groupId)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const first = await app.request(`/v1/invitations/${created.invitation.token}/accept`, {
     method: "POST",
-    headers: { "x-user-id": a },
+    headers: { authorization: await bearer(a) },
   })
   expect(first.status).toBe(201)
 
   const second = await app.request(`/v1/invitations/${created.invitation.token}/accept`, {
     method: "POST",
-    headers: { "x-user-id": b },
+    headers: { authorization: await bearer(b) },
   })
   expect(second.status).toBe(409)
   const body = (await second.json()) as { error: { code: string } }
@@ -129,10 +130,10 @@ test("accept on expired token returns 422 INVITATION_EXPIRED", async () => {
     .set({ expiresAt: new Date(Date.now() - 1000) })
     .where(eq(invitations.token, created.invitation.token))
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/invitations/${created.invitation.token}/accept`, {
     method: "POST",
-    headers: { "x-user-id": newcomerId },
+    headers: { authorization: await bearer(newcomerId) },
   })
   expect(res.status).toBe(422)
   const body = (await res.json()) as { error: { code: string } }
@@ -146,10 +147,10 @@ test("accept by existing member returns 409 ALREADY_MEMBER", async () => {
   await seedMembership(editorId, groupId, "EDITOR")
   const created = await createInvitation(ownerId, groupId)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/invitations/${created.invitation.token}/accept`, {
     method: "POST",
-    headers: { "x-user-id": editorId },
+    headers: { authorization: await bearer(editorId) },
   })
   expect(res.status).toBe(409)
   const body = (await res.json()) as { error: { code: string } }
@@ -159,10 +160,10 @@ test("accept by existing member returns 409 ALREADY_MEMBER", async () => {
 test("accept on non-existent token returns 404", async () => {
   const userId = await seedUser()
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/invitations/${crypto.randomUUID()}/accept`, {
     method: "POST",
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   expect(res.status).toBe(404)
 })

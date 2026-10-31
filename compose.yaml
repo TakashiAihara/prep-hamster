@@ -11,6 +11,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
       PORT: "3000"
+      # 既定は手元の `bunx supabase start` の Auth。Supabase の project に向けるなら env で上書きする。
+      SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     profiles: ["prod"]
@@ -28,6 +30,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
       PORT: "3000"
+      # 既定は手元の `bunx supabase start` の Auth。Supabase の project に向けるなら env で上書きする。
+      SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

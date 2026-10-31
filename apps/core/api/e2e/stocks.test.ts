@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, expect, test } from "bun:test"
 import { createApp } from "../src/app"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
 import { seedBaseFixture } from "./seed"
+import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -13,7 +14,7 @@ beforeEach(async () => {
 
 test("POST /v1/stocks creates a stock and GET returns it", async () => {
   const { userId, groupId, itemId, locationId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   const oneYearAhead = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
@@ -21,7 +22,7 @@ test("POST /v1/stocks creates a stock and GET returns it", async () => {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-user-id": userId,
+      authorization: await bearer(userId),
     },
     body: JSON.stringify({
       groupId,
@@ -41,7 +42,7 @@ test("POST /v1/stocks creates a stock and GET returns it", async () => {
   expect(created.stock.quantity).toBe(3)
 
   const listRes = await app.request(`/v1/stocks?groupId=${groupId}`, {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   expect(listRes.status).toBe(200)
   const listed = (await listRes.json()) as { stocks: { id: string }[] }
@@ -51,18 +52,18 @@ test("POST /v1/stocks creates a stock and GET returns it", async () => {
 
 test("GET /v1/stocks with invalid groupId returns 422", async () => {
   const { userId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request("/v1/stocks?groupId=not-a-uuid", {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   expect(res.status).toBe(422)
 })
 
 test("GET /v1/stocks returns empty list for empty group", async () => {
   const { userId, groupId } = await seedBaseFixture()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks?groupId=${groupId}`, {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   expect(res.status).toBe(200)
   const body = (await res.json()) as { stocks: unknown[] }

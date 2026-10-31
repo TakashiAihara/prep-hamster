@@ -1,5 +1,5 @@
 import { createApiClient, type ApiClient } from "@prep-hamster/api-client"
-import { getCurrentUserId } from "./auth"
+import { getAccessToken } from "./auth"
 
 // EXPO_PUBLIC_API_BASE_URL を解決して @prep-hamster/api-client の hc<AppType> を生成する。
 //
@@ -18,6 +18,6 @@ export function resolveApiBaseUrl(env: Record<string, string | undefined> = proc
 export function getApiClient(): ApiClient {
   return createApiClient({
     baseUrl: resolveApiBaseUrl(),
-    userId: getCurrentUserId(),
+    accessToken: getAccessToken(),
   })
 }
