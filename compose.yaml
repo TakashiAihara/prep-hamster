@@ -13,6 +13,8 @@ services:
       PORT: "3000"
       # 既定は手元の `bunx supabase start` の Auth。Supabase の project に向けるなら env で上書きする。
       SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
+      # 手元の supabase start が発行する token の iss (supabase/config.toml の auth.jwt_issuer の既定)。
+      SUPABASE_JWT_ISSUER: ${SUPABASE_JWT_ISSUER:-http://127.0.0.1:54321/auth/v1}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     profiles: ["prod"]
@@ -32,6 +34,8 @@ services:
       PORT: "3000"
       # 既定は手元の `bunx supabase start` の Auth。Supabase の project に向けるなら env で上書きする。
       SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
+      # 手元の supabase start が発行する token の iss (supabase/config.toml の auth.jwt_issuer の既定)。
+      SUPABASE_JWT_ISSUER: ${SUPABASE_JWT_ISSUER:-http://127.0.0.1:54321/auth/v1}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

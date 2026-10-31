@@ -160,3 +160,47 @@ test("while the first fetch keeps failing, it is retried at most once a minute",
   await expect(getKeys("k1")).rejects.toThrow("JWKS fetch failed with status 503")
   expect(count).toBe(2)
 })
+
+test("requests that arrive while the first fetch is in flight wait for it instead of failing", async () => {
+  let count = 0
+  let release: (() => void) | undefined
+  const gate = new Promise<void>((r) => (release = r))
+  const getKeys = createJwksKeys(JWKS_URL, async () => {
+    count++
+    await gate
+    return jwksResponse(["k1"])
+  })
+
+  const pending = [getKeys("k1"), getKeys("k1"), getKeys("k1")]
+  release?.()
+  const results = await Promise.all(pending)
+
+  expect(count).toBe(1)
+  expect(results.map((keys) => keys.map((k) => k.kid))).toEqual([["k1"], ["k1"], ["k1"]])
+})
+
+test("requests for a rotated kid wait for the refresh in flight and get the new key", async () => {
+  const clock = fakeClock()
+  let count = 0
+  let release: (() => void) | undefined
+  const getKeys = createJwksKeys(
+    JWKS_URL,
+    async () => {
+      count++
+      if (count === 1) return jwksResponse(["old"])
+      await new Promise<void>((r) => (release = r))
+      return jwksResponse(["old", "new"])
+    },
+    clock.now,
+  )
+
+  await getKeys("old")
+  clock.advance(60_000)
+  const first = getKeys("new")
+  const second = getKeys("new")
+  release?.()
+
+  expect((await second).map((k) => k.kid)).toEqual(["old", "new"])
+  expect((await first).map((k) => k.kid)).toEqual(["old", "new"])
+  expect(count).toBe(2)
+})
