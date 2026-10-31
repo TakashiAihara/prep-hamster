@@ -8,6 +8,7 @@
 //   - app (`com.example.prephamster`) が emulator にインストール済み
 //     (`bun run --filter @prep-hamster/mobile android` 等で先にビルド)
 //   - `maestro` CLI が PATH にある (https://maestro.mobile.dev/)
+//   - env SUPABASE_URL / SUPABASE_SECRET_KEY (flow はサインイン済みで始める。scripts/dev-session.ts)
 //
 // 使い方:
 //   bun run --filter @prep-hamster/mobile capture
@@ -54,6 +55,22 @@ function checkDevice(): void {
   }
 }
 
+// flow は起動直後にこの deep link で dev build の受け口に session を渡し、サインイン済みで始める (D-12)。
+function devSessionUrl(): string {
+  const r = spawnSync("bun", ["run", join(here, "dev-session.ts")], {
+    stdio: ["ignore", "pipe", "inherit"],
+    encoding: "utf-8",
+  })
+  const url = (r.stdout ?? "").trim().split("\n")[0] ?? ""
+  if (r.status !== 0 || !url) {
+    console.error(
+      "[capture-screens] テスト用ユーザーの session を発行できません (scripts/dev-session.ts)",
+    )
+    process.exit(1)
+  }
+  return url
+}
+
 function runFlows(): string[] {
   const flows = readdirSync(flowsDir).filter((f) => f.endsWith(".yaml"))
   if (flows.length === 0) {
@@ -69,7 +86,9 @@ function runFlows(): string[] {
   for (const flow of flows) {
     const flowPath = join(flowsDir, flow)
     console.log(`[capture-screens] running ${flow}`)
-    const r = spawnSync("maestro", ["test", flowPath], {
+    // refresh token は 1 回しか使えないので、flow ごとに新しい組を発行する
+    const sessionUrl = devSessionUrl()
+    const r = spawnSync("maestro", ["test", "-e", `DEV_SESSION_URL=${sessionUrl}`, flowPath], {
       cwd: outDir,
       stdio: "inherit",
     })
