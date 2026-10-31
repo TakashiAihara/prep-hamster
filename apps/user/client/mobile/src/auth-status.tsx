@@ -18,7 +18,14 @@ export function AuthStatusProvider({ children }: { children: ReactNode }) {
       })
       unsubscribe = () => data.subscription.unsubscribe()
       // import を待つ間に unmount していたら (dev の effect 二重実行など)、ここで外す。
-      if (unmounted) unsubscribe()
+      if (unmounted) {
+        unsubscribe()
+        return
+      }
+      // 購読は client の読み込みを待ってから張るので、その前に起きた変化 (deep link の setSession など) は
+      // イベントで届かない。張った直後に 1 回読み直して追いつく。
+      const { data: current } = await supabase.auth.getSession()
+      if (!unmounted) setStatus(current.session ? "signed-in" : "signed-out")
     }
     // supabase.ts の読み込み (env の検査) が落ちたらセッションは作れないので、サインアウト扱いにする。
     subscribe().catch(() => setStatus("signed-out"))
