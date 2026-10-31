@@ -12,7 +12,8 @@ export type AuthOptions = {
   audience: string
 }
 
-const BEARER_PREFIX = "Bearer "
+// auth-scheme は大文字小文字を区別しない (RFC 9110 11.1)。前後の空白は token に含めない。
+const BEARER = /^\s*bearer\s+(\S+)\s*$/i
 // users.id は uuid 型。形の違う sub を通すと insert が DB エラー (500) になる。
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -22,11 +23,11 @@ const unauthorized = () => new HTTPException(401, { message: "valid access token
 // HMAC の鍵として使う alg 混同攻撃の余地が生まれるため拒否する。
 export const withUserAuth = (auth: AuthOptions) =>
   createMiddleware<AppEnv>(async (c, next) => {
-    const header = c.req.header("authorization")
-    if (!header?.startsWith(BEARER_PREFIX)) {
+    const matched = BEARER.exec(c.req.header("authorization") ?? "")
+    if (!matched?.[1]) {
       throw unauthorized()
     }
-    const token = header.slice(BEARER_PREFIX.length)
+    const token = matched[1]
 
     let kid: string | undefined
     try {
@@ -42,7 +43,9 @@ export const withUserAuth = (auth: AuthOptions) =>
     let keys: HonoJsonWebKey[]
     try {
       keys = await auth.getKeys(kid)
-    } catch {
+    } catch (err) {
+      // 返すのは 503 だけなので、原因 (URL の誤り / 届かない / タイムアウト) はここで残す。
+      console.error("[auth] signing keys unavailable:", err instanceof Error ? err.message : err)
       return c.json(
         { error: { code: "AUTH_UNAVAILABLE", message: "認証サーバに接続できません" } },
         503,

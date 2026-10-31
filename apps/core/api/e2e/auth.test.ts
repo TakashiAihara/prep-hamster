@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, expect, test } from "bun:test"
+import { beforeAll, beforeEach, expect, spyOn, test } from "bun:test"
 import { createApp } from "../src/app"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
 import { eq } from "drizzle-orm"
@@ -148,7 +148,12 @@ test("a new account whose email is taken by another user returns 409 EMAIL_IN_US
   expect(await testDb.select().from(users).where(eq(users.id, newcomer))).toHaveLength(0)
 })
 
-test("returns 503 AUTH_UNAVAILABLE when no signing keys can be loaded", async () => {
+test("returns 503 AUTH_UNAVAILABLE when no signing keys can be loaded, and logs why", async () => {
+  const logged: string[] = []
+  const spy = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+    logged.push(args.map(String).join(" "))
+  })
+
   const app = createApp({
     db: testDb,
     auth: {
@@ -161,9 +166,11 @@ test("returns 503 AUTH_UNAVAILABLE when no signing keys can be loaded", async ()
   const res = await app.request("/v1/groups", {
     headers: { authorization: await bearer(crypto.randomUUID()) },
   })
+  spy.mockRestore()
 
   expect(res.status).toBe(503)
   expect(((await res.json()) as { error: { code: string } }).error.code).toBe("AUTH_UNAVAILABLE")
+  expect(logged.join("\n")).toContain("signing keys unavailable: JWKS fetch failed with status 503")
 })
 
 test("a token signed with an RS256 key from the JWKS is accepted", async () => {
@@ -175,4 +182,10 @@ test("a token signed with an RS256 key from the JWKS is accepted", async () => {
   const res = await app.request("/v1/groups", { headers: { authorization: `Bearer ${jwt}` } })
 
   expect(res.status).toBe(200)
+})
+
+test("the bearer scheme is matched case-insensitively", async () => {
+  const userId = await seedUser()
+  const value = await bearer(userId)
+  expect((await get(value.replace(/^Bearer/, "bearer"))).status).toBe(200)
 })
