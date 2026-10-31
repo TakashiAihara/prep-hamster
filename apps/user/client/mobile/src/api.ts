@@ -1,4 +1,4 @@
-import { createApiClient, type ApiClient } from "@prep-hamster/api-client"
+import { createApiClient, type ApiClient, type ClientFetch } from "@prep-hamster/api-client"
 import { getAccessToken } from "./auth"
 
 // EXPO_PUBLIC_API_BASE_URL を解決して @prep-hamster/api-client の hc<AppType> を生成する。
@@ -15,9 +15,22 @@ export function resolveApiBaseUrl(env: Record<string, string | undefined> = proc
   return env["EXPO_PUBLIC_API_BASE_URL"] ?? FALLBACK_BASE_URL
 }
 
+// token はサインイン状態や更新で変わるので、リクエストごとに解決して Authorization を上書きする
+export function createAuthFetch(
+  getToken: () => Promise<string> = getAccessToken,
+  baseFetch: ClientFetch = (input, init) => fetch(input, init),
+): ClientFetch {
+  return async (input, init) => {
+    const headers = new Headers(init?.headers)
+    headers.set("authorization", `Bearer ${await getToken()}`)
+    return baseFetch(input, { ...init, headers })
+  }
+}
+
 export function getApiClient(): ApiClient {
   return createApiClient({
     baseUrl: resolveApiBaseUrl(),
-    accessToken: getAccessToken(),
+    accessToken: "",
+    fetch: createAuthFetch(),
   })
 }
