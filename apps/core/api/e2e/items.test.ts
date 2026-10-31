@@ -175,6 +175,27 @@ test("PATCH /v1/items/:id by EDITOR updates barcode", async () => {
   expect(body.item.barcode).toBe("4900000000000")
 })
 
+test("PATCH /v1/items/:id with empty body returns 422 and updates nothing", async () => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const itemId = await seedItem(groupId, "Apple")
+
+  const app = createApp({ db: testDb })
+  const res = await app.request(`/v1/items/${itemId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "x-user-id": userId },
+    body: JSON.stringify({}),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string; message: string } }
+  expect(body.error.code).toBe("VALIDATION_ERROR")
+  expect(body.error.message).toBe("更新する項目がありません")
+
+  const [row] = await testDb.select().from(items).where(eq(items.id, itemId))
+  expect(row?.name).toBe("Apple")
+})
+
 test("DELETE /v1/items/:id without active stock returns 204 + soft-delete", async () => {
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Home")
