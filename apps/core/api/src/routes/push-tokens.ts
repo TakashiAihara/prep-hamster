@@ -2,7 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, desc, eq, isNull, notInArray } from "drizzle-orm"
 import { pushTokens, users } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
-import { errorResponseSchema } from "./schemas"
+import { errorResponseSchema, jsonBodyErrorResponses } from "./schemas"
 
 const bodySchema = z.object({
   token: z
@@ -25,6 +25,7 @@ const registerRoute = createRoute({
     "1 ユーザーあたり最大 10 件で、11 件目を登録すると updated_at が最も古い token が削除される。",
   request: { body: { content: { "application/json": { schema: bodySchema } } } },
   responses: {
+    ...jsonBodyErrorResponses,
     200: {
       description: "登録成功",
       content: {
@@ -53,6 +54,7 @@ const removeRoute = createRoute({
   summary: "current user の push token を削除 (無ければ何もしない)",
   request: { body: { content: { "application/json": { schema: bodySchema } } } },
   responses: {
+    ...jsonBodyErrorResponses,
     204: { description: "削除済み" },
     401: {
       description: "未認証",

@@ -3,7 +3,6 @@ import { eq } from "drizzle-orm"
 import {
   items,
   memberships,
-  expiryNotifications,
   notificationSettings,
   pushTokens,
   stocks,
@@ -188,8 +187,58 @@ test("a second run on the same JST day sends nothing, the next day sends again",
 
   expect([first.messages, second.messages, nextDay.messages]).toEqual([1, 0, 1])
   expect(calls).toHaveLength(2)
-  const [row] = await testDb.select().from(expiryNotifications)
-  expect(row).toEqual({ userId: u, notifiedOn: "2026-10-26" })
+  const [row] = await testDb
+    .select({ expiryNotifiedOn: notificationSettings.expiryNotifiedOn })
+    .from(notificationSettings)
+    .where(eq(notificationSettings.userId, u))
+  expect(row).toEqual({ expiryNotifiedOn: "2026-10-26" })
+})
+
+test("a user without a notification_settings row is notified and gets a row with the default settings", async () => {
+  const u = await seedDueUser("u", ["ExponentPushToken[no-row]"])
+
+  await runExpiryNotify({ db: testDb, sender: fakeSender().sender, today: TODAY })
+
+  const [row] = await testDb
+    .select()
+    .from(notificationSettings)
+    .where(eq(notificationSettings.userId, u))
+  expect(row).toMatchObject({
+    expiryNotifiedOn: "2026-10-25",
+    expiringNotifyEnabled: true,
+    expiringDaysBefore: 7,
+  })
+})
+
+test("notifying a user keeps the days-before setting they chose", async () => {
+  const u = await seedDueUser("u", ["ExponentPushToken[three-days]"], "2026-10-27")
+  await setSettings(u, { days: 3 })
+
+  await runExpiryNotify({ db: testDb, sender: fakeSender().sender, today: TODAY })
+
+  const [row] = await testDb
+    .select()
+    .from(notificationSettings)
+    .where(eq(notificationSettings.userId, u))
+  expect(row).toMatchObject({ expiringDaysBefore: 3, expiryNotifiedOn: "2026-10-25" })
+})
+
+test("a user notified on an earlier day is notified again on a later day", async () => {
+  const u = await seedDueUser("u", ["ExponentPushToken[stale]"])
+  await testDb
+    .insert(notificationSettings)
+    .values({ id: crypto.randomUUID(), userId: u, expiryNotifiedOn: "2026-10-24" })
+  const { sender, calls } = fakeSender()
+
+  const result = await runExpiryNotify({ db: testDb, sender, today: TODAY })
+
+  expect(result.messages).toBe(1)
+  expect(calls).toHaveLength(1)
+  const [row] = await testDb
+    .select({ expiryNotifiedOn: notificationSettings.expiryNotifiedOn })
+    .from(notificationSettings)
+    .where(eq(notificationSettings.userId, u))
+  expect(row).toEqual({ expiryNotifiedOn: "2026-10-25" })
 })
 
 test("a user whose every message failed is not marked notified and is retried by the next run", async () => {
@@ -224,9 +273,11 @@ test("deletes a token the ticket reports as DeviceNotRegistered and keeps the us
     "ExponentPushToken[live-tablet]",
     "ExponentPushToken[other-phone]",
   ])
-  expect((await testDb.select().from(expiryNotifications)).map((r) => r.userId).toSorted()).toEqual(
-    [u, other].toSorted(),
-  )
+  const notified = await testDb
+    .select({ userId: notificationSettings.userId })
+    .from(notificationSettings)
+    .where(eq(notificationSettings.expiryNotifiedOn, TODAY))
+  expect(notified.map((r) => r.userId).toSorted()).toEqual([u, other].toSorted())
 })
 
 test("does not delete tokens for other errors", async () => {

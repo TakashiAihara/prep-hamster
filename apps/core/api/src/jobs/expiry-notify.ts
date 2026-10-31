@@ -1,7 +1,6 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import {
   createDb,
-  expiryNotifications,
   groups,
   items,
   memberships,
@@ -108,12 +107,12 @@ export async function runExpiryNotify(
 
   // 同じ JST 暦日に通知済みのユーザーは飛ばす (ジョブの再実行・二重起動で二重送信しない)。
   const alreadyNotified = await opts.db
-    .select({ userId: expiryNotifications.userId })
-    .from(expiryNotifications)
+    .select({ userId: notificationSettings.userId })
+    .from(notificationSettings)
     .where(
       and(
-        inArray(expiryNotifications.userId, [...dueByUser.keys()]),
-        eq(expiryNotifications.notifiedOn, today),
+        inArray(notificationSettings.userId, [...dueByUser.keys()]),
+        eq(notificationSettings.expiryNotifiedOn, today),
       ),
     )
   for (const { userId } of alreadyNotified) dueByUser.delete(userId)
@@ -157,14 +156,15 @@ export async function runExpiryNotify(
   const failedTo = new Set(result.errors.map((e) => e.to))
   const notified = [...attemptedTokens]
     .filter(([, tokens]) => tokens.some((t) => !failedTo.has(t)))
-    .map(([userId]) => ({ userId, notifiedOn: today }))
+    .map(([userId]) => ({ id: crypto.randomUUID(), userId, expiryNotifiedOn: today }))
+  // 行が無いユーザーは schema の既定値で作る。既存行は expiry_notified_on だけを更新する。
   if (notified.length > 0) {
     await opts.db
-      .insert(expiryNotifications)
+      .insert(notificationSettings)
       .values(notified)
       .onConflictDoUpdate({
-        target: expiryNotifications.userId,
-        set: { notifiedOn: sql`excluded.notified_on` },
+        target: notificationSettings.userId,
+        set: { expiryNotifiedOn: sql`excluded.expiry_notified_on` },
       })
   }
 

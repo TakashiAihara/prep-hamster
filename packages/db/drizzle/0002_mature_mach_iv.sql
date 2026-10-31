@@ -1,0 +1,1 @@
+ALTER TABLE "notification_settings" ADD COLUMN "expiry_notified_on" date;

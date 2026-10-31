@@ -1,5 +1,5 @@
 {
-  "id": "cff7a15a-4372-4177-aae1-0be49c5bf4bb",
+  "id": "c5732b43-490a-407d-a570-741cdf6138bb",
   "prevId": "57b6e733-1e9c-4695-9fdb-ac02e147e5f7",
   "version": "7",
   "dialect": "postgresql",
@@ -61,45 +61,6 @@
           "tableTo": "groups",
           "columnsFrom": [
             "group_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.expiry_notifications": {
-      "name": "expiry_notifications",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "notified_on": {
-          "name": "notified_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "expiry_notifications_user_id_users_id_fk": {
-          "name": "expiry_notifications_user_id_users_id_fk",
-          "tableFrom": "expiry_notifications",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
           ],
           "columnsTo": [
             "id"
@@ -737,6 +698,12 @@
         "push_token": {
           "name": "push_token",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expiry_notified_on": {
+          "name": "expiry_notified_on",
+          "type": "date",
           "primaryKey": false,
           "notNull": false
         },

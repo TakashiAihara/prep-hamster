@@ -288,6 +288,8 @@ export const notificationSettings = pgTable("notification_settings", {
   shortageNotifyEnabled: boolean("shortage_notify_enabled").notNull().default(true),
   invitationNotifyEnabled: boolean("invitation_notify_enabled").notNull().default(true),
   pushToken: text("push_token"),
+  // 期限通知を JST の暦日 1 回に抑えるための、直近に通知した日付
+  expiryNotifiedOn: date("expiry_notified_on"),
   ...timestamps,
 })
 
@@ -306,14 +308,6 @@ export const pushTokens = pgTable(
   },
   (t) => [index("push_tokens_user_idx").on(t.userId)],
 )
-
-// 期限通知をユーザーごとに JST の暦日 1 回に抑える記録 (ジョブを再実行しても二重送信しない)。
-export const expiryNotifications = pgTable("expiry_notifications", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => users.id),
-  notifiedOn: date("notified_on").notNull(),
-})
 
 // ============================================================================
 // Relations
