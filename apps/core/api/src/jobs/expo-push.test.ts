@@ -161,3 +161,32 @@ test("retries a network error", async () => {
   expect(calls).toBe(2)
   expect(result.sent).toBe(1)
 })
+
+test("aborts a request that does not answer and retries it", async () => {
+  let calls = 0
+  const fakeFetch = (async (_url: string, init: RequestInit) => {
+    calls++
+    if (calls === 1) {
+      // 打ち切られなければ 5 秒後に応答する。
+      return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(json(okTickets(1))), 5000)
+        init.signal?.addEventListener("abort", () => {
+          clearTimeout(timer)
+          reject(new Error("aborted"))
+        })
+      })
+    }
+    return json(okTickets(1))
+  }) as unknown as typeof fetch
+
+  const started = Date.now()
+  const result = await createExpoPushSender({
+    fetch: fakeFetch,
+    sleep: noSleep,
+    timeoutMs: 50,
+  }).send([msg(1)])
+
+  expect(result).toEqual({ sent: 1, failed: 0, errors: [] })
+  expect(calls).toBe(2)
+  expect(Date.now() - started).toBeLessThan(2000)
+})

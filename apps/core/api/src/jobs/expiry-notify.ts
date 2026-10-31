@@ -36,7 +36,7 @@ const PAYLOAD_STOCK_ID_LIMIT = 20
 const DEVICE_NOT_REGISTERED = "DeviceNotRegistered"
 
 // 全メッセージが失敗したときだけ、運用者に気づかせるため終了コードを非 0 にする。
-// 一部の失敗 (死んだ token など) は次回に回るだけなので、ジョブ自体は成功として扱う。
+// 一部の失敗 (死んだ token など) はジョブ自体を成功として扱う。
 export const exitCodeFor = (r: { messages: number; sent: number }) =>
   r.messages > 0 && r.sent === 0 ? 1 : 0
 
@@ -153,6 +153,7 @@ export async function runExpiryNotify(
   const result = await opts.sender.send(messages)
 
   // 1 端末でも受理されたユーザーだけを通知済みにする。全端末が失敗したユーザーは次回の実行で再送する。
+  // 一部の端末だけ失敗したユーザーは通知済みになり、失敗した端末にはその日は届かない (1 日 1 回の要約なので受け入れる)。
   const failedTo = new Set(result.errors.map((e) => e.to))
   const notified = [...attemptedTokens]
     .filter(([, tokens]) => tokens.some((t) => !failedTo.has(t)))
