@@ -339,6 +339,7 @@ test("every table in the public schema has row level security enabled", async ()
     sql`select c.relname as name, c.relrowsecurity as rls from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' order by c.relname`,
   )) as unknown as { name: string; rls: boolean }[]
 
-  expect(rows.length).toBe(14)
+  // 表を足しても直さなくてよいよう件数は固定しない。0 件 (query の誤り) だけは通さない。
+  expect(rows.length).toBeGreaterThan(0)
   expect(rows.filter((r) => !r.rls).map((r) => r.name)).toEqual([])
 })
