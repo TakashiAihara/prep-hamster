@@ -11,7 +11,9 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
       PORT: "3000"
-      # 既定は手元の `bunx supabase start` の Auth。Supabase の project に向けるなら env で上書きする。
+      # 既定は手元の `bunx supabase start` の Auth。Supabase の project に向けるなら、
+      # SUPABASE_URL と SUPABASE_JWT_ISSUER (<project の URL>/auth/v1) の両方を上書きする。
+      # 片方だけだと iss が合わず、全リクエストが 401 になる。
       SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
       # 手元の supabase start が発行する token の iss (supabase/config.toml の auth.jwt_issuer の既定)。
       SUPABASE_JWT_ISSUER: ${SUPABASE_JWT_ISSUER:-http://127.0.0.1:54321/auth/v1}
@@ -32,7 +34,9 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
       PORT: "3000"
-      # 既定は手元の `bunx supabase start` の Auth。Supabase の project に向けるなら env で上書きする。
+      # 既定は手元の `bunx supabase start` の Auth。Supabase の project に向けるなら、
+      # SUPABASE_URL と SUPABASE_JWT_ISSUER (<project の URL>/auth/v1) の両方を上書きする。
+      # 片方だけだと iss が合わず、全リクエストが 401 になる。
       SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
       # 手元の supabase start が発行する token の iss (supabase/config.toml の auth.jwt_issuer の既定)。
       SUPABASE_JWT_ISSUER: ${SUPABASE_JWT_ISSUER:-http://127.0.0.1:54321/auth/v1}
