@@ -4,6 +4,7 @@ import { items, locations, memberships, stockEvents, stocks } from "@prep-hamste
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
+  authErrorResponses,
   createStockBodyDtoSchema,
   errorResponseSchema,
   jsonBodyErrorResponses,
@@ -78,6 +79,7 @@ const listStocksRoute = createRoute({
     query: ListQuerySchema,
   },
   responses: {
+    ...authErrorResponses,
     200: {
       description: "在庫一覧 (useByDate ASC NULLS LAST, bestBeforeDate ASC NULLS LAST)",
       content: {
@@ -108,6 +110,7 @@ const getStockRoute = createRoute({
   summary: "在庫を 1 件取得",
   request: { params: IdParamSchema },
   responses: {
+    ...authErrorResponses,
     200: {
       description: "取得成功",
       content: {
@@ -145,6 +148,7 @@ const patchStockRoute = createRoute({
     body: { content: { "application/json": { schema: updateStockBodyDtoSchema } }, required: true },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     200: {
       description: "更新成功",
@@ -188,6 +192,7 @@ const createStockRoute = createRoute({
     },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     201: {
       description: "作成成功",
@@ -222,6 +227,7 @@ const consumeStockRoute = createRoute({
     body: { content: { "application/json": { schema: stockQuantityDeltaBodyDtoSchema } } },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     200: {
       description: "消費成功",
@@ -260,6 +266,7 @@ const discardStockRoute = createRoute({
     body: { content: { "application/json": { schema: stockQuantityDeltaBodyDtoSchema } } },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     200: {
       description: "廃棄成功",
@@ -298,6 +305,7 @@ const moveStockRoute = createRoute({
     body: { content: { "application/json": { schema: stockMoveBodyDtoSchema } } },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     200: {
       description: "移動成功",
@@ -333,6 +341,7 @@ const deleteStockRoute = createRoute({
   summary: "在庫を soft delete (EDITOR 以上)",
   request: { params: IdParamSchema },
   responses: {
+    ...authErrorResponses,
     204: { description: "削除成功" },
     401: {
       description: "未認証",

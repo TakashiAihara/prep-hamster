@@ -4,6 +4,7 @@ import { locations, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
+  authErrorResponses,
   createLocationBodyDtoSchema,
   errorResponseSchema,
   jsonBodyErrorResponses,
@@ -40,6 +41,7 @@ const listLocationsRoute = createRoute({
   middleware: [withGroupAccess({ in: "query", name: "groupId" })] as const,
   request: { query: ListQuerySchema },
   responses: {
+    ...authErrorResponses,
     200: {
       description: "一覧",
       content: {
@@ -72,6 +74,7 @@ const createLocationRoute = createRoute({
     body: { content: { "application/json": { schema: createLocationBodyDtoSchema } } },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     201: {
       description: "作成成功",
@@ -101,6 +104,7 @@ const getLocationRoute = createRoute({
   summary: "location 単件取得",
   request: { params: IdParamSchema },
   responses: {
+    ...authErrorResponses,
     200: {
       description: "取得成功",
       content: {
@@ -139,6 +143,7 @@ const patchLocationRoute = createRoute({
     },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     200: {
       description: "更新成功",
@@ -172,6 +177,7 @@ const deleteLocationRoute = createRoute({
   summary: "location を soft delete (EDITOR 以上)",
   request: { params: IdParamSchema },
   responses: {
+    ...authErrorResponses,
     204: { description: "削除成功" },
     401: {
       description: "未認証",

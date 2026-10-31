@@ -4,6 +4,7 @@ import { groups, memberships } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { withGroupAccess } from "../middleware/group-access"
 import {
+  authErrorResponses,
   createGroupBodyDtoSchema,
   errorResponseSchema,
   jsonBodyErrorResponses,
@@ -47,6 +48,7 @@ const listGroupsRoute = createRoute({
   tags: ["groups"],
   summary: "current user が所属する group 一覧",
   responses: {
+    ...authErrorResponses,
     200: {
       description: "所属 group 一覧",
       content: {
@@ -77,6 +79,7 @@ const createGroupRoute = createRoute({
     },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     201: {
       description: "作成成功",
@@ -108,6 +111,7 @@ const getGroupRoute = createRoute({
   middleware: [withGroupAccess({ in: "param", name: "id" })] as const,
   request: { params: IdParamSchema },
   responses: {
+    ...authErrorResponses,
     200: {
       description: "取得成功",
       content: {
@@ -153,6 +157,7 @@ const patchGroupRoute = createRoute({
     },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     200: {
       description: "更新成功",

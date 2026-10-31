@@ -35,6 +35,18 @@ export const jsonBodyErrorResponses = {
   },
 }
 
+// /v1 全 route の前段にある auth middleware が返すので、route ごとではなくここで共通に定義する
+export const authErrorResponses = {
+  409: {
+    description: "同じメールアドレスのアカウントが別にある (新規アカウントの初回リクエスト)",
+    content: { "application/json": { schema: errorResponseSchema } },
+  },
+  503: {
+    description: "認証サーバ (Supabase) の署名鍵を取得できない",
+    content: { "application/json": { schema: errorResponseSchema } },
+  },
+}
+
 export const roleSchema = z.enum(["OWNER", "EDITOR", "VIEWER"]).openapi("Role")
 
 // 全フィールド optional な PATCH body で「更新対象が 1 つ以上」を担保する。{} は 422

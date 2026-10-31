@@ -4,6 +4,7 @@ import { invitations, memberships } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { withGroupAccess } from "../middleware/group-access"
 import {
+  authErrorResponses,
   createInvitationBodyDtoSchema,
   errorResponseSchema,
   jsonBodyErrorResponses,
@@ -54,6 +55,7 @@ const createInvitationRoute = createRoute({
     body: { content: { "application/json": { schema: createInvitationBodyDtoSchema } } },
   },
   responses: {
+    ...authErrorResponses,
     ...jsonBodyErrorResponses,
     201: {
       description: "発行成功",
@@ -85,6 +87,7 @@ const acceptInvitationRoute = createRoute({
   summary: "招待トークンで group に参加",
   request: { params: TokenParamSchema },
   responses: {
+    ...authErrorResponses,
     201: {
       description: "参加成功 (新規 membership)",
       content: {
@@ -102,7 +105,9 @@ const acceptInvitationRoute = createRoute({
       content: { "application/json": { schema: errorResponseSchema } },
     },
     409: {
-      description: "token 使用済み / 既に当該 group の member",
+      // 共通の 409 (authErrorResponses) を上書きするので、認証の 409 もここに書く。
+      description:
+        "token 使用済み / 既に当該 group の member / 同じメールアドレスのアカウントが別にある (EMAIL_IN_USE)",
       content: { "application/json": { schema: errorResponseSchema } },
     },
     422: {
