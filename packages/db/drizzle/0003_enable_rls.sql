@@ -11,6 +11,8 @@ BEGIN
 END $$;
 --> statement-breakpoint
 -- 素の Postgres (E2E / 手元の開発) には anon / authenticated が無いので、ある環境でだけ権限を外す。
+-- default privileges は migration を当てた role が作る表にだけ効く。別の role で作った表に権限が戻っても、
+-- RLS が入っていれば行は見えない (全表の RLS は e2e/validation.test.ts で確かめている)。
 DO $$
 DECLARE
   r text;
