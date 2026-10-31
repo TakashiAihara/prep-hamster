@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test"
-import { gateFor, getAccessToken, initialAuthStatus, parseAuthCallback } from "../auth"
+import {
+  exchangeAuthCodeOnce,
+  gateFor,
+  getAccessToken,
+  initialAuthStatus,
+  parseAuthCallback,
+} from "../auth"
 
 const NO_CODE = { error: "コールバック URL に code がありません" }
 
@@ -68,4 +74,14 @@ test("initialAuthStatus falls back to signed-out when the stored session cannot 
       throw new Error("decrypt failed")
     }),
   ).toBe("signed-out")
+})
+
+test("exchangeAuthCodeOnce exchanges the same code only once", async () => {
+  let calls = 0
+  const exchange = async () => {
+    calls++
+  }
+  await Promise.all([exchangeAuthCodeOnce("c-1", exchange), exchangeAuthCodeOnce("c-1", exchange)])
+  await exchangeAuthCodeOnce("c-2", exchange)
+  expect(calls).toBe(2)
 })

@@ -27,6 +27,27 @@ export function parseAuthCallback(url: string): AuthCallback {
   return { code }
 }
 
+// 同じ code は 1 回しか交換できない。Android では戻り URL でアプリが前に出て callback 画面も開くので、
+// openAuthSessionAsync の結果と callback 画面の両方から同じ code が来る。1 回の交換を共有する。
+const exchanges = new Map<string, Promise<void>>()
+
+export function exchangeAuthCodeOnce(
+  code: string,
+  exchange: (code: string) => Promise<void> = exchangeWithSupabase,
+): Promise<void> {
+  const running = exchanges.get(code)
+  if (running) return running
+  const started = exchange(code)
+  exchanges.set(code, started)
+  return started
+}
+
+async function exchangeWithSupabase(code: string): Promise<void> {
+  const { supabase } = await import("./supabase")
+  const exchanged = await supabase.auth.exchangeCodeForSession(code)
+  if (exchanged.error) throw exchanged.error
+}
+
 export async function signInWithGoogle(): Promise<void> {
   const { supabase } = await import("./supabase")
   const WebBrowser = await import("expo-web-browser")
@@ -45,8 +66,7 @@ export async function signInWithGoogle(): Promise<void> {
   const callback = parseAuthCallback(result.url)
   if ("error" in callback) throw new Error(callback.error)
 
-  const exchanged = await supabase.auth.exchangeCodeForSession(callback.code)
-  if (exchanged.error) throw exchanged.error
+  await exchangeAuthCodeOnce(callback.code)
 }
 
 export async function signOut(): Promise<void> {
