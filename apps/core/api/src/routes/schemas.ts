@@ -42,7 +42,8 @@ export const roleSchema = z.enum(["OWNER", "EDITOR", "VIEWER"]).openapi("Role")
 // 必須フィールドを持つ body (group name / membership role) には付けない: 必須検査が先に効く。
 // undefined のみのキー (JSON では表現できない) も「無い」扱いにする。
 // message は issue を 1 つだけ持たせ、validationErrorResponse の error.message にそのまま出る。
-// refine は spec に出ないので、同じ制約を minProperties で spec にも書く (strict なので未知キーは 1 件に数えられない)。
+// refine は spec に出ないので、spec には minProperties で近い制約を書く。strict でない body では
+// spec 上は未知キー 1 つでも満たすが、実行時は未知キーを落としてから refine するので 422 になる。
 export const requireUpdatableField = <T extends z.ZodType<Record<string, unknown>>>(schema: T) =>
   schema
     .refine((value) => Object.values(value).some((v) => v !== undefined), {
