@@ -100,6 +100,7 @@ docker compose --profile dev up
 
 - `localhost:3000` で API、`/health` が 200 を返せば疎通
 - `node_modules` は named volume (`api_node_modules`) に隔離して host の OS 差分を回避
+- 認証は既定で手元の `bunx supabase start` を見る。Supabase の project に向けるときは `SUPABASE_URL` と `SUPABASE_JWT_ISSUER` (`<project の URL>/auth/v1`) の両方を env で渡す。片方だけだと token の `iss` が合わず全リクエストが 401 になる
 
 ### prod プロファイル（本番再現）
 
