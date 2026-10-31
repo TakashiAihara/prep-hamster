@@ -149,6 +149,7 @@ const patchGroupRoute = createRoute({
           schema: updateGroupBodyDtoSchema,
         },
       },
+      required: true,
     },
   },
   responses: {

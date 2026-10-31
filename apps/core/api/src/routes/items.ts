@@ -240,7 +240,7 @@ const patchItemRoute = createRoute({
   summary: "item を更新 (EDITOR 以上)",
   request: {
     params: IdParamSchema,
-    body: { content: { "application/json": { schema: updateItemBodyDtoSchema } } },
+    body: { content: { "application/json": { schema: updateItemBodyDtoSchema } }, required: true },
   },
   responses: {
     ...jsonBodyErrorResponses,

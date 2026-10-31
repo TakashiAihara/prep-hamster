@@ -133,7 +133,10 @@ const patchCategoryRoute = createRoute({
   summary: "category を更新 (EDITOR 以上)",
   request: {
     params: IdParamSchema,
-    body: { content: { "application/json": { schema: updateCategoryBodyDtoSchema } } },
+    body: {
+      content: { "application/json": { schema: updateCategoryBodyDtoSchema } },
+      required: true,
+    },
   },
   responses: {
     ...jsonBodyErrorResponses,

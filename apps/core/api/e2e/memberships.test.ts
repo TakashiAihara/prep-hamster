@@ -1,4 +1,6 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
+import { and, eq, isNull } from "drizzle-orm"
+import { memberships } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import { seedGroupWithMembership, seedMembership, seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
@@ -56,6 +58,37 @@ test("PATCH /v1/groups/:groupId/memberships/:userId promotes EDITOR to OWNER (OW
   expect(res.status).toBe(200)
   const body = (await res.json()) as { membership: { role: string } }
   expect(body.membership.role).toBe("OWNER")
+})
+
+test("PATCH /v1/groups/:groupId/memberships/:userId with empty body returns 422 and updates nothing", async () => {
+  const ownerId = await seedUser("owner")
+  const editorId = await seedUser("editor")
+  const groupId = await seedGroupWithMembership(ownerId)
+  await seedMembership(editorId, groupId, "EDITOR")
+
+  const app = createApp({ db: testDb })
+  const res = await app.request(`/v1/groups/${groupId}/memberships/${editorId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "x-user-id": ownerId },
+    body: JSON.stringify({}),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string; message: string } }
+  expect(body.error.code).toBe("VALIDATION_ERROR")
+  expect(body.error.message).toBe("必須項目です")
+
+  const [row] = await testDb
+    .select()
+    .from(memberships)
+    .where(
+      and(
+        eq(memberships.groupId, groupId),
+        eq(memberships.userId, editorId),
+        isNull(memberships.deletedAt),
+      ),
+    )
+  expect(row?.role).toBe("EDITOR")
 })
 
 test("PATCH membership by EDITOR returns 403", async () => {

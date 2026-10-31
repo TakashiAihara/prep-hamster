@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
-import { and, eq } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 import { stockEvents, stocks } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import {
@@ -28,6 +28,32 @@ async function setupGroupWithStock(quantity = 10) {
   const stockId = await seedStock(groupId, itemId, locationId, quantity)
   return { userId, groupId, locationId, itemId, stockId }
 }
+
+test("PATCH /v1/stocks/:id with empty body returns 422 and updates nothing", async () => {
+  const { userId, stockId } = await setupGroupWithStock(5)
+
+  const app = createApp({ db: testDb })
+  const res = await app.request(`/v1/stocks/${stockId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "x-user-id": userId },
+    body: JSON.stringify({}),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string; message: string } }
+  expect(body.error.code).toBe("VALIDATION_ERROR")
+  expect(body.error.message).toBe("更新する項目がありません")
+
+  const [row] = await testDb
+    .select()
+    .from(stocks)
+    .where(and(eq(stocks.id, stockId), isNull(stocks.deletedAt)))
+  expect(row?.quantity).toBe(5)
+  expect(row?.unit).toBe("個")
+
+  const events = await testDb.select().from(stockEvents).where(eq(stockEvents.stockId, stockId))
+  expect(events).toHaveLength(0)
+})
 
 test("POST /v1/stocks/:id/consume reduces quantity + records CONSUME event", async () => {
   const { userId, stockId, groupId } = await setupGroupWithStock(10)

@@ -97,6 +97,27 @@ test("PATCH /v1/categories/:id by EDITOR returns 200", async () => {
   expect(body.category.name).toBe("Food & Drink")
 })
 
+test("PATCH /v1/categories/:id with empty body returns 422 and updates nothing", async () => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const categoryId = await seedCategory(groupId, "Food")
+
+  const app = createApp({ db: testDb })
+  const res = await app.request(`/v1/categories/${categoryId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "x-user-id": userId },
+    body: JSON.stringify({}),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string; message: string } }
+  expect(body.error.code).toBe("VALIDATION_ERROR")
+  expect(body.error.message).toBe("更新する項目がありません")
+
+  const [row] = await testDb.select().from(categories).where(eq(categories.id, categoryId))
+  expect(row?.name).toBe("Food")
+})
+
 test("DELETE /v1/categories/:id without children returns 204 + soft-delete", async () => {
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Home")

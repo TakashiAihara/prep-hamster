@@ -132,6 +132,29 @@ test("every operation with parameters or a request body declares 422 as ApiError
   expect(missing).toEqual([])
 })
 
+test("PATCH bodies declare only their always-required fields as required in /openapi.json", async () => {
+  const app = createApp({ db: testDb })
+
+  const spec = (await (await app.request("/openapi.json")).json()) as {
+    components: { schemas: Record<string, { required?: string[]; minProperties?: number }> }
+  }
+  const schemas = spec.components.schemas
+
+  expect(schemas["UpdateGroupBody"]?.required).toEqual(["name"])
+  expect(schemas["UpdateMembershipRoleBody"]?.required).toEqual(["role"])
+  expect(schemas["UpdateItemBody"]).toBeDefined()
+  expect(schemas["UpdateItemBody"]?.required).toBeUndefined()
+  for (const name of [
+    "UpdateItemBody",
+    "UpdateStockBody",
+    "UpdateLocationBody",
+    "UpdateCategoryBody",
+  ]) {
+    expect(schemas[name]?.minProperties).toBe(1)
+  }
+  expect(schemas["UpdateGroupBody"]?.minProperties).toBeUndefined()
+})
+
 test("every operation with a JSON request body declares 400, 413 and 415 as ApiError in /openapi.json", async () => {
   const app = createApp({ db: testDb })
 

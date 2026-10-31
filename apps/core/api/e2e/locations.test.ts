@@ -135,6 +135,28 @@ test("PATCH /v1/locations/:id by EDITOR returns 200", async () => {
   expect(body.location.name).toBe("Pantry (Renamed)")
 })
 
+test("PATCH /v1/locations/:id with empty body returns 422 and updates nothing", async () => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const locationId = await seedLocation(groupId, "Pantry", 1)
+
+  const app = createApp({ db: testDb })
+  const res = await app.request(`/v1/locations/${locationId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "x-user-id": userId },
+    body: JSON.stringify({}),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string; message: string } }
+  expect(body.error.code).toBe("VALIDATION_ERROR")
+  expect(body.error.message).toBe("更新する項目がありません")
+
+  const [row] = await testDb.select().from(locations).where(eq(locations.id, locationId))
+  expect(row?.name).toBe("Pantry")
+  expect(row?.sortOrder).toBe(1)
+})
+
 test("PATCH /v1/locations/:id by VIEWER returns 403", async () => {
   const ownerId = await seedUser("Owner")
   const viewerId = await seedUser("Viewer")

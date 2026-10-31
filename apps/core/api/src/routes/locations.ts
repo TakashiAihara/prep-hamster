@@ -133,7 +133,10 @@ const patchLocationRoute = createRoute({
   summary: "location を更新 (EDITOR 以上)",
   request: {
     params: IdParamSchema,
-    body: { content: { "application/json": { schema: updateLocationBodyDtoSchema } } },
+    body: {
+      content: { "application/json": { schema: updateLocationBodyDtoSchema } },
+      required: true,
+    },
   },
   responses: {
     ...jsonBodyErrorResponses,

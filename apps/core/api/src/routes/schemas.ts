@@ -27,7 +27,8 @@ export const jsonBodyErrorResponses = {
   },
   415: {
     // JSON 系は application/json と application/*+json を受け付ける (`; charset=utf-8` 等の
-    // parameter 付きも可)。content-type なし + 空ボディは 415 にならず {} として検証される。
+    // parameter 付きも可)。content-type なし + 空ボディは 415 にならず {} として検証される
+    // (body を `required: true` にした route だけ。required で無いと検証自体が飛ばされる)。
     description:
       "JSON 系 content-type (application/json / application/*+json) 以外、または content-type なしでボディあり",
     content: { "application/json": { schema: errorResponseSchema } },
@@ -35,6 +36,20 @@ export const jsonBodyErrorResponses = {
 }
 
 export const roleSchema = z.enum(["OWNER", "EDITOR", "VIEWER"]).openapi("Role")
+
+// 全フィールド optional な PATCH body で「更新対象が 1 つ以上」を担保する。{} は 422
+// VALIDATION_ERROR「更新する項目がありません」になる。
+// 必須フィールドを持つ body (group name / membership role) には付けない: 必須検査が先に効く。
+// undefined のみのキー (JSON では表現できない) も「無い」扱いにする。
+// message は issue を 1 つだけ持たせ、validationErrorResponse の error.message にそのまま出る。
+// refine は spec に出ないので、spec には minProperties で近い制約を書く。strict でない body では
+// spec 上は未知キー 1 つでも満たすが、実行時は未知キーを落としてから refine するので 422 になる。
+export const requireUpdatableField = <T extends z.ZodType<Record<string, unknown>>>(schema: T) =>
+  schema
+    .refine((value) => Object.values(value).some((v) => v !== undefined), {
+      message: "更新する項目がありません",
+    })
+    .openapi({ minProperties: 1 })
 
 export const groupDtoSchema = z
   .object({
@@ -125,12 +140,12 @@ export const createLocationBodyDtoSchema = z
   })
   .openapi("CreateLocationBody")
 
-export const updateLocationBodyDtoSchema = z
-  .object({
+export const updateLocationBodyDtoSchema = requireUpdatableField(
+  z.object({
     name: z.string().min(1).max(100).optional(),
     sortOrder: z.number().int().nullable().optional(),
-  })
-  .openapi("UpdateLocationBody")
+  }),
+).openapi("UpdateLocationBody")
 
 export const categoryDtoSchema = z
   .object({
@@ -152,12 +167,12 @@ export const createCategoryBodyDtoSchema = z
   })
   .openapi("CreateCategoryBody")
 
-export const updateCategoryBodyDtoSchema = z
-  .object({
+export const updateCategoryBodyDtoSchema = requireUpdatableField(
+  z.object({
     name: z.string().min(1).max(100).optional(),
     sortOrder: z.number().int().nullable().optional(),
-  })
-  .openapi("UpdateCategoryBody")
+  }),
+).openapi("UpdateCategoryBody")
 
 export const itemDtoSchema = z
   .object({
@@ -224,16 +239,16 @@ export const createItemBodyDtoSchema = z
   })
   .openapi("CreateItemBody")
 
-export const updateItemBodyDtoSchema = z
-  .object({
+export const updateItemBodyDtoSchema = requireUpdatableField(
+  z.object({
     name: z.string().min(1).max(200).optional(),
     categoryId: z.string().guid().nullable().optional(),
     defaultUnit: z.string().min(1).max(50).nullable().optional(),
     manufacturer: z.string().max(200).nullable().optional(),
     memo: z.string().max(2000).nullable().optional(),
     barcode: z.string().min(1).max(64).nullable().optional(),
-  })
-  .openapi("UpdateItemBody")
+  }),
+).openapi("UpdateItemBody")
 
 export const stockDtoSchema = z
   .object({
@@ -269,17 +284,18 @@ export const createStockBodyDtoSchema = z
 
 // quantity は consume / move / discard / soft-delete 経由で履歴を残しつつ更新する方針のため、
 // PATCH では受け付けない。.strict() で未知キー (quantity を含む) を 422 で reject する。
-export const updateStockBodyDtoSchema = z
-  .object({
-    locationId: z.string().guid().optional(),
-    unit: z.string().min(1).optional(),
-    useByDate: z.string().date().nullable().optional(),
-    bestBeforeDate: z.string().date().nullable().optional(),
-    openedAt: z.string().date().nullable().optional(),
-    note: z.string().nullable().optional(),
-  })
-  .strict()
-  .openapi("UpdateStockBody")
+export const updateStockBodyDtoSchema = requireUpdatableField(
+  z
+    .object({
+      locationId: z.string().guid().optional(),
+      unit: z.string().min(1).optional(),
+      useByDate: z.string().date().nullable().optional(),
+      bestBeforeDate: z.string().date().nullable().optional(),
+      openedAt: z.string().date().nullable().optional(),
+      note: z.string().nullable().optional(),
+    })
+    .strict(),
+).openapi("UpdateStockBody")
 
 export const stockEventDtoSchema = z
   .object({
