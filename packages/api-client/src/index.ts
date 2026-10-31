@@ -8,7 +8,7 @@ export type ClientFetch = (
 
 export type ApiClientOptions = {
   baseUrl: string
-  userId: string
+  accessToken: string
   fetch?: ClientFetch
 }
 
@@ -17,7 +17,7 @@ export type ApiClient = ReturnType<typeof createApiClient>
 export function createApiClient(opts: ApiClientOptions) {
   return hc<AppType>(opts.baseUrl, {
     headers: {
-      "x-user-id": opts.userId,
+      authorization: `Bearer ${opts.accessToken}`,
     },
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
   })

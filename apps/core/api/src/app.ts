@@ -2,7 +2,7 @@ import { OpenAPIHono } from "@hono/zod-openapi"
 import { Scalar } from "@scalar/hono-api-reference"
 import type { Db } from "@prep-hamster/db"
 import { createJanApiClient, type JanApiClient } from "@prep-hamster/jan-api"
-import { withUserAuth } from "./middleware/auth"
+import { withUserAuth, type AuthOptions } from "./middleware/auth"
 import { withBodyLimit } from "./middleware/body-limit"
 import { withDb } from "./middleware/db"
 import { onError, validationHook } from "./middleware/error"
@@ -25,6 +25,7 @@ export type AppEnv = {
 
 export type CreateAppOptions = {
   db: Db
+  auth: AuthOptions
   // 消費者は JanApiClient interface のみに依存。
   // 未指定なら env (YAHOO_SHOPPING_APP_ID) ベースの default chain を使う。
   janApi?: JanApiClient
@@ -41,7 +42,7 @@ export function createApp(opts: CreateAppOptions) {
     await next()
   })
   app.use("/v1/*", withBodyLimit)
-  app.use("/v1/*", withUserAuth)
+  app.use("/v1/*", withUserAuth(opts.auth))
 
   app.doc("/openapi.json", {
     openapi: "3.1.0",

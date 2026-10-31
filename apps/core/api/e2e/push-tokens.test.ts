@@ -4,6 +4,7 @@ import { pushTokens, users } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import { seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
+import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -16,19 +17,22 @@ beforeEach(async () => {
 const TOKEN_A = "ExponentPushToken[aaaa-1111-phone]"
 const TOKEN_B = "ExponentPushToken[bbbb-2222-tablet]"
 
-const call = (method: "POST" | "DELETE", body: unknown, userId?: string) =>
-  createApp({ db: testDb }).request("/v1/push-tokens", {
+const call = async (method: "POST" | "DELETE", body: unknown, userId?: string) =>
+  createApp({ db: testDb, auth: e2eAuth }).request("/v1/push-tokens", {
     method,
-    headers: { "content-type": "application/json", ...(userId ? { "x-user-id": userId } : {}) },
+    headers: {
+      "content-type": "application/json",
+      ...(userId ? { authorization: await bearer(userId) } : {}),
+    },
     body: JSON.stringify(body),
   })
 
-test("POST /v1/push-tokens without x-user-id returns 401", async () => {
+test("POST /v1/push-tokens without a bearer token returns 401", async () => {
   const res = await call("POST", { token: TOKEN_A })
   expect(res.status).toBe(401)
 })
 
-test("DELETE /v1/push-tokens without x-user-id returns 401", async () => {
+test("DELETE /v1/push-tokens without a bearer token returns 401", async () => {
   const res = await call("DELETE", { token: TOKEN_A })
   expect(res.status).toBe(401)
 })
@@ -81,8 +85,11 @@ test("POST rejects a string that is not an Expo push token with 422", async () =
   expect(await testDb.select().from(pushTokens)).toHaveLength(0)
 })
 
-test("POST for a user that does not exist returns 404", async () => {
-  const res = await call("POST", { token: TOKEN_A }, crypto.randomUUID())
+// 存在しない user は認証で作られるので、404 になるのは論理削除された user だけ。
+test("POST for a soft-deleted user returns 404", async () => {
+  const userId = await seedUser()
+  await testDb.update(users).set({ deletedAt: new Date() }).where(eq(users.id, userId))
+  const res = await call("POST", { token: TOKEN_A }, userId)
 
   expect(res.status).toBe(404)
   expect(await testDb.select().from(pushTokens)).toHaveLength(0)

@@ -5,7 +5,7 @@
 declare namespace NodeJS {
   interface ProcessEnv {
     EXPO_PUBLIC_API_BASE_URL?: string
-    EXPO_PUBLIC_STUB_USER_ID?: string
+    EXPO_PUBLIC_DEV_ACCESS_TOKEN?: string
     EXPO_PUBLIC_STUB_GROUP_ID?: string
   }
 }

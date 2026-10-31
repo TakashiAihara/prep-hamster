@@ -9,6 +9,7 @@ import {
   seedUser,
 } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
+import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -31,9 +32,9 @@ test("GET /v1/stocks/:id returns the stock for a member", async () => {
   const itemId = await seedItem(groupId)
   const stockId = await seedStock(groupId, itemId, locationId, 5)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}`, {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   expect(res.status).toBe(200)
   const body = (await res.json()) as { stock: { id: string; quantity: number } }
@@ -49,9 +50,9 @@ test("GET /v1/stocks/:id returns 403 for a non-member", async () => {
   const itemId = await seedItem(groupId)
   const stockId = await seedStock(groupId, itemId, locationId, 1)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}`, {
-    headers: { "x-user-id": outsiderId },
+    headers: { authorization: await bearer(outsiderId) },
   })
   expect(res.status).toBe(403)
 })
@@ -59,9 +60,9 @@ test("GET /v1/stocks/:id returns 403 for a non-member", async () => {
 test("GET /v1/stocks/:id returns 404 for a missing stock", async () => {
   const userId = await seedUser()
   await seedGroupWithMembership(userId)
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${crypto.randomUUID()}`, {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   expect(res.status).toBe(404)
 })
@@ -73,10 +74,10 @@ test("PATCH /v1/stocks/:id rejects quantity in body", async () => {
   const itemId = await seedItem(groupId)
   const stockId = await seedStock(groupId, itemId, locationId, 3)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ quantity: 99, note: "memo" }),
   })
   // .strict() で unrecognized_keys を投げ、422 で reject される
@@ -90,10 +91,10 @@ test("PATCH /v1/stocks/:id updates note / unit / dates without changing quantity
   const itemId = await seedItem(groupId)
   const stockId = await seedStock(groupId, itemId, locationId, 3)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({
       note: "updated",
       unit: "本",
@@ -119,10 +120,10 @@ test("PATCH /v1/stocks/:id with locationId in another group returns 422", async 
   const itemId = await seedItem(groupId)
   const stockId = await seedStock(groupId, itemId, locationId, 1)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ locationId: otherLocationId }),
   })
   expect(res.status).toBe(422)
@@ -143,10 +144,10 @@ test("GET /v1/stocks?categoryId filters by item.categoryId", async () => {
   await seedStock(groupId, drinkItemId, locationId, 1)
   await seedStock(groupId, noCatItemId, locationId, 1)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(
     `/v1/stocks?groupId=${groupId}&categoryId=${foodCategoryId}&includeExpired=true`,
-    { headers: { "x-user-id": userId } },
+    { headers: { authorization: await bearer(userId) } },
   )
   expect(res.status).toBe(200)
   const body = (await res.json()) as { stocks: { itemId: string }[] }
@@ -163,10 +164,10 @@ test("GET /v1/stocks?locationId filters by stock.locationId", async () => {
   await seedStock(groupId, itemId, pantryId, 1)
   await seedStock(groupId, itemId, fridgeId, 1)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(
     `/v1/stocks?groupId=${groupId}&locationId=${fridgeId}&includeExpired=true`,
-    { headers: { "x-user-id": userId } },
+    { headers: { authorization: await bearer(userId) } },
   )
   expect(res.status).toBe(200)
   const body = (await res.json()) as { stocks: { locationId: string }[] }
@@ -190,9 +191,9 @@ test("GET /v1/stocks excludes expired stocks by default", async () => {
   // 期限なし (null)
   const noExpiryId = await seedStock(groupId, itemId, locationId, 1)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks?groupId=${groupId}`, {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   expect(res.status).toBe(200)
   const body = (await res.json()) as { stocks: { id: string }[] }
@@ -211,9 +212,9 @@ test("GET /v1/stocks?includeExpired=true includes expired", async () => {
     useByDate: isoDate(-3),
   })
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks?groupId=${groupId}&includeExpired=true`, {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   expect(res.status).toBe(200)
   const body = (await res.json()) as { stocks: { id: string }[] }
@@ -238,10 +239,10 @@ test("GET /v1/stocks?expiringBefore filters by useByDate or bestBeforeDate", asy
     useByDate: isoDate(60),
   })
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(
     `/v1/stocks?groupId=${groupId}&expiringBefore=${isoDate(7)}&includeExpired=true`,
-    { headers: { "x-user-id": userId } },
+    { headers: { authorization: await bearer(userId) } },
   )
   expect(res.status).toBe(200)
   const body = (await res.json()) as { stocks: { id: string }[] }
@@ -267,9 +268,9 @@ test("GET /v1/stocks orders by useByDate ASC NULLS LAST then bestBeforeDate ASC 
     bestBeforeDate: isoDate(10),
   })
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks?groupId=${groupId}&includeExpired=true`, {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   expect(res.status).toBe(200)
   const body = (await res.json()) as { stocks: { id: string }[] }

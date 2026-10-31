@@ -4,6 +4,7 @@ import { groups, memberships } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import { seedGroupWithMembership, seedMembership, seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
+import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -13,21 +14,21 @@ beforeEach(async () => {
   await truncateAll()
 })
 
-test("GET /v1/groups without x-user-id returns 401", async () => {
-  const app = createApp({ db: testDb })
+test("GET /v1/groups without a bearer token returns 401", async () => {
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request("/v1/groups")
   expect(res.status).toBe(401)
 })
 
 test("POST /v1/groups creates group + OWNER membership in single tx", async () => {
   const userId = await seedUser()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   const res = await app.request("/v1/groups", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-user-id": userId,
+      authorization: await bearer(userId),
     },
     body: JSON.stringify({ name: "Sample Household" }),
   })
@@ -57,13 +58,13 @@ test("POST /v1/groups creates group + OWNER membership in single tx", async () =
 
 test("POST /v1/groups with empty name returns 422", async () => {
   const userId = await seedUser()
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
 
   const res = await app.request("/v1/groups", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-user-id": userId,
+      authorization: await bearer(userId),
     },
     body: JSON.stringify({ name: "" }),
   })
@@ -77,9 +78,9 @@ test("GET /v1/groups returns only groups the user is a member of", async () => {
   const aliceGroupId = await seedGroupWithMembership(aliceId, "Alice's Home")
   await seedGroupWithMembership(bobId, "Bob's Home")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request("/v1/groups", {
-    headers: { "x-user-id": aliceId },
+    headers: { authorization: await bearer(aliceId) },
   })
 
   expect(res.status).toBe(200)
@@ -94,9 +95,9 @@ test("GET /v1/groups/:id by non-member returns 403", async () => {
   const bobId = await seedUser("Bob")
   const bobGroupId = await seedGroupWithMembership(bobId, "Bob's Home")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${bobGroupId}`, {
-    headers: { "x-user-id": aliceId },
+    headers: { authorization: await bearer(aliceId) },
   })
 
   expect(res.status).toBe(403)
@@ -108,12 +109,12 @@ test("PATCH /v1/groups/:id by OWNER returns 200 and updates name", async () => {
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Old Name")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}`, {
     method: "PATCH",
     headers: {
       "content-type": "application/json",
-      "x-user-id": userId,
+      authorization: await bearer(userId),
     },
     body: JSON.stringify({ name: "New Name" }),
   })
@@ -128,12 +129,12 @@ test("PATCH /v1/groups/:id with empty body returns 422 and updates nothing", asy
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Old Name")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}`, {
     method: "PATCH",
     headers: {
       "content-type": "application/json",
-      "x-user-id": userId,
+      authorization: await bearer(userId),
     },
     body: JSON.stringify({}),
   })
@@ -153,12 +154,12 @@ test("PATCH /v1/groups/:id by EDITOR returns 403", async () => {
   const groupId = await seedGroupWithMembership(ownerId, "Shared Home")
   await seedMembership(editorId, groupId, "EDITOR")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}`, {
     method: "PATCH",
     headers: {
       "content-type": "application/json",
-      "x-user-id": editorId,
+      authorization: await bearer(editorId),
     },
     body: JSON.stringify({ name: "Hijack Attempt" }),
   })
@@ -173,12 +174,12 @@ test("PATCH /v1/groups/:id by non-member returns 403", async () => {
   const outsiderId = await seedUser("Outsider")
   const groupId = await seedGroupWithMembership(ownerId, "Closed Home")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}`, {
     method: "PATCH",
     headers: {
       "content-type": "application/json",
-      "x-user-id": outsiderId,
+      authorization: await bearer(outsiderId),
     },
     body: JSON.stringify({ name: "Sneak" }),
   })

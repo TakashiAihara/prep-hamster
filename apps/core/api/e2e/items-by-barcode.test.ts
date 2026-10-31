@@ -5,6 +5,7 @@ import type { JanApiClient, ProductMasterCandidate } from "@prep-hamster/jan-api
 import { createApp } from "../src/app"
 import { seedGroupWithMembership, seedItem, seedMembership, seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
+import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -45,10 +46,10 @@ test("POST /v1/items/by-barcode by VIEWER returns 403 INSUFFICIENT_ROLE", async 
   const groupId = await seedGroupWithMembership(ownerId, "Home")
   await seedMembership(viewerId, groupId, "VIEWER")
 
-  const app = createApp({ db: testDb, janApi: stubJanApi(sampleCandidate()) })
+  const app = createApp({ db: testDb, auth: e2eAuth, janApi: stubJanApi(sampleCandidate()) })
   const res = await app.request("/v1/items/by-barcode", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": viewerId },
+    headers: { "content-type": "application/json", authorization: await bearer(viewerId) },
     body: JSON.stringify({ groupId, barcode: VALID_JAN }),
   })
 
@@ -70,10 +71,10 @@ test("POST /v1/items/by-barcode existing item returns 200 productLookup=existing
       return null
     },
   }
-  const app = createApp({ db: testDb, janApi })
+  const app = createApp({ db: testDb, auth: e2eAuth, janApi })
   const res = await app.request("/v1/items/by-barcode", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ groupId, barcode: VALID_JAN }),
   })
 
@@ -93,10 +94,10 @@ test("POST /v1/items/by-barcode lookup hit creates productMaster + item", async 
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Home")
 
-  const app = createApp({ db: testDb, janApi: stubJanApi(sampleCandidate()) })
+  const app = createApp({ db: testDb, auth: e2eAuth, janApi: stubJanApi(sampleCandidate()) })
   const res = await app.request("/v1/items/by-barcode", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ groupId, barcode: VALID_JAN }),
   })
 
@@ -124,10 +125,10 @@ test("POST /v1/items/by-barcode lookup miss creates placeholder item", async () 
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Home")
 
-  const app = createApp({ db: testDb, janApi: stubJanApi(null) })
+  const app = createApp({ db: testDb, auth: e2eAuth, janApi: stubJanApi(null) })
   const res = await app.request("/v1/items/by-barcode", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ groupId, barcode: VALID_JAN }),
   })
 
@@ -149,11 +150,11 @@ test("POST /v1/items/by-barcode hit then existing returns 200 with productMaster
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Home")
 
-  const app = createApp({ db: testDb, janApi: stubJanApi(sampleCandidate()) })
+  const app = createApp({ db: testDb, auth: e2eAuth, janApi: stubJanApi(sampleCandidate()) })
   // 1 回目: hit で作成
   const first = await app.request("/v1/items/by-barcode", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ groupId, barcode: VALID_JAN }),
   })
   expect(first.status).toBe(201)
@@ -161,7 +162,7 @@ test("POST /v1/items/by-barcode hit then existing returns 200 with productMaster
   // 2 回目: 既存 hit で再利用 (200)
   const second = await app.request("/v1/items/by-barcode", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ groupId, barcode: VALID_JAN }),
   })
   expect(second.status).toBe(200)
@@ -179,10 +180,10 @@ test("POST /v1/items/by-barcode by non-member returns 403 FORBIDDEN_GROUP_ACCESS
   const outsiderId = await seedUser("Outsider")
   const groupId = await seedGroupWithMembership(ownerId, "Home")
 
-  const app = createApp({ db: testDb, janApi: stubJanApi(null) })
+  const app = createApp({ db: testDb, auth: e2eAuth, janApi: stubJanApi(null) })
   const res = await app.request("/v1/items/by-barcode", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": outsiderId },
+    headers: { "content-type": "application/json", authorization: await bearer(outsiderId) },
     body: JSON.stringify({ groupId, barcode: VALID_JAN }),
   })
 

@@ -6,7 +6,7 @@
 
 最小スコープでカメラ読取 → 在庫追加までを成立させる MVP。
 
-- 認証は `x-user-id` ヘッダ固定値 (Supabase Auth 本実装は v1.1.0)
+- 認証は env の access token を `Authorization: Bearer` で送る暫定 (サインイン画面は v1.1.0 の別 PR)
 - 画面: 在庫一覧 placeholder + 追加導線 (#77 で本実装)
 - API は `@prep-hamster/api-client` の `hc<AppType>` を経由
 
@@ -32,14 +32,14 @@ iOS Simulator なら `i`、Android Emulator なら `a` を押す。
 
 ```env
 EXPO_PUBLIC_API_BASE_URL=http://192.168.x.y:3000
-EXPO_PUBLIC_STUB_USER_ID=<開発機ごとの UUID>
+EXPO_PUBLIC_DEV_ACCESS_TOKEN=<Supabase の access token>
 ```
 
 - `EXPO_PUBLIC_API_BASE_URL`: Expo Go / 実機からは LAN IP 必須（localhost は届かない）
   - iOS Simulator: `http://localhost:3000`
   - Android Emulator: `http://10.0.2.2:3000`
   - 実機 (Expo Go): 開発機の LAN IP
-- `EXPO_PUBLIC_STUB_USER_ID`: API 側に seed 済みの user UUID。未設定時は `00000000-0000-0000-0000-000000000001` を fallback として送る
+- `EXPO_PUBLIC_DEV_ACCESS_TOKEN`: サインイン画面 (M-01) が入るまでの暫定。Supabase でサインインして得た access token を入れる。未設定だと API は 401 を返す
 
 ## v1.0.0 で動作確認するもの
 
@@ -76,6 +76,6 @@ iOS / 実機・本物の barcode 読取は別 Issue で扱う (本仕組みは A
 
 ## v1.1.0 以降の差し替えポイント
 
-- `src/auth.ts` の `getCurrentUserId()` を Supabase Auth ベースに置換
-- 残りの mobile コードは `getCurrentUserId()` 経由でのみ user id を参照しているので、
+- `src/auth.ts` の `getAccessToken()` を Supabase のセッションに置換
+- 残りの mobile コードは `getAccessToken()` 経由でのみ token を参照しているので、
   この 1 ファイルの差し替えで Supabase Auth 移行が完了する想定

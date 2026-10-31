@@ -4,6 +4,7 @@ import { memberships } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import { seedGroupWithMembership, seedMembership, seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
+import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -19,9 +20,9 @@ test("GET /v1/groups/:groupId/memberships returns members for any member", async
   const groupId = await seedGroupWithMembership(ownerId)
   await seedMembership(editorId, groupId, "EDITOR")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/memberships`, {
-    headers: { "x-user-id": editorId },
+    headers: { authorization: await bearer(editorId) },
   })
   expect(res.status).toBe(200)
   const body = (await res.json()) as { memberships: { userId: string; role: string }[] }
@@ -36,9 +37,9 @@ test("GET /v1/groups/:groupId/memberships returns 403 for non-member", async () 
   const outsiderId = await seedUser("outsider")
   const groupId = await seedGroupWithMembership(ownerId)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/memberships`, {
-    headers: { "x-user-id": outsiderId },
+    headers: { authorization: await bearer(outsiderId) },
   })
   expect(res.status).toBe(403)
 })
@@ -49,10 +50,10 @@ test("PATCH /v1/groups/:groupId/memberships/:userId promotes EDITOR to OWNER (OW
   const groupId = await seedGroupWithMembership(ownerId)
   await seedMembership(editorId, groupId, "EDITOR")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/memberships/${editorId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": ownerId },
+    headers: { "content-type": "application/json", authorization: await bearer(ownerId) },
     body: JSON.stringify({ role: "OWNER" }),
   })
   expect(res.status).toBe(200)
@@ -66,10 +67,10 @@ test("PATCH /v1/groups/:groupId/memberships/:userId with empty body returns 422 
   const groupId = await seedGroupWithMembership(ownerId)
   await seedMembership(editorId, groupId, "EDITOR")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/memberships/${editorId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": ownerId },
+    headers: { "content-type": "application/json", authorization: await bearer(ownerId) },
     body: JSON.stringify({}),
   })
 
@@ -99,10 +100,10 @@ test("PATCH membership by EDITOR returns 403", async () => {
   await seedMembership(editorId, groupId, "EDITOR")
   await seedMembership(viewerId, groupId, "VIEWER")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/memberships/${viewerId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": editorId },
+    headers: { "content-type": "application/json", authorization: await bearer(editorId) },
     body: JSON.stringify({ role: "EDITOR" }),
   })
   expect(res.status).toBe(403)
@@ -112,10 +113,10 @@ test("PATCH self OWNER → EDITOR returns 422 SELF_OWNER_DEMOTE", async () => {
   const ownerId = await seedUser("owner")
   const groupId = await seedGroupWithMembership(ownerId)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/memberships/${ownerId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": ownerId },
+    headers: { "content-type": "application/json", authorization: await bearer(ownerId) },
     body: JSON.stringify({ role: "EDITOR" }),
   })
   expect(res.status).toBe(422)
@@ -127,10 +128,10 @@ test("DELETE last OWNER returns 422 LAST_OWNER", async () => {
   const ownerId = await seedUser("owner")
   const groupId = await seedGroupWithMembership(ownerId)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/memberships/${ownerId}`, {
     method: "DELETE",
-    headers: { "x-user-id": ownerId },
+    headers: { authorization: await bearer(ownerId) },
   })
   expect(res.status).toBe(422)
   const body = (await res.json()) as { error: { code: string } }
@@ -143,17 +144,17 @@ test("DELETE OWNER when another OWNER exists returns 204", async () => {
   const groupId = await seedGroupWithMembership(owner1)
   await seedMembership(owner2, groupId, "OWNER")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/memberships/${owner2}`, {
     method: "DELETE",
-    headers: { "x-user-id": owner1 },
+    headers: { authorization: await bearer(owner1) },
   })
   expect(res.status).toBe(204)
 
   // 二度目はもう deletedAt が立っているので 404
   const res2 = await app.request(`/v1/groups/${groupId}/memberships/${owner2}`, {
     method: "DELETE",
-    headers: { "x-user-id": owner1 },
+    headers: { authorization: await bearer(owner1) },
   })
   expect(res2.status).toBe(404)
 })
@@ -164,10 +165,10 @@ test("DELETE EDITOR by OWNER returns 204", async () => {
   const groupId = await seedGroupWithMembership(ownerId)
   await seedMembership(editorId, groupId, "EDITOR")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/groups/${groupId}/memberships/${editorId}`, {
     method: "DELETE",
-    headers: { "x-user-id": ownerId },
+    headers: { authorization: await bearer(ownerId) },
   })
   expect(res.status).toBe(204)
 })

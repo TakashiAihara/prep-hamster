@@ -11,6 +11,7 @@ import {
   seedUser,
 } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
+import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -24,10 +25,10 @@ test("POST /v1/locations by OWNER returns 201", async () => {
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Home")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request("/v1/locations", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ groupId, name: "Pantry", sortOrder: 1 }),
   })
 
@@ -43,10 +44,10 @@ test("POST /v1/locations by VIEWER returns 403 INSUFFICIENT_ROLE", async () => {
   const groupId = await seedGroupWithMembership(ownerId, "Home")
   await seedMembership(viewerId, groupId, "VIEWER")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request("/v1/locations", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": viewerId },
+    headers: { "content-type": "application/json", authorization: await bearer(viewerId) },
     body: JSON.stringify({ groupId, name: "Pantry" }),
   })
 
@@ -60,10 +61,10 @@ test("POST /v1/locations by non-member returns 403 FORBIDDEN_GROUP_ACCESS", asyn
   const outsiderId = await seedUser("Outsider")
   const groupId = await seedGroupWithMembership(ownerId, "Home")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request("/v1/locations", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": outsiderId },
+    headers: { "content-type": "application/json", authorization: await bearer(outsiderId) },
     body: JSON.stringify({ groupId, name: "Sneak Pantry" }),
   })
 
@@ -79,9 +80,9 @@ test("GET /v1/locations?groupId=X returns ordered list (sortOrder asc, NULL last
   await seedLocation(groupId, "Pantry", 1)
   await seedLocation(groupId, "Fridge", 2)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/locations?groupId=${groupId}`, {
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
 
   expect(res.status).toBe(200)
@@ -94,9 +95,9 @@ test("GET /v1/locations?groupId=X by non-member returns 403", async () => {
   const outsiderId = await seedUser("Outsider")
   const groupId = await seedGroupWithMembership(ownerId, "Home")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/locations?groupId=${groupId}`, {
-    headers: { "x-user-id": outsiderId },
+    headers: { authorization: await bearer(outsiderId) },
   })
 
   expect(res.status).toBe(403)
@@ -108,9 +109,9 @@ test("GET /v1/locations/:id by non-member returns 403", async () => {
   const groupId = await seedGroupWithMembership(ownerId, "Home")
   const locationId = await seedLocation(groupId, "Pantry")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/locations/${locationId}`, {
-    headers: { "x-user-id": outsiderId },
+    headers: { authorization: await bearer(outsiderId) },
   })
 
   expect(res.status).toBe(403)
@@ -123,10 +124,10 @@ test("PATCH /v1/locations/:id by EDITOR returns 200", async () => {
   await seedMembership(editorId, groupId, "EDITOR")
   const locationId = await seedLocation(groupId, "Pantry")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/locations/${locationId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": editorId },
+    headers: { "content-type": "application/json", authorization: await bearer(editorId) },
     body: JSON.stringify({ name: "Pantry (Renamed)" }),
   })
 
@@ -140,10 +141,10 @@ test("PATCH /v1/locations/:id with empty body returns 422 and updates nothing", 
   const groupId = await seedGroupWithMembership(userId, "Home")
   const locationId = await seedLocation(groupId, "Pantry", 1)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/locations/${locationId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({}),
   })
 
@@ -164,10 +165,10 @@ test("PATCH /v1/locations/:id by VIEWER returns 403", async () => {
   await seedMembership(viewerId, groupId, "VIEWER")
   const locationId = await seedLocation(groupId, "Pantry")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/locations/${locationId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": viewerId },
+    headers: { "content-type": "application/json", authorization: await bearer(viewerId) },
     body: JSON.stringify({ name: "Hijack" }),
   })
 
@@ -179,10 +180,10 @@ test("DELETE /v1/locations/:id without children returns 204 + soft-delete row", 
   const groupId = await seedGroupWithMembership(userId, "Home")
   const locationId = await seedLocation(groupId, "Pantry")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/locations/${locationId}`, {
     method: "DELETE",
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
 
   expect(res.status).toBe(204)
@@ -197,10 +198,10 @@ test("DELETE /v1/locations/:id with referencing stock returns 422 LOCATION_IN_US
   const itemId = await seedItem(groupId, "Canned Tomato")
   await seedStock(groupId, itemId, locationId)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/locations/${locationId}`, {
     method: "DELETE",
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
 
   expect(res.status).toBe(422)

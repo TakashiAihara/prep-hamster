@@ -11,6 +11,7 @@ import {
   seedUser,
 } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
+import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -32,10 +33,10 @@ async function setupGroupWithStock(quantity = 10) {
 test("PATCH /v1/stocks/:id with empty body returns 422 and updates nothing", async () => {
   const { userId, stockId } = await setupGroupWithStock(5)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({}),
   })
 
@@ -58,10 +59,10 @@ test("PATCH /v1/stocks/:id with empty body returns 422 and updates nothing", asy
 test("POST /v1/stocks/:id/consume reduces quantity + records CONSUME event", async () => {
   const { userId, stockId, groupId } = await setupGroupWithStock(10)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}/consume`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ quantityDelta: 3, reason: "lunch" }),
   })
 
@@ -83,10 +84,10 @@ test("POST /v1/stocks/:id/consume reduces quantity + records CONSUME event", asy
 test("POST /v1/stocks/:id/consume rejects when result would be negative", async () => {
   const { userId, stockId } = await setupGroupWithStock(2)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}/consume`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ quantityDelta: 10 }),
   })
 
@@ -110,10 +111,10 @@ test("POST /v1/stocks/:id/consume by VIEWER returns 403 INSUFFICIENT_ROLE", asyn
   const itemId = await seedItem(groupId, "Apple")
   const stockId = await seedStock(groupId, itemId, locationId, 5)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}/consume`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": viewerId },
+    headers: { "content-type": "application/json", authorization: await bearer(viewerId) },
     body: JSON.stringify({ quantityDelta: 1 }),
   })
 
@@ -126,10 +127,10 @@ test("POST /v1/stocks/:id/consume on soft-deleted stock returns 404", async () =
   const { userId, stockId } = await setupGroupWithStock(5)
   await testDb.update(stocks).set({ deletedAt: new Date() }).where(eq(stocks.id, stockId))
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}/consume`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ quantityDelta: 1 }),
   })
 
@@ -139,10 +140,10 @@ test("POST /v1/stocks/:id/consume on soft-deleted stock returns 404", async () =
 test("POST /v1/stocks/:id/discard records DISCARD event", async () => {
   const { userId, stockId } = await setupGroupWithStock(8)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}/discard`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ quantityDelta: 2, reason: "expired" }),
   })
 
@@ -160,10 +161,10 @@ test("POST /v1/stocks/:id/move updates locationId + records MOVE event", async (
   const { userId, groupId, locationId, stockId } = await setupGroupWithStock(5)
   const otherLocationId = await seedLocation(groupId, "Garage")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}/move`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ toLocationId: otherLocationId, reason: "rearrange" }),
   })
 
@@ -188,10 +189,10 @@ test("POST /v1/stocks/:id/move updates locationId + records MOVE event", async (
 test("POST /v1/stocks/:id/move to same location returns 422 MOVE_NOOP", async () => {
   const { userId, locationId, stockId } = await setupGroupWithStock(5)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}/move`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ toLocationId: locationId }),
   })
 
@@ -207,10 +208,10 @@ test("POST /v1/stocks/:id/move to other group's location returns 422 LOCATION_GR
   const otherGroupId = await seedGroupWithMembership(otherOwner, "Other")
   const otherLocationId = await seedLocation(otherGroupId, "Foreign")
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}/move`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ toLocationId: otherLocationId }),
   })
 
@@ -222,10 +223,10 @@ test("POST /v1/stocks/:id/move to other group's location returns 422 LOCATION_GR
 test("DELETE /v1/stocks/:id soft-deletes + records final DISCARD event for remaining qty", async () => {
   const { userId, stockId, groupId } = await setupGroupWithStock(4)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}`, {
     method: "DELETE",
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
 
   expect(res.status).toBe(204)
@@ -248,10 +249,10 @@ test("DELETE /v1/stocks/:id soft-deletes + records final DISCARD event for remai
 test("DELETE /v1/stocks/:id with quantity=0 does not create extra event", async () => {
   const { userId, stockId } = await setupGroupWithStock(0)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const res = await app.request(`/v1/stocks/${stockId}`, {
     method: "DELETE",
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
 
   expect(res.status).toBe(204)
@@ -262,16 +263,16 @@ test("DELETE /v1/stocks/:id with quantity=0 does not create extra event", async 
 test("After soft-delete, consume on same id returns 404", async () => {
   const { userId, stockId } = await setupGroupWithStock(5)
 
-  const app = createApp({ db: testDb })
+  const app = createApp({ db: testDb, auth: e2eAuth })
   const del = await app.request(`/v1/stocks/${stockId}`, {
     method: "DELETE",
-    headers: { "x-user-id": userId },
+    headers: { authorization: await bearer(userId) },
   })
   expect(del.status).toBe(204)
 
   const consume = await app.request(`/v1/stocks/${stockId}/consume`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-user-id": userId },
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ quantityDelta: 1 }),
   })
   expect(consume.status).toBe(404)
