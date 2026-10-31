@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { getAccessToken, initialAuthStatus, parseAuthCallback, redirectFor } from "../auth"
+import { gateFor, getAccessToken, initialAuthStatus, parseAuthCallback } from "../auth"
 
 const NO_CODE = { error: "コールバック URL に code がありません" }
 
@@ -42,22 +42,19 @@ test("parseAuthCallback returns an error without a code", () => {
   expect(parseAuthCallback("prep-hamster://auth/callback?state=s")).toEqual(NO_CODE)
 })
 
-test("redirectFor sends a signed-out user to /sign-in except on sign-in and auth screens", () => {
-  expect(redirectFor("signed-out", "(tabs)")).toBe("/sign-in")
-  expect(redirectFor("signed-out", undefined)).toBe("/sign-in")
-  expect(redirectFor("signed-out", "sign-in")).toBeNull()
-  expect(redirectFor("signed-out", "auth")).toBeNull()
+test("gateFor renders the app only for a signed-in user and sends others to /sign-in", () => {
+  expect(gateFor("signed-in", "app")).toEqual({ render: true })
+  expect(gateFor("signed-out", "app")).toEqual({ render: false, redirect: "/sign-in" })
 })
 
-test("redirectFor sends a signed-in user away from /sign-in only", () => {
-  expect(redirectFor("signed-in", "sign-in")).toBe("/")
-  expect(redirectFor("signed-in", "(tabs)")).toBeNull()
-  expect(redirectFor("signed-in", "auth")).toBeNull()
+test("gateFor renders the sign-in screen only for a signed-out user and sends others home", () => {
+  expect(gateFor("signed-out", "sign-in")).toEqual({ render: true })
+  expect(gateFor("signed-in", "sign-in")).toEqual({ render: false, redirect: "/" })
 })
 
-test("redirectFor does nothing while loading", () => {
-  expect(redirectFor("loading", "sign-in")).toBeNull()
-  expect(redirectFor("loading", "(tabs)")).toBeNull()
+test("gateFor renders nothing and redirects nowhere while loading", () => {
+  expect(gateFor("loading", "app")).toEqual({ render: false, redirect: null })
+  expect(gateFor("loading", "sign-in")).toEqual({ render: false, redirect: null })
 })
 
 test("initialAuthStatus is signed-in with a session and signed-out without one", async () => {

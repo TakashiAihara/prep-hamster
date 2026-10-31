@@ -57,13 +57,15 @@ export async function signOut(): Promise<void> {
 
 export type AuthStatus = "loading" | "signed-in" | "signed-out"
 
-// セッションの有無から、今の画面 (最上位の segment) を移す先を決める。移さないなら null
-export function redirectFor(status: AuthStatus, firstSegment: string | undefined): string | null {
-  if (status === "loading") return null
-  if (status === "signed-out") {
-    return firstSegment === "sign-in" || firstSegment === "auth" ? null : "/sign-in"
-  }
-  return firstSegment === "sign-in" ? "/" : null
+export type Gate = { render: true } | { render: false; redirect: string | null }
+
+// 画面グループごとの入口の判定。アプリ本体 (タブ) はサインイン済みのときだけ描き、サインイン画面は
+// 未サインインのときだけ描く。描かないときは中身をマウントしない (マウントすると API を叩いてしまう)。
+export function gateFor(status: AuthStatus, area: "app" | "sign-in"): Gate {
+  if (status === "loading") return { render: false, redirect: null }
+  if (area === "app")
+    return status === "signed-in" ? { render: true } : { render: false, redirect: "/sign-in" }
+  return status === "signed-out" ? { render: true } : { render: false, redirect: "/" }
 }
 
 // 起動時の状態。保存したセッションが読めない (壊れた・鍵が消えた) ときは、loading のまま止めず

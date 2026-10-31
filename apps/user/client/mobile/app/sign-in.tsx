@@ -1,10 +1,19 @@
 import { useState } from "react"
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native"
 import { signInWithGoogle } from "@/auth"
+import { AuthGate } from "@/auth-status"
 
-// M-01 サインイン。セッションができると _layout の判定で一覧のタブに移る。
+// M-01 サインイン。セッションができると AuthGate が一覧のタブに移す。
 
-export default function SignIn() {
+export default function SignInScreen() {
+  return (
+    <AuthGate area="sign-in">
+      <SignIn />
+    </AuthGate>
+  )
+}
+
+function SignIn() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
