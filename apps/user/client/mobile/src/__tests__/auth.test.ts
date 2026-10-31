@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { getAccessToken, parseAuthCallback, redirectFor } from "../auth"
+import { getAccessToken, initialAuthStatus, parseAuthCallback, redirectFor } from "../auth"
 
 const NO_CODE = { error: "コールバック URL に code がありません" }
 
@@ -58,4 +58,17 @@ test("redirectFor sends a signed-in user away from /sign-in only", () => {
 test("redirectFor does nothing while loading", () => {
   expect(redirectFor("loading", "sign-in")).toBeNull()
   expect(redirectFor("loading", "(tabs)")).toBeNull()
+})
+
+test("initialAuthStatus is signed-in with a session and signed-out without one", async () => {
+  expect(await initialAuthStatus(async () => ({ access_token: "a" }))).toBe("signed-in")
+  expect(await initialAuthStatus(async () => null)).toBe("signed-out")
+})
+
+test("initialAuthStatus falls back to signed-out when the stored session cannot be read", async () => {
+  expect(
+    await initialAuthStatus(async () => {
+      throw new Error("decrypt failed")
+    }),
+  ).toBe("signed-out")
 })

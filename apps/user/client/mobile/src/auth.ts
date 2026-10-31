@@ -65,3 +65,15 @@ export function redirectFor(status: AuthStatus, firstSegment: string | undefined
   }
   return firstSegment === "sign-in" ? "/" : null
 }
+
+// 起動時の状態。保存したセッションが読めない (壊れた・鍵が消えた) ときは、loading のまま止めず
+// サインアウト扱いにしてサインイン画面に回す。
+export async function initialAuthStatus(
+  getSession: SessionGetter = loadSession,
+): Promise<"signed-in" | "signed-out"> {
+  try {
+    return (await getSession()) ? "signed-in" : "signed-out"
+  } catch {
+    return "signed-out"
+  }
+}

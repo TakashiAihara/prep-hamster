@@ -1,11 +1,21 @@
 import { Ionicons } from "@expo/vector-icons"
 import { Tabs } from "expo-router"
-import { Pressable, Text } from "react-native"
+import { Alert, Pressable, Text } from "react-native"
 import { signOut } from "@/auth"
 
 function SignOutButton() {
   return (
-    <Pressable onPress={() => void signOut()} style={{ paddingHorizontal: 16 }}>
+    <Pressable
+      onPress={() => {
+        signOut().catch((err: unknown) => {
+          Alert.alert(
+            "サインアウトできませんでした",
+            err instanceof Error ? err.message : String(err),
+          )
+        })
+      }}
+      style={{ paddingHorizontal: 16 }}
+    >
       <Text style={{ color: "#2c7be5", fontSize: 14 }}>サインアウト</Text>
     </Pressable>
   )

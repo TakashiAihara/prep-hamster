@@ -1,7 +1,7 @@
 import { Stack, useRouter, useSegments } from "expo-router"
 import { StatusBar } from "expo-status-bar"
 import { useEffect, useState } from "react"
-import { redirectFor, type AuthStatus } from "@/auth"
+import { initialAuthStatus, redirectFor, type AuthStatus } from "@/auth"
 import { supabase } from "@/supabase"
 
 export default function RootLayout() {
@@ -10,10 +10,7 @@ export default function RootLayout() {
   const router = useRouter()
 
   useEffect(() => {
-    void (async () => {
-      const { data } = await supabase.auth.getSession()
-      setStatus(data.session ? "signed-in" : "signed-out")
-    })()
+    void initialAuthStatus().then(setStatus)
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       setStatus(session ? "signed-in" : "signed-out")
     })
