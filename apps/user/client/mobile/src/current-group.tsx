@@ -126,9 +126,11 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
       const listRes = await getApiClient().v1.groups.$get()
       if (startedIn !== session.current) return
       if (!listRes.ok) {
-        // 参加は済んでいるので、一覧は次の取り直しに任せる
+        // 参加は済んでいるので、選ぶ id だけ残して一覧は取り直しに任せる。reload() で画面は入口へ戻るので、
+        // throw して呼び出し側の onJoined (back) を止め、遷移を 1 回にする
+        await AsyncStorage.setItem(STORED_ID_KEY, membership.groupId).catch(() => {})
         reload()
-        return
+        throw new Error("参加しました。グループの一覧を読み直しています")
       }
       const { groups } = await listRes.json()
       if (startedIn !== session.current) return

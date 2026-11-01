@@ -1,9 +1,11 @@
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 
-// 招待コードは 1 回しか使えない (API が使用済みにする) ので、文面にもそう書く
-export function inviteMessage(groupName: string, token: string): string {
+// 招待コードは 1 回しか使えない (API が使用済みにする) ので、文面にもそう書く。
+// 期限は API の既定値を写さず、発行の応答の expiresAt から端末の日付で出す
+export function inviteMessage(groupName: string, token: string, expiresAt: string): string {
+  const until = new Date(expiresAt)
   return [
-    `prep-hamster の「${groupName}」への招待コード (1 人だけ・7 日間使えます):`,
+    `prep-hamster の「${groupName}」への招待コード (1 人だけ・${until.getMonth() + 1}/${until.getDate()} まで使えます):`,
     token,
     "アプリの「招待コードで参加」に、このメッセージをまるごと貼ってください",
   ].join("\n")

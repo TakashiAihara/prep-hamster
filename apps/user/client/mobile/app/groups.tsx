@@ -16,7 +16,7 @@ async function shareInvitation(groupId: string, groupName: string): Promise<stri
   })
   if (!res.ok) return apiErrorMessage(res, `招待できませんでした (HTTP ${res.status})`)
   const { invitation } = await res.json()
-  await Share.share({ message: inviteMessage(groupName, invitation.token) })
+  await Share.share({ message: inviteMessage(groupName, invitation.token, invitation.expiresAt) })
   return null
 }
 
