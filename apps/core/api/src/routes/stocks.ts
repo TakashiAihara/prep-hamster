@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm"
-import { items, locations, memberships, stockEvents, stocks } from "@prep-hamster/db"
+import { items, locations, stockEvents, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
@@ -207,11 +207,12 @@ const createStockRoute = createRoute({
       content: { "application/json": { schema: errorResponseSchema } },
     },
     403: {
-      description: "未参加",
+      description: "未参加 / role 不足",
       content: { "application/json": { schema: errorResponseSchema } },
     },
     422: {
-      description: "ボディ不正",
+      description:
+        "ボディ不正 / itemId・locationId が別 group (ITEM_GROUP_MISMATCH / LOCATION_GROUP_MISMATCH)",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },
@@ -501,28 +502,45 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
     const db = c.get("db")
     const userId = c.get("userId")
 
-    // body.groupId の membership は middleware では検査できないため (body 読込のタイミング)、
-    // ここで明示的にチェックする。本検査の middleware 化は別 Issue (#69 後続) で扱う。
-    const [member] = await db
-      .select({ id: memberships.id })
-      .from(memberships)
-      .where(
-        and(
-          eq(memberships.userId, userId),
-          eq(memberships.groupId, body.groupId),
-          isNull(memberships.deletedAt),
-        ),
-      )
+    // body.groupId は middleware では読めない (body 読込のタイミング) ので、items / categories の作成と同じく
+    // ここで EDITOR 以上を確かめる (VIEWER に在庫を作らせない)
+    const access = await checkGroupAccess(db, userId, body.groupId, "EDITOR")
+    if (!access.ok) {
+      return c.json(access.body, access.status)
+    }
+
+    // item / location が body.groupId の active なものであることを検証する (move / PATCH と同じ基準)。
+    const [item] = await db
+      .select({ groupId: items.groupId })
+      .from(items)
+      .where(and(eq(items.id, body.itemId), isNull(items.deletedAt)))
       .limit(1)
-    if (!member) {
+    if (!item || item.groupId !== body.groupId) {
       return c.json(
         {
           error: {
-            code: "FORBIDDEN_GROUP_ACCESS",
-            message: "この group に対するアクセス権がありません",
+            code: "ITEM_GROUP_MISMATCH",
+            message: "itemId が同じ group の active な item ではありません",
           },
         },
-        403,
+        422,
+      )
+    }
+
+    const [loc] = await db
+      .select({ groupId: locations.groupId })
+      .from(locations)
+      .where(and(eq(locations.id, body.locationId), isNull(locations.deletedAt)))
+      .limit(1)
+    if (!loc || loc.groupId !== body.groupId) {
+      return c.json(
+        {
+          error: {
+            code: "LOCATION_GROUP_MISMATCH",
+            message: "locationId が同じ group の active な location ではありません",
+          },
+        },
+        422,
       )
     }
 
