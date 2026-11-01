@@ -1,67 +1,37 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { getApiClient } from "./api"
-import { getCurrentGroupId } from "./config"
+import { useCurrentGroup } from "./current-group"
+import { joinStocksWithMasters, type StockListItem } from "./stock-join"
+
+export type { StockListItem }
 
 // 在庫一覧 + アイテム / 場所マスタを並行取得して、画面表示用に join したデータを返す。
 // react-query は依存追加を増やすので useState/useEffect の最小構成で。
 // 規模が増えたら別途 issue で react-query 導入を検討。
-
-export type StockListItem = {
-  id: string
-  itemName: string
-  locationName: string
-  quantity: number
-  unit: string
-  useByDate: string | null
-  bestBeforeDate: string | null
-}
 
 type State =
   | { status: "loading" }
   | { status: "ok"; rows: StockListItem[] }
   | { status: "error"; message: string }
 
-type StockRow = {
-  id: string
-  itemId: string
-  locationId: string
-  quantity: number
-  unit: string
-  useByDate: string | null
-  bestBeforeDate: string | null
-}
-
-// items / locations を id → name の Map に畳み込み、stocks に画面表示用 join した行を作る。
-// hook 本体から切り出すことで描画なしの unit test で挙動を固定できる。
-export function joinStocksWithMasters(
-  stocks: StockRow[],
-  items: { id: string; name: string }[],
-  locations: { id: string; name: string }[],
-): StockListItem[] {
-  const itemMap = new Map(items.map((i) => [i.id, i.name]))
-  const locMap = new Map(locations.map((l) => [l.id, l.name]))
-  return stocks.map((s) => ({
-    id: s.id,
-    itemName: itemMap.get(s.itemId) ?? "(unknown item)",
-    locationName: locMap.get(s.locationId) ?? "(unknown location)",
-    quantity: s.quantity,
-    unit: s.unit,
-    useByDate: s.useByDate,
-    bestBeforeDate: s.bestBeforeDate,
-  }))
-}
-
 export function useStocks(): { state: State; reload: () => void } {
   const [state, setState] = useState<State>({ status: "loading" })
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey((n) => n + 1), [])
+  const groupId = useCurrentGroup().group?.id
+  const loadedGroupId = useRef(groupId)
 
   useEffect(() => {
+    if (!groupId) return
+    // 前のグループの行を見せたままにしない。同じグループの reload では spinner を出さない
+    if (loadedGroupId.current !== groupId) {
+      loadedGroupId.current = groupId
+      setState({ status: "loading" })
+    }
     let cancelled = false
     void (async () => {
       try {
         const client = getApiClient()
-        const groupId = getCurrentGroupId()
         const [stocksRes, itemsRes, locationsRes] = await Promise.all([
           client.v1.stocks.$get({ query: { groupId } }),
           client.v1.items.$get({ query: { groupId } }),
@@ -94,7 +64,7 @@ export function useStocks(): { state: State; reload: () => void } {
     return () => {
       cancelled = true
     }
-  }, [reloadKey])
+  }, [reloadKey, groupId])
 
   return { state, reload }
 }

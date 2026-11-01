@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native"
 import { getApiClient } from "@/api"
-import { getCurrentGroupId } from "@/config"
+import { useCurrentGroup } from "@/current-group"
 
 // 詳細入力 + 保存画面。
 // 受け取る params:
@@ -45,6 +45,7 @@ export default function AddDetailsScreen() {
   const params = useLocalSearchParams<{ itemId: string; productLookup: string }>()
   const itemId = params.itemId
   const productLookup = params.productLookup as "existing" | "hit" | "miss" | undefined
+  const groupId = useCurrentGroup().group?.id
 
   const [load, setLoad] = useState<LoadState>({ status: "loading" })
   const [name, setName] = useState("")
@@ -61,11 +62,14 @@ export default function AddDetailsScreen() {
 
   useEffect(() => {
     if (!itemId) return
+    if (!groupId) {
+      setLoad({ status: "error", message: "グループが選ばれていません" })
+      return
+    }
     let cancelled = false
     void (async () => {
       try {
         const client = getApiClient()
-        const groupId = getCurrentGroupId()
         const [itemRes, locsRes] = await Promise.all([
           client.v1.items[":id"].$get({ param: { id: itemId } }),
           client.v1.locations.$get({ query: { groupId } }),
@@ -93,7 +97,7 @@ export default function AddDetailsScreen() {
     return () => {
       cancelled = true
     }
-  }, [itemId])
+  }, [itemId, groupId])
 
   if (!itemId) {
     return (
@@ -118,9 +122,12 @@ export default function AddDetailsScreen() {
   }
 
   const canEditName = productLookup === "miss"
-  const groupId = getCurrentGroupId()
 
   async function onSave() {
+    if (!groupId) {
+      setSaveError("グループが選ばれていません")
+      return
+    }
     if (!locationId) {
       setSaveError("場所を選択してください")
       return
