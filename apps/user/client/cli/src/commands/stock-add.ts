@@ -23,7 +23,7 @@ export const stockAddCommand = defineCommand({
       process.exit(1)
     }
 
-    const client = makeClient()
+    const client = await makeClient()
     const res = await client.v1.stocks.$post({
       json: {
         groupId: args.groupId,

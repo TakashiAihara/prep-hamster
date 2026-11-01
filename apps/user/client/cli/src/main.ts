@@ -1,6 +1,8 @@
 import { defineCommand } from "citty"
 import { stockListCommand } from "./commands/stock-list"
 import { stockAddCommand } from "./commands/stock-add"
+import { loginCommand } from "./commands/login"
+import { logoutCommand } from "./commands/logout"
 
 const stockCommand = defineCommand({
   meta: {
@@ -20,6 +22,8 @@ export const main = defineCommand({
     description: "備蓄管理アプリのユーザー CLI",
   },
   subCommands: {
+    login: loginCommand,
+    logout: logoutCommand,
     stock: stockCommand,
   },
 })

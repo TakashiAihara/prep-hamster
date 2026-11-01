@@ -14,7 +14,7 @@ export const stockListCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const client = makeClient()
+    const client = await makeClient()
     const res = await client.v1.stocks.$get({
       query: { groupId: args.groupId },
     })

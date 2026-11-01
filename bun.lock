@@ -48,6 +48,7 @@
       "dependencies": {
         "@prep-hamster/api-client": "workspace:*",
         "@prep-hamster/schema": "workspace:*",
+        "@supabase/supabase-js": "^2.118.0",
         "citty": "^0.2.2",
       },
     },
