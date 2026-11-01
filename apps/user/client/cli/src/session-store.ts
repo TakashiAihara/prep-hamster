@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { randomUUID } from "node:crypto"
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 export type CallbackResult = { code: string } | { error: string }
@@ -19,30 +20,54 @@ export function codeFromCallback(input: string, path: string): CallbackResult | 
 }
 
 export function sessionFilePath(env: Record<string, string | undefined>): string {
-  const base = env["XDG_CONFIG_HOME"] || join(env["HOME"] ?? "", ".config")
-  return join(base, "prep-hamster", "session.json")
+  const xdg = env["XDG_CONFIG_HOME"]
+  const home = env["HOME"]
+  // どちらも無いと相対パスになり、cwd に token を書いてしまうので止める
+  if (!xdg && !home) throw new Error("XDG_CONFIG_HOME か HOME を設定してください")
+  return join(xdg || join(home ?? "", ".config"), "prep-hamster", "session.json")
 }
 
 // 途中で切れたファイルを読ませないよう、同じディレクトリの一時ファイルから rename する。
-// writeFileSync の mode は umask に削られるので、chmod で 0600 に揃える。
+// 一時ファイルは毎回新しい名前で作る (wx) ので、mode 0600 が必ず効く (umask は狭めるだけ)
 export function writeSessionFile(file: string, content: string): void {
   const dir = dirname(file)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
-  const tmp = join(dir, `.session.${process.pid}.tmp`)
-  // 新しく作る一時ファイルは最初から 0600 で作り、前の中断で残った一時ファイルは chmod で締める
-  writeFileSync(tmp, content, { mode: 0o600 })
-  chmodSync(tmp, 0o600)
+  const tmp = join(dir, `.session.${randomUUID()}.tmp`)
+  writeFileSync(tmp, content, { mode: 0o600, flag: "wx" })
   renameSync(tmp, file)
 }
 
 function readAll(file: string): Record<string, string> {
   if (!existsSync(file)) return {}
   try {
-    return JSON.parse(readFileSync(file, "utf8")) as Record<string, string>
+    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"))
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, string>)
+      : {}
   } catch {
     // 壊れたファイルは未サインインとして扱い、次の setItem で作り直す
     return {}
   }
+}
+
+// supabase-js のキーと混ざらない名前で、login に使った接続先を同じファイルに残す
+const CONNECTION_KEY = "prep-hamster.connection"
+
+export type Connection = { url: string; key: string }
+
+export function readConnection(file: string): Connection | null {
+  const raw = readAll(file)[CONNECTION_KEY]
+  if (!raw) return null
+  try {
+    const value = JSON.parse(raw) as Partial<Connection>
+    return value.url && value.key ? { url: value.url, key: value.key } : null
+  } catch {
+    return null
+  }
+}
+
+export function writeConnection(file: string, connection: Connection): void {
+  fileStorage(file).setItem(CONNECTION_KEY, JSON.stringify(connection))
 }
 
 // supabase-js の storage をセッションファイルに向ける (キー → 値の JSON オブジェクト)

@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { codeFromCallback, sessionFilePath, writeSessionFile } from "../session-store"
+import {
+  codeFromCallback,
+  fileStorage,
+  readConnection,
+  sessionFilePath,
+  writeConnection,
+  writeSessionFile,
+} from "../session-store"
 
 describe("codeFromCallback", () => {
   test("takes the code from the callback URL", () => {
@@ -44,6 +51,10 @@ describe("sessionFilePath", () => {
   test("falls back to ~/.config", () => {
     expect(sessionFilePath({ HOME: "/home/u" })).toBe("/home/u/.config/prep-hamster/session.json")
   })
+
+  test("refuses a relative path when neither XDG_CONFIG_HOME nor HOME is set", () => {
+    expect(() => sessionFilePath({})).toThrow("XDG_CONFIG_HOME か HOME")
+  })
 })
 
 describe("writeSessionFile", () => {
@@ -52,21 +63,37 @@ describe("writeSessionFile", () => {
     if (dir) rmSync(dir, { recursive: true, force: true })
   })
 
-  test("creates the file readable only by the owner", () => {
+  test("creates the file readable only by the owner and leaves no temp file", async () => {
     dir = mkdtempSync(join(tmpdir(), "ph-session-"))
     const file = join(dir, "prep-hamster", "session.json")
     writeSessionFile(file, '{"k":"v"}')
+    writeSessionFile(file, '{"k":"w"}')
     expect(statSync(file).mode & 0o777).toBe(0o600)
-    expect(Bun.file(file).text()).resolves.toBe('{"k":"v"}')
+    await expect(Bun.file(file).text()).resolves.toBe('{"k":"w"}')
+    expect(readdirSync(join(dir, "prep-hamster"))).toEqual(["session.json"])
+  })
+})
+
+describe("session file contents", () => {
+  let dir = ""
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true })
   })
 
-  test("tightens a temp file left behind by an interrupted write", () => {
+  test("keeps the login connection next to the supabase-js keys", () => {
     dir = mkdtempSync(join(tmpdir(), "ph-session-"))
-    const parent = join(dir, "prep-hamster")
-    mkdirSync(parent, { recursive: true })
-    writeFileSync(join(parent, `.session.${process.pid}.tmp`), "stale", { mode: 0o644 })
-    const file = join(parent, "session.json")
-    writeSessionFile(file, '{"k":"v"}')
-    expect(statSync(file).mode & 0o777).toBe(0o600)
+    const file = join(dir, "session.json")
+    fileStorage(file).setItem("sb-x-auth-token", "token-json")
+    writeConnection(file, { url: "https://p.example.test", key: "pk-1" })
+    expect(readConnection(file)).toEqual({ url: "https://p.example.test", key: "pk-1" })
+    expect(fileStorage(file).getItem("sb-x-auth-token")).toBe("token-json")
+  })
+
+  test("treats a file that is not a JSON object as empty", () => {
+    dir = mkdtempSync(join(tmpdir(), "ph-session-"))
+    const file = join(dir, "session.json")
+    writeFileSync(file, "null")
+    expect(fileStorage(file).getItem("anything")).toBeNull()
+    expect(readConnection(file)).toBeNull()
   })
 })

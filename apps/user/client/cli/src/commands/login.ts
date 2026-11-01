@@ -1,7 +1,7 @@
 import { defineCommand } from "citty"
 import { createInterface } from "node:readline"
-import { createAuthClient } from "../auth"
-import { codeFromCallback, type CallbackResult } from "../session-store"
+import { createAuthClient, currentConnection, sessionFile } from "../auth"
+import { codeFromCallback, writeConnection, type CallbackResult } from "../session-store"
 
 const CALLBACK_PATH = "/callback"
 const TIMEOUT_MS = 5 * 60 * 1000
@@ -24,8 +24,9 @@ export const loginCommand = defineCommand({
     description: "Google でサインインしてセッションを保存する",
   },
   async run() {
+    const connection = currentConnection()
     const supabase = createAuthClient()
-    if (!supabase) {
+    if (!supabase || !connection) {
       console.error(
         "Error: PREP_HAMSTER_SUPABASE_URL / PREP_HAMSTER_SUPABASE_PUBLISHABLE_KEY を設定してください",
       )
@@ -44,6 +45,8 @@ export const loginCommand = defineCommand({
           if ("error" in result) throw new Error(result.error)
           const { data, error } = await supabase.auth.exchangeCodeForSession(result.code)
           if (error) throw error
+          // 以降のコマンドが env 無しでも同じ project に繋がるよう、接続先も残す
+          writeConnection(sessionFile(), connection)
           return data.user?.email ?? ""
         })()
         begin(first)
@@ -97,7 +100,7 @@ export const loginCommand = defineCommand({
       })
 
       const email = await Promise.race([started, timeout])
-      console.log(`サインインしました: ${email}`)
+      console.log(email ? `サインインしました: ${email}` : "サインインしました")
     } catch (e) {
       console.error(`Error: ${e instanceof Error ? e.message : String(e)}`)
       process.exitCode = 1
