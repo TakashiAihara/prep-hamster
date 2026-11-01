@@ -76,5 +76,5 @@ v1.1.0 は Android と Google だけ (判断キュー Q-01)。Apple は #149。
 
 ### 確かめ方
 
-- d1 には Android の SDK も端末も無いので、サインインの往復は手元の Android 端末 (Expo Go) で確かめる。API は d1 で `SUPABASE_URL` を Supabase の project に向けて LAN に出す
+- サインインの往復は実機の Android 端末 (Expo Go) で確かめる。API は開発機で `SUPABASE_URL` を Supabase の project に向けて LAN に出す
 - 自動テストは、`getAccessToken()` がセッションの token を返すこと / 戻り URL の `code` の取り出し (code が無い・error 付きを含む) / セッションが無いとき M-01 に回す判定、を unit で押さえる
