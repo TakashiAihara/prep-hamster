@@ -211,7 +211,8 @@ const createStockRoute = createRoute({
       content: { "application/json": { schema: errorResponseSchema } },
     },
     422: {
-      description: "ボディ不正",
+      description:
+        "ボディ不正 / itemId・locationId が別 group (ITEM_GROUP_MISMATCH / LOCATION_GROUP_MISMATCH)",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },
@@ -523,6 +524,41 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
           },
         },
         403,
+      )
+    }
+
+    // item / location が body.groupId の active なものであることを検証する (move / PATCH と同じ基準)。
+    const [item] = await db
+      .select({ groupId: items.groupId })
+      .from(items)
+      .where(and(eq(items.id, body.itemId), isNull(items.deletedAt)))
+      .limit(1)
+    if (!item || item.groupId !== body.groupId) {
+      return c.json(
+        {
+          error: {
+            code: "ITEM_GROUP_MISMATCH",
+            message: "itemId が同じ group の active な item ではありません",
+          },
+        },
+        422,
+      )
+    }
+
+    const [loc] = await db
+      .select({ groupId: locations.groupId })
+      .from(locations)
+      .where(and(eq(locations.id, body.locationId), isNull(locations.deletedAt)))
+      .limit(1)
+    if (!loc || loc.groupId !== body.groupId) {
+      return c.json(
+        {
+          error: {
+            code: "LOCATION_GROUP_MISMATCH",
+            message: "locationId が同じ group の active な location ではありません",
+          },
+        },
+        422,
       )
     }
 
