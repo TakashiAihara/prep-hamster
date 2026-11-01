@@ -121,10 +121,20 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
       const { membership } = await res.json()
       // 待つ間にサインアウトしていたら、次のユーザーの端末の選択に混ぜない
       if (startedIn !== session.current) return
-      // 取り直しは保存済みの id を読んで現在のグループを決めるので、先に書いてから reload する。
-      // 書けなくても参加は済んでいるため握り、その場合は一覧に出るだけで選択は変わらない
+      // reload() は状態を loading に戻し、開いている切替画面を入口へ飛ばしてしまう (onJoined の back と二重になる)。
+      // 一覧だけ取り直して、loading を挟まずに参加したグループを選ぶ
+      const listRes = await getApiClient().v1.groups.$get()
+      if (startedIn !== session.current) return
+      if (!listRes.ok) {
+        // 参加は済んでいるので、一覧は次の取り直しに任せる
+        reload()
+        return
+      }
+      const { groups } = await listRes.json()
+      if (startedIn !== session.current) return
+      setFetched({ status: "ok", groups, storedId: membership.groupId })
+      // 残せなくても今のセッションでは選べているので、失敗は握る
       await AsyncStorage.setItem(STORED_ID_KEY, membership.groupId).catch(() => {})
-      reload()
     },
     [reload],
   )

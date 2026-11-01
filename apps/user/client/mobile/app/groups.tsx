@@ -5,19 +5,18 @@ import { getApiClient } from "@/api"
 import { apiErrorMessage } from "@/api-error"
 import { CreateGroupForm } from "@/create-group-form"
 import { useCurrentGroup } from "@/current-group"
+import { inviteMessage } from "@/invite-code"
 import { JoinInviteForm } from "@/join-invite-form"
 
 // OWNER 以外は API が 403 を返すので、その message をそのまま出す。成功なら null
-async function shareInvitation(groupId: string): Promise<string | null> {
+async function shareInvitation(groupId: string, groupName: string): Promise<string | null> {
   const res = await getApiClient().v1.groups[":groupId"].invitations.$post({
     param: { groupId },
     json: { role: "EDITOR" },
   })
   if (!res.ok) return apiErrorMessage(res, `招待できませんでした (HTTP ${res.status})`)
   const { invitation } = await res.json()
-  await Share.share({
-    message: `prep-hamster の招待コード: ${invitation.token}\nアプリの「招待コードで参加」に貼ってください`,
-  })
+  await Share.share({ message: inviteMessage(groupName, invitation.token) })
   return null
 }
 
@@ -57,7 +56,7 @@ export default function GroupsScreen() {
               setInviting(true)
               setInviteError(null)
               try {
-                setInviteError(await shareInvitation(group.id))
+                setInviteError(await shareInvitation(group.id, group.name))
               } catch (err) {
                 setInviteError(err instanceof Error ? err.message : "unknown")
               } finally {
