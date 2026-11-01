@@ -60,10 +60,20 @@ describe("afterSelect", () => {
 
   test("ignores a select while not loaded", () => {
     expect(afterSelect({ status: "loading" }, "id-club")).toEqual({ status: "loading" })
+    expect(afterSelect({ status: "error", message: "groups HTTP 500" }, "id-club")).toEqual({
+      status: "error",
+      message: "groups HTTP 500",
+    })
   })
 })
 
 describe("afterCreate", () => {
+  test("does not add the group twice when a refetched list already has it", () => {
+    expect(afterCreate(okState([home, created, office], "id-home"), created, false)).toEqual(
+      okState([home, created, office], "id-new"),
+    )
+  })
+
   test("adds the new group and selects it", () => {
     expect(afterCreate(okState([home, office], "id-home"), created, false)).toEqual(
       okState([home, office, created], "id-new"),

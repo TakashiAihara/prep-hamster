@@ -19,6 +19,7 @@ export const afterListFetched = (
 
 export const afterListFailed = (message: string): Fetched => ({ status: "error", message })
 
+// 読み込み中・失敗中の状態には storedId が無いので、選択は読み込めてからだけ反映する
 export const afterSelect = (prev: Fetched, id: string): Fetched =>
   prev.status === "ok" ? { ...prev, storedId: id } : prev
 
@@ -29,7 +30,11 @@ export const afterCreate = (
   selectedMeanwhile: boolean,
 ): Fetched => {
   if (prev.status !== "ok") return prev
-  const withCreated: Fetched = { ...prev, groups: [...prev.groups, created] }
+  // 作成の後に取り直した一覧 (参加の取り直し等) に既に入っていれば、二重に足さない
+  const groups = prev.groups.some((g) => g.id === created.id)
+    ? prev.groups
+    : [...prev.groups, created]
+  const withCreated: Fetched = { ...prev, groups }
   return selectedMeanwhile ? withCreated : afterSelect(withCreated, created.id)
 }
 

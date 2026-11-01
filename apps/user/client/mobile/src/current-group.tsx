@@ -36,7 +36,7 @@ export type CurrentGroup = {
   group: CurrentGroupGroup | null
   groups: CurrentGroupGroup[]
   select: (id: string) => void
-  create: (name: string) => Promise<void>
+  create: (name: string) => Promise<"selected" | "added">
   // "recovering" は参加は済んだが一覧を取り直している最中。画面は reload で入口へ戻るので呼び出し側は何もしない
   join: (text: string) => Promise<"joined" | "recovering">
   reload: () => void
@@ -101,20 +101,23 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(STORED_ID_KEY, id).catch(() => {})
   }, [])
 
-  const create = useCallback(async (name: string) => {
+  // 作ったグループを選んだら "selected"、待つ間に利用者が選び直していたら一覧に足すだけで "added"。
+  // フォームは "selected" のときだけ画面を閉じる (選び直しで既に閉じているので、二度閉じない)
+  const create = useCallback(async (name: string): Promise<"selected" | "added"> => {
     const startedIn = session.current
     const selectionAtStart = selection.current
     const res = await getApiClient().v1.groups.$post({ json: { name } })
     if (!res.ok) throw new Error(`グループを作れませんでした (HTTP ${res.status})`)
     const created = (await res.json()).group
     // 待つ間にサインアウトしていたら、次のユーザーの一覧や端末の選択に混ぜない
-    if (startedIn !== session.current) return
+    if (startedIn !== session.current) return "added"
     const selectedMeanwhile = selection.current !== selectionAtStart
     setFetched((prev) => afterCreate(prev, created, selectedMeanwhile))
     // 待つ間に利用者が選び直していたら、端末の選択も奪わない
-    if (!selectedMeanwhile) {
-      AsyncStorage.setItem(STORED_ID_KEY, created.id).catch(() => {})
-    }
+    if (selectedMeanwhile) return "added"
+    selection.current += 1
+    AsyncStorage.setItem(STORED_ID_KEY, created.id).catch(() => {})
+    return "selected"
   }, [])
 
   const join = useCallback(
@@ -127,12 +130,14 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
         throw new Error(await apiErrorMessage(res, `参加できませんでした (HTTP ${res.status})`))
       }
       const { membership } = await res.json()
-      // 待つ間にサインアウトしていたら、次のユーザーの端末の選択に混ぜない
+      // 待つ間にサインアウトしていたら、次のユーザーの端末の選択に混ぜない。
+      // 画面はサインアウトで入口へ戻っているので、呼び出し側には閉じさせない ("recovering")
       if (startedIn !== session.current) return "recovering"
+      // 参加も選択の 1 つ。同時に走っている作成に、参加したグループの選択を奪わせない
+      selection.current += 1
       // reload() は状態を loading に戻し、開いている切替画面を入口へ飛ばしてしまう (onJoined の back と二重になる)。
-      // 一覧だけ取り直して、loading を挟まずに参加したグループを選ぶ
-      // 参加は済んでいる。一覧が取れなければ (HTTP の失敗も通信の例外も)、選ぶ id だけ残して取り直しに任せる。
-      // reload() で画面は入口へ戻るので、"recovering" を返して呼び出し側の onJoined (back) を止め、遷移を 1 回にする
+      // そこで一覧だけ取り直し、loading を挟まずに参加したグループを選ぶ。
+      // 一覧が取れなければ (HTTP の失敗も通信の例外も)、選ぶ id だけ残して reload() に任せ、"recovering" で back を止める
       let groups: CurrentGroupGroup[] | null = null
       try {
         const listRes = await getApiClient().v1.groups.$get()

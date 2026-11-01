@@ -14,9 +14,9 @@ export function CreateGroupForm({ onCreated }: { onCreated?: () => void }) {
     setSaving(true)
     setError(null)
     try {
-      await create(trimmed)
+      const result = await create(trimmed)
       setName("")
-      onCreated?.()
+      if (result === "selected") onCreated?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown")
     } finally {

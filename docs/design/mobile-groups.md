@@ -18,7 +18,10 @@
 ## 画面の組み立て
 
 - `src/current-group.tsx` の `CurrentGroupProvider` は root の layout で `AuthStatusProvider` の内側に置く (タブの外の M-10 と詳細画面からも使うため)。サインイン済みのときだけ一覧を取り、サインアウトしたら状態を捨てる
-- `useCurrentGroup()` は `{ status: "loading" | "ok" | "error", message, group, groups, select, create, reload }` を配る。`status` が `ok` で `group` が無ければ所属グループ 0 件。`create(name)` は作ったグループを選んだ状態にし、失敗したら throw する
+- `useCurrentGroup()` は `{ status: "loading" | "ok" | "error", message, group, groups, select, create, join, reload }` を配る。`status` が `ok` で `group` が無ければ所属グループ 0 件
+- `create(name)` は作ったグループを一覧に足し、待つ間に利用者が別のグループを選んでいなければそれを選んで `"selected"`、選んでいたら足すだけで `"added"` を返す。失敗したら throw する。フォームは `"selected"` のときだけ画面を閉じる
+- `join(text)` は参加したグループを選んで `"joined"` を返す。参加は通ったが一覧を取り直せなかったとき (とサインアウトしていたとき) は `"recovering"` で、フォームは画面を閉じない。参加も選択として数え、同時に走る作成に選択を奪わせない
+- 状態の動きは純関数 (`src/current-group-state.ts`) に置いて unit で押さえる
 - タブの layout は取得中なら spinner、グループが無ければ「グループを作る」画面、取得に失敗したら理由と再試行を出す
 - 在庫一覧・バーコード登録・詳細の 3 か所は `getCurrentGroupId()` の代わりに `useCurrentGroup()` の id を使う。グループが変わったら一覧を取り直す
 - M-10 は root の Stack の modal (`app/groups.tsx`)
