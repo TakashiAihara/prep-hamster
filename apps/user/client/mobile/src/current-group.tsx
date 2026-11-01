@@ -10,8 +10,10 @@ import {
   type ReactNode,
 } from "react"
 import { getApiClient } from "./api"
+import { apiErrorMessage } from "./api-error"
 import { useAuthStatus } from "./auth-status"
 import { pickCurrentGroup } from "./current-group-pick"
+import { parseInviteCode } from "./invite-code"
 
 // 秘密ではないので secure-store ではなく AsyncStorage に置く
 const STORED_ID_KEY = "prep-hamster.current-group-id"
@@ -30,6 +32,7 @@ export type CurrentGroup = {
   groups: CurrentGroupGroup[]
   select: (id: string) => void
   create: (name: string) => Promise<void>
+  join: (text: string) => Promise<void>
   reload: () => void
 }
 
@@ -39,6 +42,7 @@ const CurrentGroupContext = createContext<CurrentGroup>({
   groups: [],
   select: () => {},
   create: () => Promise.reject(new Error("CurrentGroupProvider の外では使えません")),
+  join: () => Promise.reject(new Error("CurrentGroupProvider の外では使えません")),
   reload: () => {},
 })
 
@@ -105,6 +109,26 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
     [select],
   )
 
+  const join = useCallback(
+    async (text: string) => {
+      const token = parseInviteCode(text)
+      if (!token) throw new Error("招待コードが見つかりません")
+      const startedIn = session.current
+      const res = await getApiClient().v1.invitations[":token"].accept.$post({ param: { token } })
+      if (!res.ok) {
+        throw new Error(await apiErrorMessage(res, `参加できませんでした (HTTP ${res.status})`))
+      }
+      const { membership } = await res.json()
+      // 待つ間にサインアウトしていたら、次のユーザーの端末の選択に混ぜない
+      if (startedIn !== session.current) return
+      // 取り直しは保存済みの id を読んで現在のグループを決めるので、先に書いてから reload する。
+      // 書けなくても参加は済んでいるため握り、その場合は一覧に出るだけで選択は変わらない
+      await AsyncStorage.setItem(STORED_ID_KEY, membership.groupId).catch(() => {})
+      reload()
+    },
+    [reload],
+  )
+
   const value = useMemo<CurrentGroup>(() => {
     if (fetched.status !== "ok") {
       return {
@@ -114,6 +138,7 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
         groups: [],
         select,
         create,
+        join,
         reload,
       }
     }
@@ -123,9 +148,10 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
       groups: fetched.groups,
       select,
       create,
+      join,
       reload,
     }
-  }, [fetched, select, create, reload])
+  }, [fetched, select, create, join, reload])
 
   return <CurrentGroupContext.Provider value={value}>{children}</CurrentGroupContext.Provider>
 }
