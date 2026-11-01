@@ -26,6 +26,17 @@ bun --filter @prep-hamster/mobile dev
 ターミナルに表示される QR を Expo Go で読むと実機で起動できる。
 iOS Simulator なら `i`、Android Emulator なら `a` を押す。
 
+### Expo Go でサインインする
+
+Expo Go からサインインするなら、dev server を IP ではなくホスト名で配る。Supabase Auth は戻り先 (`exp://<host>:8081/--/auth/callback`) のホストが IP だと、loopback 以外を Redirect URLs の設定より先に弾き、Site URL に戻してしまう (supabase/auth の `internal/utilities/request.go` の `IsRedirectURLValid`)。
+
+```sh
+# 192.168.1.23 は開発機の LAN IP に置き換える。nip.io は名前に埋めた IP をそのまま返す公開 DNS
+REACT_NATIVE_PACKAGER_HOSTNAME=192-168-1-23.nip.io bun --filter @prep-hamster/mobile dev
+```
+
+Expo Go では、ターミナルに出る `exp://192-168-1-23.nip.io:<port>` (QR か URL) を開く。ポートは起動時の表示に従う (8081 が埋まっていると別の番号になる)。nip.io の名前が引けない (DNS が私設 IP への応答を捨てる) ネットワークでは、開発機のホスト名を家の DNS に登録して使う。
+
 ## 環境変数
 
 `.env.local` に以下を記述（コミットしない）。

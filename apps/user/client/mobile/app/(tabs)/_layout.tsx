@@ -5,6 +5,7 @@ import { signOut } from "@/auth"
 import { AuthGate } from "@/auth-status"
 import { CreateGroupForm } from "@/create-group-form"
 import { useCurrentGroup } from "@/current-group"
+import { JoinInviteForm } from "@/join-invite-form"
 
 function SignOutButton() {
   return (
@@ -61,9 +62,15 @@ function GroupGate() {
     return (
       <View style={styles.center}>
         <Text style={styles.title}>グループを作る</Text>
-        <Text style={styles.hint}>まだグループに入っていません。名前を付けて作ってください。</Text>
+        <Text style={styles.hint}>
+          まだグループに入っていません。新しく作るか、届いた招待コードで参加してください。
+        </Text>
         <View style={styles.form}>
           <CreateGroupForm />
+        </View>
+        <Text style={styles.title}>招待コードで参加</Text>
+        <View style={styles.form}>
+          <JoinInviteForm />
         </View>
       </View>
     )
