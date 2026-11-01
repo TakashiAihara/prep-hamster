@@ -88,14 +88,21 @@ function GroupGate() {
         name="index"
         options={{
           title: "在庫",
-          tabBarIcon: ({ color, size }) => <Ionicons name="list" color={color} size={size} />,
+          // HACK: SDK 58 の tabBarIcon の color は string | number | NativeColorValue | null の型だが、
+          // Ionicons は string しか受けない。タブバーは実際には文字列を渡すので型だけ合わせている。
+          // @expo/vector-icons を @react-native-vector-icons/* に移すときに外す
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="list" color={color as string} size={size} />
+          ),
         }}
       />
       <Tabs.Screen
         name="add"
         options={{
           title: "追加",
-          tabBarIcon: ({ color, size }) => <Ionicons name="add-circle" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="add-circle" color={color as string} size={size} />
+          ),
         }}
       />
     </Tabs>
