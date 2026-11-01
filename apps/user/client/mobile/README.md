@@ -35,7 +35,7 @@ Expo Go からサインインするなら、dev server を IP ではなくホス
 REACT_NATIVE_PACKAGER_HOSTNAME=192-168-1-23.nip.io bun --filter @prep-hamster/mobile dev
 ```
 
-Expo Go では `exp://192-168-1-23.nip.io:8081` を開く。nip.io の名前が引けない (DNS が私設 IP への応答を捨てる) ネットワークでは、開発機のホスト名を家の DNS に登録して使う。
+Expo Go では、ターミナルに出る `exp://192-168-1-23.nip.io:<port>` (QR か URL) を開く。ポートは起動時の表示に従う (8081 が埋まっていると別の番号になる)。nip.io の名前が引けない (DNS が私設 IP への応答を捨てる) ネットワークでは、開発機のホスト名を家の DNS に登録して使う。
 
 ## 環境変数
 

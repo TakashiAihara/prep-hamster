@@ -14,6 +14,11 @@ describe("parseInviteCode", () => {
     expect(parseInviteCode(inviteMessage("相原家 2026", code, expiresAt))).toBe(code)
   })
 
+  test("returns the token even when the group name is itself a UUID", () => {
+    const groupName = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+    expect(parseInviteCode(inviteMessage(groupName, code, expiresAt))).toBe(code)
+  })
+
   test("takes the first code when the text holds two", () => {
     const other = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
     expect(parseInviteCode(`${code} ${other}`)).toBe(code)

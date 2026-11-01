@@ -123,17 +123,21 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
       if (startedIn !== session.current) return
       // reload() は状態を loading に戻し、開いている切替画面を入口へ飛ばしてしまう (onJoined の back と二重になる)。
       // 一覧だけ取り直して、loading を挟まずに参加したグループを選ぶ
-      const listRes = await getApiClient().v1.groups.$get()
+      // 参加は済んでいる。一覧が取れなければ (HTTP の失敗も通信の例外も)、選ぶ id だけ残して取り直しに任せる。
+      // reload() で画面は入口へ戻るので、throw して呼び出し側の onJoined (back) を止め、遷移を 1 回にする
+      let groups: CurrentGroupGroup[] | null = null
+      try {
+        const listRes = await getApiClient().v1.groups.$get()
+        if (listRes.ok) groups = (await listRes.json()).groups
+      } catch {
+        // 通信の例外も HTTP の失敗と同じく、下で取り直しに回す
+      }
       if (startedIn !== session.current) return
-      if (!listRes.ok) {
-        // 参加は済んでいるので、選ぶ id だけ残して一覧は取り直しに任せる。reload() で画面は入口へ戻るので、
-        // throw して呼び出し側の onJoined (back) を止め、遷移を 1 回にする
+      if (!groups) {
         await AsyncStorage.setItem(STORED_ID_KEY, membership.groupId).catch(() => {})
         reload()
         throw new Error("参加しました。グループの一覧を読み直しています")
       }
-      const { groups } = await listRes.json()
-      if (startedIn !== session.current) return
       setFetched({ status: "ok", groups, storedId: membership.groupId })
       // 残せなくても今のセッションでは選べているので、失敗は握る
       await AsyncStorage.setItem(STORED_ID_KEY, membership.groupId).catch(() => {})

@@ -4,9 +4,10 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 // 期限は API の既定値を写さず、発行の応答の expiresAt から端末の日付で出す
 export function inviteMessage(groupName: string, token: string, expiresAt: string): string {
   const until = new Date(expiresAt)
+  // parseInviteCode は最初の UUID を拾うので、グループ名 (UUID のこともある) より前に token を置く
   return [
-    `prep-hamster の「${groupName}」への招待コード (1 人だけ・${until.getMonth() + 1}/${until.getDate()} まで使えます):`,
-    token,
+    `prep-hamster の招待コード: ${token}`,
+    `「${groupName}」に参加できます (1 人だけ・${until.getMonth() + 1}/${until.getDate()} まで)`,
     "アプリの「招待コードで参加」に、このメッセージをまるごと貼ってください",
   ].join("\n")
 }
