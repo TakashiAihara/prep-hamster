@@ -35,6 +35,11 @@ export function CreateGroupForm({ onCreated }: { onCreated?: () => void }) {
         placeholder="グループ名"
         maxLength={100}
         editable={!saving}
+        // 確定キーで送れるようにし、キーボードの下のボタンに届かなくても作れるようにする
+        returnKeyType="done"
+        onSubmitEditing={() => {
+          if (!disabled) onSubmit()
+        }}
         style={styles.input}
       />
       <Pressable

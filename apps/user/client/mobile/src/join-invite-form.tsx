@@ -38,6 +38,11 @@ export function JoinInviteForm({ onJoined }: { onJoined?: () => void }) {
         autoCapitalize="none"
         autoCorrect={false}
         editable={!joining}
+        // 貼り付けた直後にキーボードの確定キーで送れるようにする (キーボードを閉じてボタンを探さずに済む)
+        returnKeyType="join"
+        onSubmitEditing={() => {
+          if (!disabled) onSubmit()
+        }}
         style={styles.input}
       />
       <Pressable
