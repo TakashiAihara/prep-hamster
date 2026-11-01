@@ -7,19 +7,29 @@ import { CreateGroupForm } from "@/create-group-form"
 import { useCurrentGroup } from "@/current-group"
 import { JoinInviteForm } from "@/join-invite-form"
 
-function SignOutButton() {
-  return (
-    <Pressable
-      onPress={() => {
+function confirmSignOut() {
+  // ヘッダー右は Expo Go の開発メニューのボタンと重なり、それを押したつもりでサインアウトしていた。
+  // 戻すには Google のサインインをやり直すことになるので、確認を挟む
+  Alert.alert("サインアウトしますか？", undefined, [
+    { text: "キャンセル", style: "cancel" },
+    {
+      text: "サインアウト",
+      style: "destructive",
+      onPress: () => {
         signOut().catch((err: unknown) => {
           Alert.alert(
             "サインアウトできませんでした",
             err instanceof Error ? err.message : String(err),
           )
         })
-      }}
-      style={{ paddingHorizontal: 16 }}
-    >
+      },
+    },
+  ])
+}
+
+function SignOutButton() {
+  return (
+    <Pressable onPress={confirmSignOut} style={{ paddingHorizontal: 16 }}>
       <Text style={{ color: "#2c7be5", fontSize: 14 }}>サインアウト</Text>
     </Pressable>
   )
@@ -88,14 +98,21 @@ function GroupGate() {
         name="index"
         options={{
           title: "在庫",
-          tabBarIcon: ({ color, size }) => <Ionicons name="list" color={color} size={size} />,
+          // HACK: SDK 58 の tabBarIcon の color は string | number | NativeColorValue | null の型だが、
+          // Ionicons は string しか受けない。タブバーは実際には文字列を渡すので型だけ合わせている。
+          // @expo/vector-icons を @react-native-vector-icons/* に移すときに外す
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="list" color={color as string} size={size} />
+          ),
         }}
       />
       <Tabs.Screen
         name="add"
         options={{
           title: "追加",
-          tabBarIcon: ({ color, size }) => <Ionicons name="add-circle" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="add-circle" color={color as string} size={size} />
+          ),
         }}
       />
     </Tabs>

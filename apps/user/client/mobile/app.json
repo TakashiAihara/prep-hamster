@@ -11,8 +11,7 @@
       "bundleIdentifier": "com.example.prephamster"
     },
     "android": {
-      "package": "com.example.prephamster",
-      "edgeToEdgeEnabled": true
+      "package": "com.example.prephamster"
     },
     "web": {
       "bundler": "metro",
@@ -26,7 +25,10 @@
           "cameraPermission": "JAN コードを読み取って商品を登録するためにカメラを使用します"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "@react-native-community/datetimepicker",
+      "expo-web-browser",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true
