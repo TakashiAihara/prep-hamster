@@ -70,6 +70,9 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      - name: Check dependency versions against the Expo SDK
+        working-directory: apps/user/client/mobile
+        run: bunx expo install --check
       - name: Export the Android bundle
         working-directory: apps/user/client/mobile
         run: bunx expo export --platform android --output-dir "$RUNNER_TEMP/expo-export"
