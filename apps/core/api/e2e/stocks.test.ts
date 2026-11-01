@@ -1,7 +1,16 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
 import { createApp } from "../src/app"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
-import { seedBaseFixture, seedGroupWithMembership, seedItem, seedLocation, seedUser } from "./seed"
+import { eq } from "drizzle-orm"
+import { items, locations } from "@prep-hamster/db"
+import {
+  seedBaseFixture,
+  seedGroupWithMembership,
+  seedItem,
+  seedLocation,
+  seedMembership,
+  seedUser,
+} from "./seed"
 import { bearer, e2eAuth } from "./auth-helper"
 
 beforeAll(async () => {
@@ -137,4 +146,68 @@ test("POST /v1/stocks with nonexistent item returns 422 ITEM_GROUP_MISMATCH", as
   expect(res.status).toBe(422)
   const body = (await res.json()) as { error: { code: string } }
   expect(body.error.code).toBe("ITEM_GROUP_MISMATCH")
+})
+
+test("POST /v1/stocks with nonexistent location returns 422 LOCATION_GROUP_MISMATCH", async () => {
+  const { userId, groupId, itemId } = await seedBaseFixture()
+  const app = createApp({ db: testDb, auth: e2eAuth })
+
+  const res = await app.request("/v1/stocks", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
+    body: createStockBody(groupId, itemId, crypto.randomUUID()),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("LOCATION_GROUP_MISMATCH")
+})
+
+test("POST /v1/stocks with a soft-deleted item of the same group returns 422 ITEM_GROUP_MISMATCH", async () => {
+  const { userId, groupId, itemId, locationId } = await seedBaseFixture()
+  await testDb.update(items).set({ deletedAt: new Date() }).where(eq(items.id, itemId))
+  const app = createApp({ db: testDb, auth: e2eAuth })
+
+  const res = await app.request("/v1/stocks", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
+    body: createStockBody(groupId, itemId, locationId),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("ITEM_GROUP_MISMATCH")
+})
+
+test("POST /v1/stocks with a soft-deleted location of the same group returns 422 LOCATION_GROUP_MISMATCH", async () => {
+  const { userId, groupId, itemId, locationId } = await seedBaseFixture()
+  await testDb.update(locations).set({ deletedAt: new Date() }).where(eq(locations.id, locationId))
+  const app = createApp({ db: testDb, auth: e2eAuth })
+
+  const res = await app.request("/v1/stocks", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
+    body: createStockBody(groupId, itemId, locationId),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("LOCATION_GROUP_MISMATCH")
+})
+
+test("POST /v1/stocks by VIEWER returns 403 INSUFFICIENT_ROLE", async () => {
+  const { groupId, itemId, locationId } = await seedBaseFixture()
+  const viewerId = await seedUser("Viewer")
+  await seedMembership(viewerId, groupId, "VIEWER")
+  const app = createApp({ db: testDb, auth: e2eAuth })
+
+  const res = await app.request("/v1/stocks", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: await bearer(viewerId) },
+    body: createStockBody(groupId, itemId, locationId),
+  })
+
+  expect(res.status).toBe(403)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("INSUFFICIENT_ROLE")
 })

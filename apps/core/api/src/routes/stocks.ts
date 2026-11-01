@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm"
-import { items, locations, memberships, stockEvents, stocks } from "@prep-hamster/db"
+import { items, locations, stockEvents, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
@@ -502,29 +502,11 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
     const db = c.get("db")
     const userId = c.get("userId")
 
-    // body.groupId の membership は middleware では検査できないため (body 読込のタイミング)、
-    // ここで明示的にチェックする。本検査の middleware 化は別 Issue (#69 後続) で扱う。
-    const [member] = await db
-      .select({ id: memberships.id })
-      .from(memberships)
-      .where(
-        and(
-          eq(memberships.userId, userId),
-          eq(memberships.groupId, body.groupId),
-          isNull(memberships.deletedAt),
-        ),
-      )
-      .limit(1)
-    if (!member) {
-      return c.json(
-        {
-          error: {
-            code: "FORBIDDEN_GROUP_ACCESS",
-            message: "この group に対するアクセス権がありません",
-          },
-        },
-        403,
-      )
+    // body.groupId は middleware では読めない (body 読込のタイミング) ので、items / categories の作成と同じく
+    // ここで EDITOR 以上を確かめる (VIEWER に在庫を作らせない)
+    const access = await checkGroupAccess(db, userId, body.groupId, "EDITOR")
+    if (!access.ok) {
+      return c.json(access.body, access.status)
     }
 
     // item / location が body.groupId の active なものであることを検証する (move / PATCH と同じ基準)。
