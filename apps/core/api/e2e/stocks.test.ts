@@ -211,3 +211,19 @@ test("POST /v1/stocks by VIEWER returns 403 INSUFFICIENT_ROLE", async () => {
   const body = (await res.json()) as { error: { code: string } }
   expect(body.error.code).toBe("INSUFFICIENT_ROLE")
 })
+
+test("POST /v1/stocks by a non-member returns 403 FORBIDDEN_GROUP_ACCESS", async () => {
+  const { groupId, itemId, locationId } = await seedBaseFixture()
+  const outsiderId = await seedUser("Outsider")
+  const app = createApp({ db: testDb, auth: e2eAuth })
+
+  const res = await app.request("/v1/stocks", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: await bearer(outsiderId) },
+    body: createStockBody(groupId, itemId, locationId),
+  })
+
+  expect(res.status).toBe(403)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("FORBIDDEN_GROUP_ACCESS")
+})

@@ -207,7 +207,7 @@ const createStockRoute = createRoute({
       content: { "application/json": { schema: errorResponseSchema } },
     },
     403: {
-      description: "未参加",
+      description: "未参加 / role 不足",
       content: { "application/json": { schema: errorResponseSchema } },
     },
     422: {
