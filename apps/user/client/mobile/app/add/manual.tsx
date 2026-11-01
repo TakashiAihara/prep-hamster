@@ -1,6 +1,7 @@
 import { router } from "expo-router"
 import { useState } from "react"
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native"
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput } from "react-native"
+import { KeyboardScrollView } from "@/keyboard-scroll-view"
 import { useByBarcode } from "@/use-by-barcode"
 
 // Simulator やカメラが使えない開発環境向けの debug 入口。
@@ -24,7 +25,7 @@ export default function ManualBarcodeScreen() {
   const submitting = state.status === "loading"
 
   return (
-    <View style={styles.container}>
+    <KeyboardScrollView contentContainerStyle={styles.container}>
       <Text style={styles.label}>JAN コード (EAN-13 / EAN-8)</Text>
       <TextInput
         testID="input"
@@ -47,12 +48,12 @@ export default function ManualBarcodeScreen() {
           <Text style={styles.primaryLabel}>送信</Text>
         )}
       </Pressable>
-    </View>
+    </KeyboardScrollView>
   )
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, gap: 12 },
+  container: { flexGrow: 1, padding: 24, gap: 12 },
   label: { fontSize: 14, color: "#444" },
   input: {
     borderWidth: 1,

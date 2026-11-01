@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +12,7 @@ import {
 } from "react-native"
 import { getApiClient } from "@/api"
 import { useCurrentGroup } from "@/current-group"
+import { KeyboardScrollView } from "@/keyboard-scroll-view"
 
 // 詳細入力 + 保存画面。
 // 受け取る params:
@@ -191,7 +191,7 @@ export default function AddDetailsScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <KeyboardScrollView contentContainerStyle={styles.container}>
       <Section title={`商品 (${labelForLookup(productLookup)})`}>
         {canEditName ? (
           <TextInput value={name} onChangeText={setName} style={styles.input} />
@@ -275,7 +275,7 @@ export default function AddDetailsScreen() {
           <Text style={styles.primaryLabel}>保存</Text>
         )}
       </Pressable>
-    </ScrollView>
+    </KeyboardScrollView>
   )
 }
 

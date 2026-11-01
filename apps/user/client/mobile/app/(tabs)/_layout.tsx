@@ -6,6 +6,7 @@ import { AuthGate } from "@/auth-status"
 import { CreateGroupForm } from "@/create-group-form"
 import { useCurrentGroup } from "@/current-group"
 import { JoinInviteForm } from "@/join-invite-form"
+import { KeyboardScrollView } from "@/keyboard-scroll-view"
 
 function confirmSignOut() {
   // ヘッダー右は Expo Go の開発メニューのボタンと重なり、それを押したつもりでサインアウトしていた。
@@ -70,7 +71,7 @@ function GroupGate() {
   }
   if (!group) {
     return (
-      <View style={styles.center}>
+      <KeyboardScrollView contentContainerStyle={styles.centerScroll}>
         <Text style={styles.title}>グループを作る</Text>
         <Text style={styles.hint}>
           まだグループに入っていません。新しく作るか、届いた招待コードで参加してください。
@@ -82,7 +83,7 @@ function GroupGate() {
         <View style={styles.form}>
           <JoinInviteForm />
         </View>
-      </View>
+      </KeyboardScrollView>
     )
   }
 
@@ -129,6 +130,14 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16, gap: 12 },
+  // 画面に収まるうちは今までどおり中央に置き、キーボードで狭まったら縦に流す
+  centerScroll: {
+    flexGrow: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    gap: 12,
+  },
   title: { fontSize: 18, fontWeight: "600" },
   hint: { color: "#666", fontSize: 13, textAlign: "center" },
   form: { alignSelf: "stretch" },

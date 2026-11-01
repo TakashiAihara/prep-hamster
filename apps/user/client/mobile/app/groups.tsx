@@ -1,12 +1,13 @@
 import { Redirect, router } from "expo-router"
 import { useState } from "react"
-import { Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native"
+import { Pressable, Share, StyleSheet, Text, View } from "react-native"
 import { getApiClient } from "@/api"
 import { apiErrorMessage } from "@/api-error"
 import { CreateGroupForm } from "@/create-group-form"
 import { useCurrentGroup } from "@/current-group"
 import { inviteMessage } from "@/invite-code"
 import { JoinInviteForm } from "@/join-invite-form"
+import { KeyboardScrollView } from "@/keyboard-scroll-view"
 
 // OWNER 以外は API が 403 を返すので、その message をそのまま出す。成功なら null
 async function shareInvitation(groupId: string, groupName: string): Promise<string | null> {
@@ -30,7 +31,7 @@ export default function GroupsScreen() {
   if (status !== "ok") return <Redirect href="/" />
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <KeyboardScrollView contentContainerStyle={styles.container}>
       <View style={styles.list}>
         {groups.map((g) => (
           <Pressable
@@ -77,7 +78,7 @@ export default function GroupsScreen() {
 
       <Text style={styles.heading}>新しいグループを作る</Text>
       <CreateGroupForm onCreated={() => router.back()} />
-    </ScrollView>
+    </KeyboardScrollView>
   )
 }
 
