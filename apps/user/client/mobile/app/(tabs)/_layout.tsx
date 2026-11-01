@@ -7,19 +7,29 @@ import { CreateGroupForm } from "@/create-group-form"
 import { useCurrentGroup } from "@/current-group"
 import { JoinInviteForm } from "@/join-invite-form"
 
-function SignOutButton() {
-  return (
-    <Pressable
-      onPress={() => {
+function confirmSignOut() {
+  // ヘッダー右は Expo Go の開発メニューのボタンと重なり、それを押したつもりでサインアウトしていた。
+  // 戻すには Google のサインインをやり直すことになるので、確認を挟む
+  Alert.alert("サインアウトしますか？", undefined, [
+    { text: "キャンセル", style: "cancel" },
+    {
+      text: "サインアウト",
+      style: "destructive",
+      onPress: () => {
         signOut().catch((err: unknown) => {
           Alert.alert(
             "サインアウトできませんでした",
             err instanceof Error ? err.message : String(err),
           )
         })
-      }}
-      style={{ paddingHorizontal: 16 }}
-    >
+      },
+    },
+  ])
+}
+
+function SignOutButton() {
+  return (
+    <Pressable onPress={confirmSignOut} style={{ paddingHorizontal: 16 }}>
       <Text style={{ color: "#2c7be5", fontSize: 14 }}>サインアウト</Text>
     </Pressable>
   )
