@@ -40,6 +40,8 @@ export type CurrentGroup = {
   // "recovering" は参加は済んだが一覧を取り直している最中。画面は reload で入口へ戻るので呼び出し側は何もしない
   join: (text: string) => Promise<"joined" | "recovering">
   reload: () => void
+  // 作成・参加の応答待ち。その間は切替画面の一覧とフォームを押せなくし、選択どうしの競合を起こさない
+  busy: boolean
 }
 
 const CurrentGroupContext = createContext<CurrentGroup>({
@@ -50,6 +52,7 @@ const CurrentGroupContext = createContext<CurrentGroup>({
   create: () => Promise.reject(new Error("CurrentGroupProvider の外では使えません")),
   join: () => Promise.reject(new Error("CurrentGroupProvider の外では使えません")),
   reload: () => {},
+  busy: false,
 })
 
 export function CurrentGroupProvider({ children }: { children: ReactNode }) {
@@ -59,8 +62,14 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
   const reload = useCallback(() => setReloadKey((n) => n + 1), [])
   // サインアウトのたびに進める。作成の応答が別のセッションに届いたかをこれで見分ける
   const session = useRef(0)
-  // select のたびに進める。作成の応答を待つ間に利用者が選び直したかをこれで見分ける
+  // select・作成・参加で選ぶたびに進める。作成の応答を待つ間に別の選択があったかをこれで見分ける
+  // (画面は busy の間押せないので、ここに来るのはサインアウト直後などの抜け道だけ)
   const selection = useRef(0)
+  const [pending, setPending] = useState(0)
+  const track = useCallback(<T,>(work: Promise<T>): Promise<T> => {
+    setPending((n) => n + 1)
+    return work.finally(() => setPending((n) => n - 1))
+  }, [])
 
   useEffect(() => {
     if (auth !== "signed-in") {
@@ -159,6 +168,10 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
     [reload],
   )
 
+  const trackedCreate = useCallback((name: string) => track(create(name)), [track, create])
+  const trackedJoin = useCallback((text: string) => track(join(text)), [track, join])
+  const busy = pending > 0
+
   const value = useMemo<CurrentGroup>(() => {
     if (fetched.status !== "ok") {
       return {
@@ -167,9 +180,10 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
         group: null,
         groups: [],
         select,
-        create,
-        join,
+        create: trackedCreate,
+        join: trackedJoin,
         reload,
+        busy,
       }
     }
     return {
@@ -177,11 +191,12 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
       group: pickCurrentGroup(fetched.groups, fetched.storedId),
       groups: fetched.groups,
       select,
-      create,
-      join,
+      create: trackedCreate,
+      join: trackedJoin,
       reload,
+      busy,
     }
-  }, [fetched, select, create, join, reload])
+  }, [fetched, select, trackedCreate, trackedJoin, reload, busy])
 
   return <CurrentGroupContext.Provider value={value}>{children}</CurrentGroupContext.Provider>
 }

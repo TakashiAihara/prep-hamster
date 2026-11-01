@@ -4,7 +4,7 @@ import { useCurrentGroup } from "./current-group"
 
 // M-10 と「グループを作る」画面で同じものを使う。
 export function JoinInviteForm({ onJoined }: { onJoined?: () => void }) {
-  const { join } = useCurrentGroup()
+  const { join, busy } = useCurrentGroup()
   const [text, setText] = useState("")
   const [joining, setJoining] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -26,7 +26,8 @@ export function JoinInviteForm({ onJoined }: { onJoined?: () => void }) {
     }
   }
 
-  const disabled = text.trim().length === 0 || joining
+  // 他のフォームの作成・参加を待っている間も押させない (選択の競合を起こさない)
+  const disabled = text.trim().length === 0 || joining || busy
 
   return (
     <View style={styles.form}>
