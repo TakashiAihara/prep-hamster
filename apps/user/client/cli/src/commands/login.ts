@@ -4,6 +4,9 @@ import { createAuthClient, currentConnection, sessionFile } from "../auth"
 import { codeFromCallback, writeConnection, type CallbackResult } from "../session-store"
 
 const CALLBACK_PATH = "/callback"
+
+// 戻りの文言は外から入るので、端末の表示を書き換える制御文字を落としてから出す
+const printable = (text: string): string => text.replace(/\p{Cc}/gu, "")
 const TIMEOUT_MS = 5 * 60 * 1000
 
 function openBrowser(url: string): void {
@@ -33,25 +36,37 @@ export const loginCommand = defineCommand({
       process.exit(2)
     }
 
-    // 同じ code は 1 回しか交換できないので、ブラウザと貼り付けのどちらが先でも交換は 1 回にする
-    let first: Promise<string> | undefined
-    let begin!: (done: Promise<string>) => void
+    // 同じ code は 1 回しか交換できないので、ブラウザと貼り付けのどちらが先でも交換は同時に 1 本にする。
+    // 確定するのは交換に成功したときだけ。127.0.0.1 の口は同じホストの誰でも叩けるので、
+    // 失敗 (error 付きの戻り・交換の失敗) では終わらず、本物の戻りを待ち続ける
+    let inFlight: Promise<string> | undefined
+    let signedIn!: (email: string) => void
     const started = new Promise<string>((resolve) => {
-      begin = resolve
+      signedIn = resolve
     })
     const handle = (result: CallbackResult): Promise<string> => {
-      if (!first) {
-        first = (async () => {
-          if ("error" in result) throw new Error(result.error)
-          const { data, error } = await supabase.auth.exchangeCodeForSession(result.code)
-          if (error) throw error
-          // 以降のコマンドが env 無しでも同じ project に繋がるよう、接続先も残す
-          writeConnection(sessionFile(), connection)
-          return data.user?.email ?? ""
-        })()
-        begin(first)
+      if (inFlight) return inFlight
+      if ("error" in result) {
+        const message = printable(result.error)
+        console.error(
+          `サインインに失敗した戻りを受けました: ${message} (待ち続けます。やめるなら Ctrl-C)`,
+        )
+        return Promise.reject(new Error(message))
       }
-      return first
+      const attempt = (async () => {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(result.code)
+        if (error) throw error
+        // 以降のコマンドが env 無しでも同じ project に繋がるよう、接続先も残す
+        writeConnection(sessionFile(), connection)
+        return data.user?.email ?? ""
+      })()
+      inFlight = attempt
+      attempt.then(signedIn, (e: unknown) => {
+        inFlight = undefined
+        const message = printable(e instanceof Error ? e.message : String(e))
+        console.error(`code を交換できませんでした: ${message} (待ち続けます。やめるなら Ctrl-C)`)
+      })
+      return attempt
     }
 
     const server = Bun.serve({
