@@ -54,6 +54,8 @@ export function useStocks(): { state: State; reload: () => void } {
         const stocks = (await stocksRes.json()).stocks
         const items = (await itemsRes.json()).items
         const locations = (await locationsRes.json()).locations
+        // 本文を読む間にグループが変わっていたら、前のグループの行で上書きしない
+        if (cancelled) return
         setState({ status: "ok", rows: joinStocksWithMasters(stocks, items, locations) })
       } catch (err) {
         if (cancelled) return

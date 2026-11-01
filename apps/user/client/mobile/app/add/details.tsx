@@ -88,7 +88,8 @@ export default function AddDetailsScreen() {
         const itemBody = (await itemRes.json()).item
         const locsBody = (await locsRes.json()).locations
         setName(itemBody.name)
-        if (locsBody[0]) setLocationId(locsBody[0].id)
+        // 場所が 0 件のグループでは、前のグループの場所を残さない
+        setLocationId(locsBody[0]?.id ?? null)
         setLoad({ status: "ok", item: itemBody, locations: locsBody, groupId })
       } catch (err) {
         if (cancelled) return

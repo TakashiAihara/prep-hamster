@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -46,10 +47,13 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
   const [fetched, setFetched] = useState<Fetched>({ status: "loading" })
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey((n) => n + 1), [])
+  // サインアウトのたびに進める。作成の応答が別のセッションに届いたかをこれで見分ける
+  const session = useRef(0)
 
   useEffect(() => {
     // サインアウトしたら、次にサインインするユーザーへ前のユーザーのグループを見せないよう捨てる
     if (auth !== "signed-in") {
+      session.current += 1
       setFetched({ status: "loading" })
       return
     }
@@ -87,9 +91,12 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
 
   const create = useCallback(
     async (name: string) => {
+      const startedIn = session.current
       const res = await getApiClient().v1.groups.$post({ json: { name } })
       if (!res.ok) throw new Error(`グループを作れませんでした (HTTP ${res.status})`)
       const created = (await res.json()).group
+      // 待つ間にサインアウトしていたら、次のユーザーの一覧や端末の選択に混ぜない
+      if (startedIn !== session.current) return
       setFetched((prev) =>
         prev.status === "ok" ? { ...prev, groups: [...prev.groups, created] } : prev,
       )
