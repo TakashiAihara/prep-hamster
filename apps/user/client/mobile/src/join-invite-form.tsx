@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native"
 import { useCurrentGroup } from "./current-group"
 
@@ -9,7 +9,12 @@ export function JoinInviteForm({ onJoined }: { onJoined?: () => void }) {
   const [joining, setJoining] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // state の joining は次の描画まで反映されないので、改行キーの連打で同じフレームに 2 回来ても 1 回にする
+  const inFlight = useRef(false)
+
   async function onSubmit() {
+    if (inFlight.current) return
+    inFlight.current = true
     setJoining(true)
     setError(null)
     try {
@@ -22,6 +27,7 @@ export function JoinInviteForm({ onJoined }: { onJoined?: () => void }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown")
     } finally {
+      inFlight.current = false
       setJoining(false)
     }
   }
@@ -39,7 +45,7 @@ export function JoinInviteForm({ onJoined }: { onJoined?: () => void }) {
         autoCorrect={false}
         editable={!joining}
         // 貼り付けた直後にキーボードの確定キーで送れるようにする (キーボードを閉じてボタンを探さずに済む)
-        returnKeyType="join"
+        returnKeyType="go"
         onSubmitEditing={() => {
           if (!disabled) onSubmit()
         }}

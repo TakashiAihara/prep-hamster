@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native"
 import { useCurrentGroup } from "./current-group"
 
@@ -10,7 +10,12 @@ export function CreateGroupForm({ onCreated }: { onCreated?: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const trimmed = name.trim()
 
+  // state の saving は次の描画まで反映されないので、改行キーの連打で同じグループを 2 つ作らない
+  const inFlight = useRef(false)
+
   async function onSubmit() {
+    if (inFlight.current) return
+    inFlight.current = true
     setSaving(true)
     setError(null)
     try {
@@ -20,6 +25,7 @@ export function CreateGroupForm({ onCreated }: { onCreated?: () => void }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown")
     } finally {
+      inFlight.current = false
       setSaving(false)
     }
   }
