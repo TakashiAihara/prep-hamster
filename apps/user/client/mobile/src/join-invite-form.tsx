@@ -13,9 +13,12 @@ export function JoinInviteForm({ onJoined }: { onJoined?: () => void }) {
     setJoining(true)
     setError(null)
     try {
-      await join(text)
-      setText("")
-      onJoined?.()
+      const result = await join(text)
+      // 一覧を取り直している最中は、画面ごと入口へ戻るので何も出さない
+      if (result === "joined") {
+        setText("")
+        onJoined?.()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown")
     } finally {

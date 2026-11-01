@@ -13,17 +13,22 @@ import { getApiClient } from "./api"
 import { apiErrorMessage } from "./api-error"
 import { useAuthStatus } from "./auth-status"
 import { pickCurrentGroup } from "./current-group-pick"
+import {
+  afterCreate,
+  afterJoin,
+  afterListFailed,
+  afterListFetched,
+  afterSelect,
+  afterSignOut,
+  type CurrentGroupGroup,
+  type Fetched,
+} from "./current-group-state"
 import { parseInviteCode } from "./invite-code"
 
 // 秘密ではないので secure-store ではなく AsyncStorage に置く
 const STORED_ID_KEY = "prep-hamster.current-group-id"
 
-export type CurrentGroupGroup = { id: string; name: string; createdAt: string }
-
-type Fetched =
-  | { status: "loading" }
-  | { status: "ok"; groups: CurrentGroupGroup[]; storedId: string | null }
-  | { status: "error"; message: string }
+export type { CurrentGroupGroup }
 
 export type CurrentGroup = {
   status: "loading" | "ok" | "error"
@@ -32,7 +37,8 @@ export type CurrentGroup = {
   groups: CurrentGroupGroup[]
   select: (id: string) => void
   create: (name: string) => Promise<void>
-  join: (text: string) => Promise<void>
+  // "recovering" は参加は済んだが一覧を取り直している最中。画面は reload で入口へ戻るので呼び出し側は何もしない
+  join: (text: string) => Promise<"joined" | "recovering">
   reload: () => void
 }
 
@@ -53,12 +59,13 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
   const reload = useCallback(() => setReloadKey((n) => n + 1), [])
   // サインアウトのたびに進める。作成の応答が別のセッションに届いたかをこれで見分ける
   const session = useRef(0)
+  // select のたびに進める。作成の応答を待つ間に利用者が選び直したかをこれで見分ける
+  const selection = useRef(0)
 
   useEffect(() => {
-    // サインアウトしたら、次にサインインするユーザーへ前のユーザーのグループを見せないよう捨てる
     if (auth !== "signed-in") {
       session.current += 1
-      setFetched({ status: "loading" })
+      setFetched(afterSignOut())
       return
     }
     let cancelled = false
@@ -71,15 +78,15 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
         ])
         if (cancelled) return
         if (!res.ok) {
-          setFetched({ status: "error", message: `groups HTTP ${res.status}` })
+          setFetched(afterListFailed(`groups HTTP ${res.status}`))
           return
         }
         const groups = (await res.json()).groups
         if (cancelled) return
-        setFetched({ status: "ok", groups, storedId })
+        setFetched(afterListFetched(groups, storedId))
       } catch (err) {
         if (cancelled) return
-        setFetched({ status: "error", message: err instanceof Error ? err.message : "unknown" })
+        setFetched(afterListFailed(err instanceof Error ? err.message : "unknown"))
       }
     })()
     return () => {
@@ -88,26 +95,27 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
   }, [auth, reloadKey])
 
   const select = useCallback((id: string) => {
-    setFetched((prev) => (prev.status === "ok" ? { ...prev, storedId: id } : prev))
+    selection.current += 1
+    setFetched((prev) => afterSelect(prev, id))
     // 残せなくても今のセッションでは選べているので、失敗は握る
     AsyncStorage.setItem(STORED_ID_KEY, id).catch(() => {})
   }, [])
 
-  const create = useCallback(
-    async (name: string) => {
-      const startedIn = session.current
-      const res = await getApiClient().v1.groups.$post({ json: { name } })
-      if (!res.ok) throw new Error(`グループを作れませんでした (HTTP ${res.status})`)
-      const created = (await res.json()).group
-      // 待つ間にサインアウトしていたら、次のユーザーの一覧や端末の選択に混ぜない
-      if (startedIn !== session.current) return
-      setFetched((prev) =>
-        prev.status === "ok" ? { ...prev, groups: [...prev.groups, created] } : prev,
-      )
-      select(created.id)
-    },
-    [select],
-  )
+  const create = useCallback(async (name: string) => {
+    const startedIn = session.current
+    const selectionAtStart = selection.current
+    const res = await getApiClient().v1.groups.$post({ json: { name } })
+    if (!res.ok) throw new Error(`グループを作れませんでした (HTTP ${res.status})`)
+    const created = (await res.json()).group
+    // 待つ間にサインアウトしていたら、次のユーザーの一覧や端末の選択に混ぜない
+    if (startedIn !== session.current) return
+    const selectedMeanwhile = selection.current !== selectionAtStart
+    setFetched((prev) => afterCreate(prev, created, selectedMeanwhile))
+    // 待つ間に利用者が選び直していたら、端末の選択も奪わない
+    if (!selectedMeanwhile) {
+      AsyncStorage.setItem(STORED_ID_KEY, created.id).catch(() => {})
+    }
+  }, [])
 
   const join = useCallback(
     async (text: string) => {
@@ -120,11 +128,11 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
       }
       const { membership } = await res.json()
       // 待つ間にサインアウトしていたら、次のユーザーの端末の選択に混ぜない
-      if (startedIn !== session.current) return
+      if (startedIn !== session.current) return "recovering"
       // reload() は状態を loading に戻し、開いている切替画面を入口へ飛ばしてしまう (onJoined の back と二重になる)。
       // 一覧だけ取り直して、loading を挟まずに参加したグループを選ぶ
       // 参加は済んでいる。一覧が取れなければ (HTTP の失敗も通信の例外も)、選ぶ id だけ残して取り直しに任せる。
-      // reload() で画面は入口へ戻るので、throw して呼び出し側の onJoined (back) を止め、遷移を 1 回にする
+      // reload() で画面は入口へ戻るので、"recovering" を返して呼び出し側の onJoined (back) を止め、遷移を 1 回にする
       let groups: CurrentGroupGroup[] | null = null
       try {
         const listRes = await getApiClient().v1.groups.$get()
@@ -132,15 +140,16 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
       } catch {
         // 通信の例外も HTTP の失敗と同じく、下で取り直しに回す
       }
-      if (startedIn !== session.current) return
+      if (startedIn !== session.current) return "recovering"
       if (!groups) {
         await AsyncStorage.setItem(STORED_ID_KEY, membership.groupId).catch(() => {})
         reload()
-        throw new Error("参加しました。グループの一覧を読み直しています")
+        return "recovering"
       }
-      setFetched({ status: "ok", groups, storedId: membership.groupId })
+      setFetched(afterJoin(groups, membership.groupId))
       // 残せなくても今のセッションでは選べているので、失敗は握る
       await AsyncStorage.setItem(STORED_ID_KEY, membership.groupId).catch(() => {})
+      return "joined"
     },
     [reload],
   )
