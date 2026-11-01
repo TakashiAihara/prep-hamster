@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { getApiClient } from "./api"
-import { getCurrentGroupId } from "./config"
+import { useCurrentGroup } from "./current-group"
 
 // POST /v1/items/by-barcode を叩く submit hook。
 // scan / manual 両方の入口から同じ後続フロー (詳細画面 → 保存) に乗せる。
@@ -18,12 +18,16 @@ export function useByBarcode(): {
   reset: () => void
 } {
   const [state, setState] = useState<State>({ status: "idle" })
+  const groupId = useCurrentGroup().group?.id
 
   async function submit(barcode: string): Promise<ByBarcodeResult | null> {
+    if (!groupId) {
+      setState({ status: "error", message: "グループが選ばれていません" })
+      return null
+    }
     setState({ status: "loading" })
     try {
       const client = getApiClient()
-      const groupId = getCurrentGroupId()
       const res = await client.v1.items["by-barcode"].$post({
         json: { groupId, barcode },
       })

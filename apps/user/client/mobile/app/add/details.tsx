@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native"
 import { getApiClient } from "@/api"
-import { getCurrentGroupId } from "@/config"
+import { useCurrentGroup } from "@/current-group"
 
 // 詳細入力 + 保存画面。
 // 受け取る params:
@@ -38,13 +38,14 @@ type LocationDto = {
 
 type LoadState =
   | { status: "loading" }
-  | { status: "ok"; item: ItemDto; locations: LocationDto[] }
+  | { status: "ok"; item: ItemDto; locations: LocationDto[]; groupId: string }
   | { status: "error"; message: string }
 
 export default function AddDetailsScreen() {
   const params = useLocalSearchParams<{ itemId: string; productLookup: string }>()
   const itemId = params.itemId
   const productLookup = params.productLookup as "existing" | "hit" | "miss" | undefined
+  const groupId = useCurrentGroup().group?.id
 
   const [load, setLoad] = useState<LoadState>({ status: "loading" })
   const [name, setName] = useState("")
@@ -61,11 +62,16 @@ export default function AddDetailsScreen() {
 
   useEffect(() => {
     if (!itemId) return
+    if (!groupId) {
+      setLoad({ status: "error", message: "グループが選ばれていません" })
+      return
+    }
     let cancelled = false
+    // グループが変わったら前のグループの場所を出したままにしない
+    setLoad({ status: "loading" })
     void (async () => {
       try {
         const client = getApiClient()
-        const groupId = getCurrentGroupId()
         const [itemRes, locsRes] = await Promise.all([
           client.v1.items[":id"].$get({ param: { id: itemId } }),
           client.v1.locations.$get({ query: { groupId } }),
@@ -82,8 +88,9 @@ export default function AddDetailsScreen() {
         const itemBody = (await itemRes.json()).item
         const locsBody = (await locsRes.json()).locations
         setName(itemBody.name)
-        if (locsBody[0]) setLocationId(locsBody[0].id)
-        setLoad({ status: "ok", item: itemBody, locations: locsBody })
+        // 場所が 0 件のグループでは、前のグループの場所を残さない
+        setLocationId(locsBody[0]?.id ?? null)
+        setLoad({ status: "ok", item: itemBody, locations: locsBody, groupId })
       } catch (err) {
         if (cancelled) return
         const message = err instanceof Error ? err.message : "unknown"
@@ -93,7 +100,7 @@ export default function AddDetailsScreen() {
     return () => {
       cancelled = true
     }
-  }, [itemId])
+  }, [itemId, groupId])
 
   if (!itemId) {
     return (
@@ -118,9 +125,14 @@ export default function AddDetailsScreen() {
   }
 
   const canEditName = productLookup === "miss"
-  const groupId = getCurrentGroupId()
 
   async function onSave() {
+    // 送るのは場所を読んだときのグループ。読み直しの途中に切り替わっても、別グループの場所と混ぜない
+    const loadedGroupId = load.status === "ok" ? load.groupId : null
+    if (!loadedGroupId) {
+      setSaveError("グループが選ばれていません")
+      return
+    }
     if (!locationId) {
       setSaveError("場所を選択してください")
       return
@@ -148,7 +160,7 @@ export default function AddDetailsScreen() {
       }
       const stockRes = await client.v1.stocks.$post({
         json: {
-          groupId,
+          groupId: loadedGroupId,
           itemId,
           locationId,
           quantity: parsedQty,

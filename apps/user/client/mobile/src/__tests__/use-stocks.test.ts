@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { joinStocksWithMasters } from "../use-stocks"
+import { joinStocksWithMasters } from "../stock-join"
 
 test("joinStocksWithMasters joins by id with item / location names", () => {
   const stocks = [
