@@ -38,7 +38,7 @@ type LocationDto = {
 
 type LoadState =
   | { status: "loading" }
-  | { status: "ok"; item: ItemDto; locations: LocationDto[] }
+  | { status: "ok"; item: ItemDto; locations: LocationDto[]; groupId: string }
   | { status: "error"; message: string }
 
 export default function AddDetailsScreen() {
@@ -67,6 +67,8 @@ export default function AddDetailsScreen() {
       return
     }
     let cancelled = false
+    // グループが変わったら前のグループの場所を出したままにしない
+    setLoad({ status: "loading" })
     void (async () => {
       try {
         const client = getApiClient()
@@ -87,7 +89,7 @@ export default function AddDetailsScreen() {
         const locsBody = (await locsRes.json()).locations
         setName(itemBody.name)
         if (locsBody[0]) setLocationId(locsBody[0].id)
-        setLoad({ status: "ok", item: itemBody, locations: locsBody })
+        setLoad({ status: "ok", item: itemBody, locations: locsBody, groupId })
       } catch (err) {
         if (cancelled) return
         const message = err instanceof Error ? err.message : "unknown"
@@ -124,7 +126,9 @@ export default function AddDetailsScreen() {
   const canEditName = productLookup === "miss"
 
   async function onSave() {
-    if (!groupId) {
+    // 送るのは場所を読んだときのグループ。読み直しの途中に切り替わっても、別グループの場所と混ぜない
+    const loadedGroupId = load.status === "ok" ? load.groupId : null
+    if (!loadedGroupId) {
       setSaveError("グループが選ばれていません")
       return
     }
@@ -155,7 +159,7 @@ export default function AddDetailsScreen() {
       }
       const stockRes = await client.v1.stocks.$post({
         json: {
-          groupId,
+          groupId: loadedGroupId,
           itemId,
           locationId,
           quantity: parsedQty,

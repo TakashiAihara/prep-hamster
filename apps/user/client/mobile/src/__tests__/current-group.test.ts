@@ -22,6 +22,13 @@ describe("pickCurrentGroup", () => {
     expect(pickCurrentGroup([older, newer, oldest], null)).toEqual(oldest)
   })
 
+  test("breaks a createdAt tie by the smaller id whatever the list order", () => {
+    const tieB = group("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "2025-12-31T00:00:00.000Z")
+    const tieA = group("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "2025-12-31T00:00:00.000+00:00")
+    expect(pickCurrentGroup([newer, tieB, tieA, older], null)).toEqual(tieA)
+    expect(pickCurrentGroup([older, tieA, tieB, newer], null)).toEqual(tieA)
+  })
+
   test("returns null when the user has no group", () => {
     expect(pickCurrentGroup([], older.id)).toBeNull()
   })

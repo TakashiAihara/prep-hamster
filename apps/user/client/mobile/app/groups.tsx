@@ -1,11 +1,14 @@
-import { router } from "expo-router"
+import { Redirect, router } from "expo-router"
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native"
 import { CreateGroupForm } from "@/create-group-form"
 import { useCurrentGroup } from "@/current-group"
 
 // グループ切替 (M-10)。root の Stack の modal として開く。
 export default function GroupsScreen() {
-  const { group, groups, select } = useCurrentGroup()
+  const { status, group, groups, select } = useCurrentGroup()
+
+  // 未サインインや読み込み前に deep link で開かれたら、作れない作成フォームを出さずに入口へ戻す
+  if (status !== "ok") return <Redirect href="/" />
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
