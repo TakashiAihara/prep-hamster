@@ -11,9 +11,13 @@ type Env = Record<string, string | undefined>
 export function pickConnection(env: Env, stored: Connection | null): Connection | null {
   const url = env["PREP_HAMSTER_SUPABASE_URL"]
   const key = env["PREP_HAMSTER_SUPABASE_PUBLISHABLE_KEY"]
-  const apiUrl = env["PREP_HAMSTER_API_URL"] || stored?.apiUrl
-  if (url && key) return { url, key, ...(apiUrl ? { apiUrl } : {}) }
-  return stored
+  const base = url && key ? { url, key } : stored
+  if (!base) return null
+  // API の URL は env が優先。保存した URL は同じ Supabase project のときだけ引き継ぐ
+  // (別の project に login し直したとき、前の project の API へ token を送らない)
+  const sameProject = stored?.url === base.url
+  const apiUrl = env["PREP_HAMSTER_API_URL"] || (sameProject ? stored?.apiUrl : undefined)
+  return { url: base.url, key: base.key, ...(apiUrl ? { apiUrl } : {}) }
 }
 
 export const currentConnection = (): Connection | null =>
