@@ -44,7 +44,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
-  name: { fontSize: 15 },
+  // 幅を指定しないと Android は見積もった文字幅で描き、末尾の文字が欠けることがある
+  name: { flex: 1, fontSize: 15, marginRight: 8 },
   current: { color: "#2c7be5", fontSize: 13, fontWeight: "600" },
   heading: { fontSize: 14, fontWeight: "600", color: "#333" },
 })
