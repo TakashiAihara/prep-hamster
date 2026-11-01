@@ -83,7 +83,7 @@ v1.1.0 は Android と Google だけ (判断キュー Q-01)。Apple は #149。
 
 ### To-Be
 
-- `prep-hamster login` で Google のサインインがブラウザで開き、終わると CLI にセッションが残る。以降のコマンドは env を渡さなくても動く
+- `prep-hamster login` で Google のサインインがブラウザで開き、終わると CLI にセッションが残る。login のときに渡した接続先 (Supabase の URL と publishable key、API の URL) も一緒に残すので、以降のコマンドは env を渡さなくても動く
 - `prep-hamster logout` でセッションを消す
 - env `PREP_HAMSTER_ACCESS_TOKEN` があればそれを優先する (CI やスクリプト用。今までどおり)
 
@@ -100,6 +100,8 @@ v1.1.0 は Android と Google だけ (判断キュー Q-01)。Apple は #149。
 - 接続先は env `PREP_HAMSTER_SUPABASE_URL` / `PREP_HAMSTER_SUPABASE_PUBLISHABLE_KEY` (publishable key は配ってよい公開鍵)。無ければ login は exit 2
 - セッションは `$XDG_CONFIG_HOME/prep-hamster/session.json` (無ければ `~/.config/prep-hamster/session.json`)。supabase-js の storage をこのファイルに向ける。権限は 0600 で、書き込みは同じディレクトリの一時ファイルから rename する
 - API を呼ぶ側 (`src/client.ts` の `makeClient`) は env の token が無ければこのセッションから access token を取る (期限が近ければ supabase-js が refresh する)。どちらも無ければ「`prep-hamster login` を実行してください」で exit 1
+- refresh token が拒否された (失効・再利用) ときは login を促す。認証サーバに届かないときだけ、login を促さずに理由を出す
+- 保存したセッションの token を送るのは、API の URL を env か login 時の保存で明示したときだけ。既定の `http://localhost:3000` には送らない (同じホストで 3000 番を待つ別のプロセスに token を渡さないため)。env の token を使うときは今までどおり既定値を使う
 
 ### テスト
 

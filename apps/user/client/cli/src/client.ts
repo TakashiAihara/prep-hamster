@@ -1,5 +1,5 @@
 import { createApiClient, type ApiClient } from "@prep-hamster/api-client"
-import { sessionAccessToken } from "./auth"
+import { currentConnection, sessionAccessToken } from "./auth"
 
 const DEFAULT_API_URL = "http://localhost:3000"
 
@@ -10,11 +10,26 @@ function exitWith(e: unknown): never {
 }
 
 export async function makeClient(): Promise<ApiClient> {
-  const baseUrl = process.env["PREP_HAMSTER_API_URL"] ?? DEFAULT_API_URL
-  const accessToken =
-    process.env["PREP_HAMSTER_ACCESS_TOKEN"] || (await sessionAccessToken().catch(exitWith))
+  const env = process.env
+  const envToken = env["PREP_HAMSTER_ACCESS_TOKEN"]
+  if (envToken) {
+    return createApiClient({
+      baseUrl: env["PREP_HAMSTER_API_URL"] ?? DEFAULT_API_URL,
+      accessToken: envToken,
+    })
+  }
+
+  const accessToken = await sessionAccessToken().catch(exitWith)
   if (!accessToken) {
     console.error("Error: prep-hamster login を実行してください")
+    process.exit(1)
+  }
+  // 保存したセッションの token は、送り先を明示したときだけ送る (既定の localhost で待つ別のプロセスに渡さない)
+  const baseUrl = currentConnection()?.apiUrl
+  if (!baseUrl) {
+    console.error(
+      "Error: PREP_HAMSTER_API_URL を設定してください (設定したまま login すると次からは不要です)",
+    )
     process.exit(1)
   }
   return createApiClient({ baseUrl, accessToken })

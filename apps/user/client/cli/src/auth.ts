@@ -1,17 +1,23 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js"
+import { createClient, isAuthRetryableFetchError, type SupabaseClient } from "@supabase/supabase-js"
 import { existsSync } from "node:fs"
 import { fileStorage, readConnection, sessionFilePath, type Connection } from "./session-store"
 
 export const sessionFile = (): string => sessionFilePath(process.env)
 
-// login が残す接続先。env が優先で、無ければ前回 login したときのもの
-export function currentConnection(): Connection | null {
-  const env = process.env
+type Env = Record<string, string | undefined>
+
+// 接続先は env が優先で、無ければ前回 login したときのもの。
+// Supabase の URL と key は組でしか意味を持たないので、片方だけの env は使わない
+export function pickConnection(env: Env, stored: Connection | null): Connection | null {
   const url = env["PREP_HAMSTER_SUPABASE_URL"]
   const key = env["PREP_HAMSTER_SUPABASE_PUBLISHABLE_KEY"]
-  if (url && key) return { url, key }
-  return readConnection(sessionFile())
+  const apiUrl = env["PREP_HAMSTER_API_URL"] || stored?.apiUrl
+  if (url && key) return { url, key, ...(apiUrl ? { apiUrl } : {}) }
+  return stored
 }
+
+export const currentConnection = (): Connection | null =>
+  pickConnection(process.env, readConnection(sessionFile()))
 
 export function createAuthClient(): SupabaseClient | null {
   const connection = currentConnection()
@@ -28,12 +34,26 @@ export function createAuthClient(): SupabaseClient | null {
   })
 }
 
-// login 済みでなければ null。更新に失敗したら (認証サーバに届かない等)、login を促さずに理由を投げる
+// getSession の結果を「token / login し直し / 一時的な失敗」に分ける。
+// refresh token が拒否された (失効・再利用) なら auth-js はセッションを消して error を返すので、login を促す側 (null)。
+// 認証サーバに届かないときだけ、login を促さずに理由を投げる
+export function tokenFromSession(
+  accessToken: string | null,
+  error: unknown,
+  retryable: (e: unknown) => boolean,
+): string | null {
+  if (error && retryable(error)) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`認証サーバに届かず、セッションを更新できませんでした: ${message}`)
+  }
+  return error ? null : accessToken
+}
+
+// login 済みでなければ null
 export async function sessionAccessToken(): Promise<string | null> {
   if (!existsSync(sessionFile())) return null
   const supabase = createAuthClient()
   if (!supabase) return null
   const { data, error } = await supabase.auth.getSession()
-  if (error) throw new Error(`セッションを更新できませんでした: ${error.message}`)
-  return data.session?.access_token ?? null
+  return tokenFromSession(data.session?.access_token ?? null, error, isAuthRetryableFetchError)
 }

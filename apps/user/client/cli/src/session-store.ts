@@ -20,7 +20,8 @@ export function codeFromCallback(input: string, path: string): CallbackResult | 
 }
 
 export function sessionFilePath(env: Record<string, string | undefined>): string {
-  const xdg = env["XDG_CONFIG_HOME"]
+  // XDG Base Directory の仕様どおり、相対パスの XDG_CONFIG_HOME は無いものとして扱う
+  const xdg = env["XDG_CONFIG_HOME"]?.startsWith("/") ? env["XDG_CONFIG_HOME"] : undefined
   const home = env["HOME"]
   // どちらも無いと相対パスになり、cwd に token を書いてしまうので止める
   if (!xdg && !home) throw new Error("XDG_CONFIG_HOME か HOME を設定してください")
@@ -53,14 +54,16 @@ function readAll(file: string): Record<string, string> {
 // supabase-js のキーと混ざらない名前で、login に使った接続先を同じファイルに残す
 const CONNECTION_KEY = "prep-hamster.connection"
 
-export type Connection = { url: string; key: string }
+// apiUrl は保存したセッションの token を送ってよい API の送り先 (login のときの PREP_HAMSTER_API_URL)
+export type Connection = { url: string; key: string; apiUrl?: string }
 
 export function readConnection(file: string): Connection | null {
   const raw = readAll(file)[CONNECTION_KEY]
   if (!raw) return null
   try {
     const value = JSON.parse(raw) as Partial<Connection>
-    return value.url && value.key ? { url: value.url, key: value.key } : null
+    if (!value.url || !value.key) return null
+    return { url: value.url, key: value.key, ...(value.apiUrl ? { apiUrl: value.apiUrl } : {}) }
   } catch {
     return null
   }

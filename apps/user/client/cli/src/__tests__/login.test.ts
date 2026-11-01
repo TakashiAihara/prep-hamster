@@ -52,6 +52,12 @@ describe("sessionFilePath", () => {
     expect(sessionFilePath({ HOME: "/home/u" })).toBe("/home/u/.config/prep-hamster/session.json")
   })
 
+  test("ignores a relative XDG_CONFIG_HOME", () => {
+    expect(sessionFilePath({ XDG_CONFIG_HOME: ".", HOME: "/home/u" })).toBe(
+      "/home/u/.config/prep-hamster/session.json",
+    )
+  })
+
   test("refuses a relative path when neither XDG_CONFIG_HOME nor HOME is set", () => {
     expect(() => sessionFilePath({})).toThrow("XDG_CONFIG_HOME か HOME")
   })
@@ -94,6 +100,28 @@ describe("session file contents", () => {
     const file = join(dir, "session.json")
     writeFileSync(file, "null")
     expect(fileStorage(file).getItem("anything")).toBeNull()
+    expect(readConnection(file)).toBeNull()
+    writeFileSync(file, '["prep-hamster.connection"]')
+    expect(fileStorage(file).getItem("0")).toBeNull()
+  })
+
+  test("keeps the API URL and refuses a half connection", () => {
+    dir = mkdtempSync(join(tmpdir(), "ph-session-"))
+    const file = join(dir, "session.json")
+    writeConnection(file, {
+      url: "https://p.example.test",
+      key: "pk-1",
+      apiUrl: "https://api.example.test",
+    })
+    expect(readConnection(file)).toEqual({
+      url: "https://p.example.test",
+      key: "pk-1",
+      apiUrl: "https://api.example.test",
+    })
+    fileStorage(file).setItem(
+      "prep-hamster.connection",
+      JSON.stringify({ url: "https://p.example.test" }),
+    )
     expect(readConnection(file)).toBeNull()
   })
 })
