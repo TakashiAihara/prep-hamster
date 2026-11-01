@@ -22,7 +22,7 @@ async function shareInvitation(groupId: string, groupName: string): Promise<stri
 
 // グループ切替 (M-10)。root の Stack の modal として開く。
 export default function GroupsScreen() {
-  const { status, group, groups, select } = useCurrentGroup()
+  const { status, group, groups, select, busy } = useCurrentGroup()
   const [inviting, setInviting] = useState(false)
   const [inviteError, setInviteError] = useState<string | null>(null)
 
@@ -35,7 +35,9 @@ export default function GroupsScreen() {
         {groups.map((g) => (
           <Pressable
             key={g.id}
-            style={styles.row}
+            style={[styles.row, busy && styles.disabled]}
+            // 作成・参加の応答待ちの間に選ぶと、応答でもう一度閉じたり選択を奪い合ったりするので押させない
+            disabled={busy}
             onPress={() => {
               select(g.id)
               router.back()

@@ -1,6 +1,6 @@
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker"
 import { router, useLocalSearchParams } from "expo-router"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Platform,
@@ -49,6 +49,8 @@ export default function AddDetailsScreen() {
 
   const [load, setLoad] = useState<LoadState>({ status: "loading" })
   const [name, setName] = useState("")
+  // グループ切替の読み直しで、利用者が打った名前を item の名前で上書きしない
+  const nameSetFor = useRef<string | null>(null)
   const [locationId, setLocationId] = useState<string | null>(null)
   const [quantity, setQuantity] = useState("1")
   const [unit, setUnit] = useState("個")
@@ -87,7 +89,10 @@ export default function AddDetailsScreen() {
         }
         const itemBody = (await itemRes.json()).item
         const locsBody = (await locsRes.json()).locations
-        setName(itemBody.name)
+        if (nameSetFor.current !== itemId) {
+          nameSetFor.current = itemId
+          setName(itemBody.name)
+        }
         // 場所が 0 件のグループでは、前のグループの場所を残さない
         setLocationId(locsBody[0]?.id ?? null)
         setLoad({ status: "ok", item: itemBody, locations: locsBody, groupId })

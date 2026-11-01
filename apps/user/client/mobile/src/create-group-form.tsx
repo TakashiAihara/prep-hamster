@@ -4,7 +4,7 @@ import { useCurrentGroup } from "./current-group"
 
 // 「グループを作る」画面と M-10 の「新しいグループを作る」で同じものを使う。
 export function CreateGroupForm({ onCreated }: { onCreated?: () => void }) {
-  const { create } = useCurrentGroup()
+  const { create, busy } = useCurrentGroup()
   const [name, setName] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -14,9 +14,9 @@ export function CreateGroupForm({ onCreated }: { onCreated?: () => void }) {
     setSaving(true)
     setError(null)
     try {
-      await create(trimmed)
+      const result = await create(trimmed)
       setName("")
-      onCreated?.()
+      if (result === "selected") onCreated?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown")
     } finally {
@@ -24,7 +24,8 @@ export function CreateGroupForm({ onCreated }: { onCreated?: () => void }) {
     }
   }
 
-  const disabled = trimmed.length === 0 || saving
+  // 他のフォームの作成・参加を待っている間も押させない (選択の競合を起こさない)
+  const disabled = trimmed.length === 0 || saving || busy
 
   return (
     <View style={styles.form}>
