@@ -5,13 +5,14 @@ import {
   Alert,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native"
 import { getApiClient } from "@/api"
+import { AuthGate } from "@/auth-status"
+import { KeyboardScrollView } from "@/keyboard-scroll-view"
 import {
   formatQuantity,
   loadStockDetail,
@@ -19,6 +20,7 @@ import {
   shouldSuggestShopping,
   type StockDetail,
   type StockDto,
+  UNKNOWN_LOCATION_NAME,
 } from "@/stock-detail"
 import { createConfirmDiscard, leaveDetail, loadReducer } from "@/stock-detail-controller"
 import { useStockActions } from "@/use-stock-actions"
@@ -27,8 +29,17 @@ import { useStockActions } from "@/use-stock-actions"
 // 消費 / 廃棄で残量が残れば一覧へ戻り、0 になったら留まって買い物リスト追加の提案を表示する
 // (screen-flow 2.3.2。表示のみ。買い物リスト本体は v1.2.0)。
 // 移動 / 編集は画面に留まり、最新の stock で表示を差し替える。
+// root の Stack に直接ぶら下がりタブの AuthGate を通らないので、深リンクで未サインインのまま開かれても
+// サインイン画面へ回すよう、ここで AuthGate を掛ける
+export default function StockDetailRoute() {
+  return (
+    <AuthGate area="app">
+      <StockDetailScreen />
+    </AuthGate>
+  )
+}
 
-export default function StockDetailScreen() {
+function StockDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const [load, dispatch] = useReducer(loadReducer, { status: "loading" })
   const [reloadKey, setReloadKey] = useState(0)
@@ -60,7 +71,7 @@ export default function StockDetailScreen() {
   if (!id) {
     return (
       <View style={styles.center}>
-        <Text style={styles.error}>id が指定されていません</Text>
+        <Text style={styles.error}>在庫が指定されていません</Text>
       </View>
     )
   }
@@ -122,12 +133,13 @@ function DetailBody({
   })
 
   const empty = shouldSuggestShopping(stock.quantity)
-  const currentLocation = locations.find((l) => l.id === stock.locationId)?.name ?? "(unknown)"
+  const currentLocation =
+    locations.find((l) => l.id === stock.locationId)?.name ?? UNKNOWN_LOCATION_NAME
   const targets = moveTargets(locations, stock.locationId)
   const targetName = targets.find((l) => l.id === targetId)?.name
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <KeyboardScrollView contentContainerStyle={styles.container}>
       <View style={styles.section}>
         <Text style={styles.title} testID="detail-item-name">
           {itemName}
@@ -154,7 +166,9 @@ function DetailBody({
           <Text style={styles.suggestionText}>
             在庫がなくなりました。買い物リストに追加しますか？
           </Text>
-          <Text style={styles.suggestionNote}>(買い物リストは v1.2.0 で提供予定です)</Text>
+          <Text style={styles.suggestionNote}>
+            (買い物リストは今後のアップデートで提供予定です)
+          </Text>
         </View>
       ) : null}
 
@@ -272,7 +286,7 @@ function DetailBody({
           <Text style={styles.primaryLabel}>保存</Text>
         </Pressable>
       </View>
-    </ScrollView>
+    </KeyboardScrollView>
   )
 }
 

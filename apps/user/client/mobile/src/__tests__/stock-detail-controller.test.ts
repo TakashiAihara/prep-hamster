@@ -180,9 +180,9 @@ test.each([true, false])(
       webConfirm: (m) => (seen.push(m), answer),
       alert: () => seen.push("alert"),
     })
-    expect(await confirm(2)).toBe(answer)
+    expect(await confirm(2, "パック")).toBe(answer)
     expect(seen).toHaveLength(1)
-    expect(seen[0]).toContain("2")
+    expect(seen[0]).toContain("2 パック を廃棄します")
     expect(seen[0]).toContain("取り消せません")
   },
 )
@@ -199,7 +199,7 @@ const nativeConfirm = (pick: AlertPick) =>
       throw new Error("web confirm on native")
     },
     alert: ((_t: string, _m: string, b: never, o: never) => pick(b, o)) as never,
-  })(1)
+  })(1, "個")
 
 test("createConfirmDiscard resolves from the Alert buttons and dismissal on native", async () => {
   expect(await nativeConfirm((b) => b.find((x) => x.text === "廃棄する")?.onPress?.())).toBe(true)

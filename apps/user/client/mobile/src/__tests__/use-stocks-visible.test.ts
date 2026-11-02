@@ -50,8 +50,10 @@ const stockDto = (id: string, quantity: number) => ({
   bestBeforeDate: null,
 })
 
-function fakeListClient(over: { stocks?: () => Response } = {}) {
-  const queries: { stocks?: unknown } = {}
+function fakeListClient(
+  over: { stocks?: () => Response; items?: () => Response; locations?: () => Response } = {},
+) {
+  const queries: { stocks?: unknown; items?: unknown; locations?: unknown } = {}
   const client = {
     v1: {
       stocks: {
@@ -63,8 +65,18 @@ function fakeListClient(over: { stocks?: () => Response } = {}) {
           )
         },
       },
-      items: { $get: async () => json({ items: [{ id: "i1", name: "Tomato" }] }) },
-      locations: { $get: async () => json({ locations: [{ id: "l1", name: "Pantry" }] }) },
+      items: {
+        $get: async (args: { query: unknown }) => {
+          queries.items = args.query
+          return over.items?.() ?? json({ items: [{ id: "i1", name: "Tomato" }] })
+        },
+      },
+      locations: {
+        $get: async (args: { query: unknown }) => {
+          queries.locations = args.query
+          return over.locations?.() ?? json({ locations: [{ id: "l1", name: "Pantry" }] })
+        },
+      },
     },
   } as unknown as ApiClient
   return { client, queries }
@@ -74,6 +86,8 @@ test("loadStockRows asks for expired stocks too and hides the emptied ones", asy
   const { client, queries } = fakeListClient()
   const r = await loadStockRows(client, GROUP)
   expect(queries.stocks).toEqual({ groupId: GROUP, includeExpired: "true" })
+  expect(queries.items).toEqual({ groupId: GROUP })
+  expect(queries.locations).toEqual({ groupId: GROUP })
   expect(r.ok && r.rows.map((x) => x.id)).toEqual(["alive", "expired"])
   expect(r.ok && r.rows[0]?.itemName).toBe("Tomato")
 })
@@ -81,4 +95,11 @@ test("loadStockRows asks for expired stocks too and hides the emptied ones", asy
 test("loadStockRows reports which request failed", async () => {
   const { client } = fakeListClient({ stocks: () => new Response("x", { status: 500 }) })
   expect(await loadStockRows(client, GROUP)).toEqual({ ok: false, message: "stocks HTTP 500" })
+  const items = fakeListClient({ items: () => new Response("x", { status: 502 }) })
+  expect(await loadStockRows(items.client, GROUP)).toEqual({ ok: false, message: "items HTTP 502" })
+  const locs = fakeListClient({ locations: () => new Response("x", { status: 503 }) })
+  expect(await loadStockRows(locs.client, GROUP)).toEqual({
+    ok: false,
+    message: "locations HTTP 503",
+  })
 })

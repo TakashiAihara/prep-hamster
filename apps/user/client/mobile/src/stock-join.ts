@@ -1,5 +1,5 @@
 import type { ApiClient } from "@prep-hamster/api-client"
-import { isEmptyQuantity, UNKNOWN_ITEM_NAME } from "./stock-detail"
+import { isEmptyQuantity, UNKNOWN_ITEM_NAME, UNKNOWN_LOCATION_NAME } from "./stock-detail"
 
 export type StockListItem = {
   id: string
@@ -34,7 +34,7 @@ export function joinStocksWithMasters(
   return stocks.map((s) => ({
     id: s.id,
     itemName: itemMap.get(s.itemId) ?? UNKNOWN_ITEM_NAME,
-    locationName: locMap.get(s.locationId) ?? "(unknown location)",
+    locationName: locMap.get(s.locationId) ?? UNKNOWN_LOCATION_NAME,
     quantity: s.quantity,
     unit: s.unit,
     useByDate: s.useByDate,
@@ -65,7 +65,7 @@ export function todayUtc(now: Date = new Date()): string {
 
 export type LoadRowsResult = { ok: true; rows: StockListItem[] } | { ok: false; message: string }
 
-// 期限切れも一覧に出す (期限切れの廃棄が詳細画面に届く唯一の経路のため)。
+// 期限切れも一覧に出す (一覧から詳細を開いて期限切れを廃棄できるように)。
 export async function loadStockRows(client: ApiClient, groupId: string): Promise<LoadRowsResult> {
   const [stocksRes, itemsRes, locationsRes] = await Promise.all([
     client.v1.stocks.$get({ query: { groupId, includeExpired: "true" } }),
