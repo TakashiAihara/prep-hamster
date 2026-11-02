@@ -13,6 +13,7 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="sign-in" />
+          <Stack.Screen name="stocks/[id]" options={{ headerShown: true, title: "在庫詳細" }} />
           <Stack.Screen
             name="groups"
             options={{ presentation: "modal", headerShown: true, title: "グループ" }}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { getApiClient } from "./api"
 import { useCurrentGroup } from "./current-group"
-import { joinStocksWithMasters, type StockListItem } from "./stock-join"
+import { loadStockRows, type StockListItem } from "./stock-join"
 
 export type { StockListItem }
 
@@ -31,32 +31,10 @@ export function useStocks(): { state: State; reload: () => void } {
     let cancelled = false
     void (async () => {
       try {
-        const client = getApiClient()
-        const [stocksRes, itemsRes, locationsRes] = await Promise.all([
-          client.v1.stocks.$get({ query: { groupId } }),
-          client.v1.items.$get({ query: { groupId } }),
-          client.v1.locations.$get({ query: { groupId } }),
-        ])
-        if (cancelled) return
-        if (!stocksRes.ok) {
-          setState({ status: "error", message: `stocks HTTP ${stocksRes.status}` })
-          return
-        }
-        if (!itemsRes.ok) {
-          setState({ status: "error", message: `items HTTP ${itemsRes.status}` })
-          return
-        }
-        if (!locationsRes.ok) {
-          setState({ status: "error", message: `locations HTTP ${locationsRes.status}` })
-          return
-        }
-
-        const stocks = (await stocksRes.json()).stocks
-        const items = (await itemsRes.json()).items
-        const locations = (await locationsRes.json()).locations
+        const r = await loadStockRows(getApiClient(), groupId)
         // 本文を読む間にグループが変わっていたら、前のグループの行で上書きしない
         if (cancelled) return
-        setState({ status: "ok", rows: joinStocksWithMasters(stocks, items, locations) })
+        setState(r.ok ? { status: "ok", rows: r.rows } : { status: "error", message: r.message })
       } catch (err) {
         if (cancelled) return
         const message = err instanceof Error ? err.message : "unknown"
