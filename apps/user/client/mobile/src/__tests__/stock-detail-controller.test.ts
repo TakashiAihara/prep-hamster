@@ -42,6 +42,7 @@ function harness(opts: { result?: () => Response; confirm?: boolean } = {}) {
   const messages: Array<ActionMessage | null> = []
   const busy: boolean[] = []
   const busyDuringConfirm: Array<boolean | undefined> = []
+  const confirmArgs: Array<[number, string]> = []
   const changed: StockDto[] = []
   const respond = (name: string) => async (args?: { json?: unknown }) => {
     posts.push(name)
@@ -70,14 +71,15 @@ function harness(opts: { result?: () => Response; confirm?: boolean } = {}) {
     setMessage: (m) => messages.push(m),
     onStockChanged: (s) => changed.push(s),
     onMoved: () => events.push("moved"),
-    confirmDiscard: async () => {
+    confirmDiscard: async (quantity, unit) => {
       events.push("confirm")
+      confirmArgs.push([quantity, unit])
       busyDuringConfirm.push(busy.at(-1))
       return opts.confirm ?? true
     },
     leave: () => events.push("leave"),
   })
-  return { actions, posts, sent, events, messages, busy, busyDuringConfirm, changed }
+  return { actions, posts, sent, events, messages, busy, busyDuringConfirm, changed, confirmArgs }
 }
 
 const lastMessage = (h: ReturnType<typeof harness>) => h.messages.at(-1)
@@ -228,6 +230,7 @@ test("consume or discard that empties the stock stays and reports success", asyn
   const d = harness({ result: emptiedResult })
   await d.actions.discard("5", "")
   expect(d.events).toEqual(["confirm"])
+  expect(d.confirmArgs).toEqual([[5, "個"]])
   expect(lastMessage(d)).toEqual({ kind: "ok", text: "廃棄しました" })
 })
 
