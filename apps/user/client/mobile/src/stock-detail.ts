@@ -91,7 +91,6 @@ export function buildEditPatch(
 }
 
 // screen-flow.md 2.3.2: 残量 0 で買い物リスト追加を提案する (表示のみ)。
-// 浮動小数の消費を繰り返すと 1 - 0.7 - 0.3 = 5.55e-17 のような残りが出る。
 // 「0 と表示されるのに在庫あり」にならないよう、判定は表示 (formatQuantity) と同じ丸めで行う。
 export function shouldSuggestShopping(quantity: number): boolean {
   return roundQuantity(quantity) <= 0

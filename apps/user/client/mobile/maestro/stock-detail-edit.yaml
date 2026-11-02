@@ -14,7 +14,7 @@ appId: com.example.prephamster
     clearState: true
 # サインイン済みで始める (scripts/capture-screens.ts が scripts/dev-session.ts の deep link を渡す)
 - openLink: ${DEV_SESSION_URL}
-# タブはサインイン後にだけ出る。session の設定が終わる前に進まない
+# タブはサインイン済みでグループがあるときだけ出る。session の設定が終わる前に進まない
 - extendedWaitUntil:
     visible:
       text: "追加"
