@@ -13,6 +13,7 @@ import {
 import { getApiClient } from "@/api"
 import { useCurrentGroup } from "@/current-group"
 import { KeyboardScrollView } from "@/keyboard-scroll-view"
+import { parsePositive } from "@/stock-detail"
 
 // 詳細入力 + 保存画面。
 // 受け取る params:
@@ -142,11 +143,13 @@ export default function AddDetailsScreen() {
       setSaveError("場所を選択してください")
       return
     }
-    const parsedQty = Number(quantity)
-    if (!Number.isFinite(parsedQty) || parsedQty < 0) {
-      setSaveError("数量は 0 以上の数値で入力してください")
+    // 数量 0 の在庫は一覧から隠れて見えなくなるので登録させない
+    const qty = parsePositive(quantity)
+    if (!qty.ok) {
+      setSaveError(qty.message)
       return
     }
+    const parsedQty = qty.value
     setSaving(true)
     setSaveError(null)
     try {
@@ -194,7 +197,12 @@ export default function AddDetailsScreen() {
     <KeyboardScrollView contentContainerStyle={styles.container}>
       <Section title={`商品 (${labelForLookup(productLookup)})`}>
         {canEditName ? (
-          <TextInput value={name} onChangeText={setName} style={styles.input} />
+          <TextInput
+            testID="add-name-input"
+            value={name}
+            onChangeText={setName}
+            style={styles.input}
+          />
         ) : (
           <Text style={styles.staticText}>{name}</Text>
         )}
@@ -227,6 +235,7 @@ export default function AddDetailsScreen() {
       <Section title="数量 / 単位">
         <View style={styles.row}>
           <TextInput
+            testID="add-quantity-input"
             value={quantity}
             onChangeText={setQuantity}
             keyboardType="decimal-pad"
@@ -265,6 +274,7 @@ export default function AddDetailsScreen() {
       {saveError ? <Text style={styles.error}>{saveError}</Text> : null}
 
       <Pressable
+        testID="add-save"
         style={[styles.primary, saving && styles.primaryDisabled]}
         onPress={onSave}
         disabled={saving}
