@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import {
+  authRedirectUrl,
   exchangeAuthCodeOnce,
   gateFor,
   getAccessToken,
@@ -85,3 +86,26 @@ test("exchangeAuthCodeOnce exchanges the same code only once", async () => {
   await exchangeAuthCodeOnce("c-2", exchange)
   expect(calls).toBe(2)
 })
+
+const appSchemeUrl = (path: string) => `prep-hamster://${path}`
+
+test("authRedirectUrl sends Expo Go back through exp://, which is the scheme Expo Go receives", () => {
+  expect(
+    authRedirectUrl({ inExpoGo: true, hostUri: "dev.example.test:8081", createURL: appSchemeUrl }),
+  ).toBe("exp://dev.example.test:8081/--/auth/callback")
+})
+
+test("authRedirectUrl uses the app scheme outside Expo Go", () => {
+  expect(
+    authRedirectUrl({ inExpoGo: false, hostUri: "dev.example.test:8081", createURL: appSchemeUrl }),
+  ).toBe("prep-hamster://auth/callback")
+})
+
+test.each([undefined, null, ""])(
+  "authRedirectUrl uses the app scheme in Expo Go when the host is %p",
+  (hostUri) => {
+    expect(authRedirectUrl({ inExpoGo: true, hostUri, createURL: appSchemeUrl })).toBe(
+      "prep-hamster://auth/callback",
+    )
+  },
+)

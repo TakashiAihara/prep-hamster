@@ -48,12 +48,29 @@ async function exchangeWithSupabase(code: string): Promise<void> {
   if (exchanged.error) throw exchanged.error
 }
 
+// Expo Go で executionEnvironment が bare を返すと (expo/expo#45189)、createURL は Expo Go の受けない
+// app の scheme を返し、Android のブラウザがそこで止まる。Expo Go では exp:// を自分で組む。
+export function authRedirectUrl(env: {
+  inExpoGo: boolean
+  hostUri: string | null | undefined
+  createURL: (path: string) => string
+}): string {
+  if (env.inExpoGo && env.hostUri) return `exp://${env.hostUri}/--/auth/callback`
+  return env.createURL("auth/callback")
+}
+
 export async function signInWithGoogle(): Promise<void> {
   const { supabase } = await import("./supabase")
   const WebBrowser = await import("expo-web-browser")
   const Linking = await import("expo-linking")
+  const { isRunningInExpoGo } = await import("expo")
+  const { default: Constants } = await import("expo-constants")
 
-  const redirectTo = Linking.createURL("auth/callback")
+  const redirectTo = authRedirectUrl({
+    inExpoGo: isRunningInExpoGo(),
+    hostUri: Constants.expoConfig?.hostUri,
+    createURL: Linking.createURL,
+  })
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo, skipBrowserRedirect: true },
