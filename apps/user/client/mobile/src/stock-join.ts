@@ -1,3 +1,6 @@
+import type { ApiClient } from "@prep-hamster/api-client"
+import { isEmptyQuantity, UNKNOWN_ITEM_NAME } from "./stock-detail"
+
 export type StockListItem = {
   id: string
   itemName: string
@@ -30,11 +33,51 @@ export function joinStocksWithMasters(
   const locMap = new Map(locations.map((l) => [l.id, l.name]))
   return stocks.map((s) => ({
     id: s.id,
-    itemName: itemMap.get(s.itemId) ?? "(unknown item)",
+    itemName: itemMap.get(s.itemId) ?? UNKNOWN_ITEM_NAME,
     locationName: locMap.get(s.locationId) ?? "(unknown location)",
     quantity: s.quantity,
     unit: s.unit,
     useByDate: s.useByDate,
     bestBeforeDate: s.bestBeforeDate,
   }))
+}
+
+// 残量 0 (消費 / 廃棄し切った在庫) は API が行を残すので、一覧では隠す。
+export function visibleStocks(rows: StockListItem[]): StockListItem[] {
+  return rows.filter((r) => !isEmptyQuantity(r.quantity))
+}
+
+// API の一覧が includeExpired なしで除外するのと同じ基準: 期限日が today 以前なら期限切れ。
+// today は API と同じ UTC の YYYY-MM-DD。
+export function isExpired(
+  row: { useByDate: string | null; bestBeforeDate: string | null },
+  today: string,
+): boolean {
+  return (
+    (row.useByDate !== null && row.useByDate <= today) ||
+    (row.bestBeforeDate !== null && row.bestBeforeDate <= today)
+  )
+}
+
+export function todayUtc(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10)
+}
+
+export type LoadRowsResult = { ok: true; rows: StockListItem[] } | { ok: false; message: string }
+
+// 期限切れも一覧に出す (期限切れの廃棄が詳細画面に届く唯一の経路のため)。
+export async function loadStockRows(client: ApiClient, groupId: string): Promise<LoadRowsResult> {
+  const [stocksRes, itemsRes, locationsRes] = await Promise.all([
+    client.v1.stocks.$get({ query: { groupId, includeExpired: "true" } }),
+    client.v1.items.$get({ query: { groupId } }),
+    client.v1.locations.$get({ query: { groupId } }),
+  ])
+  if (!stocksRes.ok) return { ok: false, message: `stocks HTTP ${stocksRes.status}` }
+  if (!itemsRes.ok) return { ok: false, message: `items HTTP ${itemsRes.status}` }
+  if (!locationsRes.ok) return { ok: false, message: `locations HTTP ${locationsRes.status}` }
+
+  const stocks = (await stocksRes.json()).stocks
+  const items = (await itemsRes.json()).items
+  const locations = (await locationsRes.json()).locations
+  return { ok: true, rows: visibleStocks(joinStocksWithMasters(stocks, items, locations)) }
 }
