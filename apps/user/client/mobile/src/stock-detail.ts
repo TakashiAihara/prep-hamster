@@ -34,9 +34,6 @@ const REASON_MAX = 500
 export const UNKNOWN_ITEM_NAME = "不明な商品"
 export const UNKNOWN_LOCATION_NAME = "不明な場所"
 
-// 浮動小数の消費を繰り返すと 1 - 0.7 - 0.3 = 5.55e-17 のような残りが出るので、これ未満は 0 と読む。
-const QUANTITY_EPSILON = 1e-9
-
 export function parsePositive(input: string): Result<number> {
   const trimmed = input.trim()
   const value = trimmed === "" ? Number.NaN : Number(trimmed)
@@ -94,8 +91,10 @@ export function buildEditPatch(
 }
 
 // screen-flow.md 2.3.2: 残量 0 で買い物リスト追加を提案する (表示のみ)。
+// 浮動小数の消費を繰り返すと 1 - 0.7 - 0.3 = 5.55e-17 のような残りが出る。
+// 「0 と表示されるのに在庫あり」にならないよう、判定は表示 (formatQuantity) と同じ丸めで行う。
 export function shouldSuggestShopping(quantity: number): boolean {
-  return quantity < QUANTITY_EPSILON
+  return roundQuantity(quantity) <= 0
 }
 
 // 一覧で隠す / 詳細で提案を出す判定は同じ「残量なし」を使う。
@@ -103,9 +102,10 @@ export function isEmptyQuantity(quantity: number): boolean {
   return shouldSuggestShopping(quantity)
 }
 
+const roundQuantity = (quantity: number): number => Number(quantity.toFixed(6))
+
 export function formatQuantity(quantity: number): string {
-  // toFixed が float 残り (5.55e-17) も 0 に丸める
-  return String(Number(quantity.toFixed(6)))
+  return String(roundQuantity(quantity))
 }
 
 export function moveTargets(locations: LocationDto[], currentLocationId: string): LocationDto[] {
