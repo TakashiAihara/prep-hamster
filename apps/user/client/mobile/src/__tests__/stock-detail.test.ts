@@ -151,6 +151,11 @@ test("a float residue from repeated consumption counts as empty and displays as 
   expect(isEmptyQuantity(residue)).toBe(true)
   expect(formatQuantity(residue)).toBe("0")
   expect(shouldSuggestShopping(0.001)).toBe(false)
+  // 0 と表示される量は空、それ以外は在庫あり
+  expect(formatQuantity(0.0000004)).toBe("0")
+  expect(shouldSuggestShopping(0.0000004)).toBe(true)
+  expect(formatQuantity(0.000001)).toBe("0.000001")
+  expect(shouldSuggestShopping(0.000001)).toBe(false)
 })
 
 test("formatQuantity rounds float noise and keeps real fractions", () => {

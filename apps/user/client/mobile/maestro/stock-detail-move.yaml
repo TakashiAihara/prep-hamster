@@ -4,7 +4,7 @@
 #   - Android 専用。画面を戻すのに Maestro の `back` (Android のみ) を使う。
 #     stack の header の戻るボタンには安定した testID が無く、iOS では `back` が使えない。
 #   - API がローカルで起動 (PORT 3000) し、EXPO_PUBLIC_API_BASE_URL が emulator から到達できる
-#   - EXPO_PUBLIC_STUB_USER_ID の user が EXPO_PUBLIC_STUB_GROUP_ID の EDITOR 以上
+#   - scripts/dev-session.ts のテストユーザーが、開いているグループの EDITOR 以上
 #   - DB の状態に依存しない: 在庫ごとに実行時刻入りの barcode / 商品名 (scripts/unique-stock.js)
 #     を使い、商品名のテキストでその在庫の行だけを開く。他の flow が残した在庫があってもよい
 #   - 場所が 2 件以上ある (移動先に現在地以外が必要)
@@ -12,6 +12,13 @@ appId: com.example.prephamster
 ---
 - launchApp:
     clearState: true
+# サインイン済みで始める (scripts/capture-screens.ts が scripts/dev-session.ts の deep link を渡す)
+- openLink: ${DEV_SESSION_URL}
+# タブはサインイン後にだけ出る。session の設定が終わる前に進まない
+- extendedWaitUntil:
+    visible:
+      text: "追加"
+    timeout: 15000
 - waitForAnimationToEnd
 - runScript:
     file: scripts/unique-stock.js
