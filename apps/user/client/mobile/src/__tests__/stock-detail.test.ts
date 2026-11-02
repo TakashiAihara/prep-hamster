@@ -348,7 +348,7 @@ test("loadStockDetail opens a stock whose item was soft-deleted under a placehol
     }),
   )
   const r = await loadStockDetail(client, STOCK_ID)
-  expect(r.ok && r.detail.itemName).toBe("(unknown item)")
+  expect(r.ok && r.detail.itemName).toBe("不明な商品")
 })
 
 test("loadStockDetail fails when the locations lookup fails", async () => {

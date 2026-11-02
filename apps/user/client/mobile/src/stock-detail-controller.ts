@@ -81,10 +81,12 @@ export type ConfirmEnv = {
   alert: typeof Alert.alert
 }
 
-export function createConfirmDiscard(env: ConfirmEnv): (quantity: number) => Promise<boolean> {
-  return (quantity) => {
+export function createConfirmDiscard(
+  env: ConfirmEnv,
+): (quantity: number, unit: string) => Promise<boolean> {
+  return (quantity, unit) => {
     const title = "在庫を廃棄しますか？"
-    const message = `${formatQuantity(quantity)} を廃棄します。この操作は取り消せません。`
+    const message = `${formatQuantity(quantity)} ${unit} を廃棄します。この操作は取り消せません。`
     if (env.os === "web") return Promise.resolve(env.webConfirm(`${title}\n${message}`))
     return new Promise((resolve) => {
       env.alert(
@@ -110,7 +112,7 @@ export type StockActionDeps = {
   setMessage: (message: ActionMessage | null) => void
   onStockChanged: (stock: StockDto) => void
   onMoved: () => void
-  confirmDiscard: (quantity: number) => Promise<boolean>
+  confirmDiscard: (quantity: number, unit: string) => Promise<boolean>
   leave: () => void
 }
 
@@ -162,7 +164,7 @@ export function createStockActions(deps: StockActionDeps) {
         deps.setBusy(true)
         let confirmed = false
         try {
-          confirmed = await deps.confirmDiscard(qty.value)
+          confirmed = await deps.confirmDiscard(qty.value, stock.unit)
         } finally {
           if (!confirmed) deps.setBusy(false)
         }

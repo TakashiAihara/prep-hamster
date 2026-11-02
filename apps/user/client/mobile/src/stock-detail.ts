@@ -1,4 +1,5 @@
 import type { ApiClient } from "@prep-hamster/api-client"
+import { apiErrorMessage } from "./api-error"
 
 // 在庫詳細 (M-05) の非 UI ロジック: 入力検証 / patch の組み立て / API 呼び出し。
 // 画面から切り出して描画なしの unit test で固定する。
@@ -30,7 +31,8 @@ export type EditPatch = {
 export type ActionResult = { ok: true; stock: StockDto } | { ok: false; message: string }
 
 const REASON_MAX = 500
-export const UNKNOWN_ITEM_NAME = "(unknown item)"
+export const UNKNOWN_ITEM_NAME = "不明な商品"
+export const UNKNOWN_LOCATION_NAME = "不明な場所"
 
 // 浮動小数の消費を繰り返すと 1 - 0.7 - 0.3 = 5.55e-17 のような残りが出るので、これ未満は 0 と読む。
 const QUANTITY_EPSILON = 1e-9
@@ -110,19 +112,11 @@ export function moveTargets(locations: LocationDto[], currentLocationId: string)
   return locations.filter((l) => l.id !== currentLocationId)
 }
 
-// hc の ClientResponse は RN の FormData 型のせいで DOM の Response に代入できないので、使う 2 つだけを受ける
 async function failure(res: {
   status: number
   json(): Promise<unknown>
 }): Promise<{ ok: false; message: string }> {
-  try {
-    const body = (await res.json()) as { error?: { message?: unknown } }
-    const message = body.error?.message
-    if (typeof message === "string" && message !== "") return { ok: false, message }
-  } catch {
-    // body が JSON でなければ status だけ返す
-  }
-  return { ok: false, message: `HTTP ${res.status}` }
+  return { ok: false, message: await apiErrorMessage(res, `HTTP ${res.status}`) }
 }
 
 function errorMessage(err: unknown): { ok: false; message: string } {

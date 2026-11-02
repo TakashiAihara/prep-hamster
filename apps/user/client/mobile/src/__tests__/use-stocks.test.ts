@@ -41,8 +41,8 @@ test("joinStocksWithMasters falls back to '(unknown ...)' when masters are missi
     },
   ]
   const rows = joinStocksWithMasters(stocks, [], [])
-  expect(rows[0]?.itemName).toBe("(unknown item)")
-  expect(rows[0]?.locationName).toBe("(unknown location)")
+  expect(rows[0]?.itemName).toBe("不明な商品")
+  expect(rows[0]?.locationName).toBe("不明な場所")
 })
 
 test("joinStocksWithMasters preserves the input order of stocks", () => {
