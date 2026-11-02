@@ -156,8 +156,8 @@ test("a float residue from repeated consumption counts as empty and displays as 
   expect(shouldSuggestShopping(0.0000004)).toBe(true)
   expect(formatQuantity(0.000001)).toBe("0.000001")
   expect(shouldSuggestShopping(0.000001)).toBe(false)
-  expect(formatQuantity(0.0000009)).toBe("0.000001")
-  expect(shouldSuggestShopping(0.0000009)).toBe(false)
+  expect(formatQuantity(0.0000006)).toBe("0.000001")
+  expect(shouldSuggestShopping(0.0000006)).toBe(false)
 })
 
 test("formatQuantity rounds float noise and keeps real fractions", () => {
