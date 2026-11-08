@@ -70,7 +70,7 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
-      - name: Check dependency versions against the Expo SDK
+      - name: Check dependency versions against the locked Expo SDK
         working-directory: apps/user/client/mobile
         # Online, expo fetches the expected versions from api.expo.dev, which moves with every SDK
         # patch release and fails main without a repo change. Offline it reads
