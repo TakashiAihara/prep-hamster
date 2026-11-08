@@ -56,7 +56,7 @@ v1.1.0 は Android と Google だけ (判断キュー Q-01)。Apple は #149。
 
 - `@supabase/supabase-js` の `signInWithOAuth({ provider: "google", options: { redirectTo, skipBrowserRedirect: true } })` で URL を得て、`expo-web-browser` の `openAuthSessionAsync(url, redirectTo)` で開く
 - `flowType: "pkce"` にし、戻ってきた URL の `code` を `exchangeCodeForSession(code)` でセッションにする。URL に token を載せない (Redirect URLs の `exp://**` は Expo Go を指すので、届いた code は verifier を持つアプリでしか使えない形にしておく)
-- `redirectTo` は `expo-linking` の `createURL("auth/callback")`。dev build と本番は `prep-hamster://auth/callback`、Expo Go は `exp://…/--/auth/callback` になる
+- `redirectTo` は `expo-linking` の `createURL("auth/callback")`。dev build と本番は `prep-hamster://auth/callback`、Expo Go は `exp://…/--/auth/callback` になる Expo Go では `createURL` が app の scheme を返すことがあり (Android はそこで止まる。#169)、`isRunningInExpoGo()` のときは `exp://<開発サーバ>/--/auth/callback` を組む。
 - Supabase の Redirect URLs (設定済み): `prep-hamster://**`, `exp://**`
 
 ### セッションの保存
