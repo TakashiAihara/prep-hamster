@@ -70,8 +70,13 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
-      - name: Check dependency versions against the Expo SDK
+      - name: Check dependency versions against the locked Expo SDK
         working-directory: apps/user/client/mobile
+        # Online, expo fetches the expected versions from api.expo.dev, which moves with every SDK
+        # patch release and fails main without a repo change. Offline it reads
+        # expo/bundledNativeModules.json from the locked expo package, so the result follows bun.lock.
+        env:
+          EXPO_OFFLINE: "1"
         run: bunx expo install --check
       - name: Export the Android bundle
         working-directory: apps/user/client/mobile
