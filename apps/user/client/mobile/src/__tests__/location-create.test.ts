@@ -79,6 +79,16 @@ test("appendCreatedLocation appends the created location to the same group's lis
   })
 })
 
+test("appendCreatedLocation returns a new state and leaves the input list unchanged", () => {
+  // React は同じ参照を返すと再描画しないので、その場で書き換える実装を落とす
+  const locations = [LOC_A]
+  const state = { groupId: GROUP_ID, locations }
+  const next = appendCreatedLocation(state, GROUP_ID, created)
+  expect(next).not.toBe(state)
+  expect(next?.locations).not.toBe(locations)
+  expect(locations).toEqual([LOC_A])
+})
+
 test("appendCreatedLocation returns null when the list now belongs to another group", () => {
   const state = { groupId: OTHER_GROUP_ID, locations: [LOC_A] }
   expect(appendCreatedLocation(state, GROUP_ID, created)).toBeNull()

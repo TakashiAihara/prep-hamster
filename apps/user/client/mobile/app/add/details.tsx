@@ -57,6 +57,12 @@ export default function AddDetailsScreen() {
   const currentGroupRef = useRef<string | null>(null)
   // Pressable の disabled は再描画まで効かないので、同じフレームの 2 回目を同期フラグで止める
   const addingRef = useRef(false)
+  // GET が作成を追い越して一覧に無いまま返ることがあるので、作成した場所をグループごとに覚えておく
+  const createdLocationsRef = useRef<Record<string, { id: string; name: string }[]>>({})
+  // 読み直し後に選択を戻すため、直近に作成した場所を覚えておく
+  const lastCreatedRef = useRef<{ groupId: string; id: string } | null>(null)
+  // 場所追加の応答時に一覧へ反映できるか (load が ok か) を見るための最新の load
+  const loadRef = useRef(load)
   const [locationId, setLocationId] = useState<string | null>(null)
   const [locationName, setLocationName] = useState("")
   const [locationError, setLocationError] = useState<string | null>(null)
@@ -109,9 +115,22 @@ export default function AddDetailsScreen() {
           nameSetFor.current = itemId
           setName(itemBody.name)
         }
-        // 場所が 0 件のグループでは、前のグループの場所を残さない
-        setLocationId(locsBody[0]?.id ?? null)
-        setLoad({ status: "ok", item: itemBody, locations: locsBody, groupId })
+        // GET が作成を追い越して一覧に無いまま返ることがあるので、作成済みの場所を足してから出す
+        const merged = (createdLocationsRef.current[groupId] ?? []).reduce(
+          (acc, loc) => appendCreatedLocation(acc, groupId, loc) ?? acc,
+          { groupId, locations: locsBody },
+        )
+        // 場所が 0 件のグループでは、前のグループの場所を残さない。
+        // 直前に作った場所が一覧にあればそれを選ぶ
+        const lastCreated = lastCreatedRef.current
+        setLocationId(
+          lastCreated !== null &&
+            lastCreated.groupId === groupId &&
+            merged.locations.some((l) => l.id === lastCreated.id)
+            ? lastCreated.id
+            : (merged.locations[0]?.id ?? null),
+        )
+        setLoad({ status: "ok", item: itemBody, locations: merged.locations, groupId })
       } catch (err) {
         if (cancelled) return
         const message = err instanceof Error ? err.message : "unknown"
@@ -122,6 +141,10 @@ export default function AddDetailsScreen() {
       cancelled = true
     }
   }, [itemId, groupId])
+
+  useEffect(() => {
+    loadRef.current = load
+  })
 
   if (!itemId) {
     return (
@@ -221,23 +244,33 @@ export default function AddDetailsScreen() {
     addingRef.current = true
     setAddingLocation(true)
     setLocationError(null)
-    const result = await createLocation(getApiClient(), submittedGroupId, parsed.value)
-    addingRef.current = false
-    setAddingLocation(false)
-    // 追加中に別グループへ切り替わっていたら、成功・失敗どちらの結果も今の画面には関係ない
-    if (currentGroupRef.current !== submittedGroupId) return
-    if (!result.ok) {
-      setLocationError(result.message)
-      return
+    try {
+      const result = await createLocation(getApiClient(), submittedGroupId, parsed.value)
+      // 追加中に別グループへ切り替わっていたら、成功・失敗どちらの結果も今の画面には関係ない
+      if (currentGroupRef.current !== submittedGroupId) return
+      if (!result.ok) {
+        setLocationError(result.message)
+        return
+      }
+      const createdList = (createdLocationsRef.current[submittedGroupId] ??= [])
+      createdList.push(result.location)
+      lastCreatedRef.current = { groupId: submittedGroupId, id: result.location.id }
+      setLoad((prev) =>
+        prev.status === "ok"
+          ? (appendCreatedLocation(prev, submittedGroupId, result.location) ?? prev)
+          : prev,
+      )
+      // load が ok でなければ一覧にまだ無いので、選択は GET 後に lastCreatedRef 経由で行う
+      const currentLoad = loadRef.current
+      if (currentLoad.status === "ok" && currentLoad.groupId === submittedGroupId) {
+        setLocationId(result.location.id)
+      }
+      setLocationName("")
+      setLocationError(null)
+    } finally {
+      addingRef.current = false
+      setAddingLocation(false)
     }
-    setLoad((prev) =>
-      prev.status === "ok"
-        ? (appendCreatedLocation(prev, submittedGroupId, result.location) ?? prev)
-        : prev,
-    )
-    setLocationId(result.location.id)
-    setLocationName("")
-    setLocationError(null)
   }
 
   return (
