@@ -61,8 +61,6 @@ export default function AddDetailsScreen() {
   const createdLocationsRef = useRef<Record<string, { id: string; name: string }[]>>({})
   // 読み直し後に選択を戻すため、直近に作成した場所を覚えておく
   const lastCreatedRef = useRef<{ groupId: string; id: string } | null>(null)
-  // 場所追加の応答時に一覧へ反映できるか (load が ok か) を見るための最新の load
-  const loadRef = useRef(load)
   const [locationId, setLocationId] = useState<string | null>(null)
   const [locationName, setLocationName] = useState("")
   const [locationError, setLocationError] = useState<string | null>(null)
@@ -111,6 +109,8 @@ export default function AddDetailsScreen() {
         }
         const itemBody = (await itemRes.json()).item
         const locsBody = (await locsRes.json()).locations
+        // 本文を読む間にグループが変わっていたら、前のグループの一覧と選択を書き込まない
+        if (cancelled) return
         if (nameSetFor.current !== itemId) {
           nameSetFor.current = itemId
           setName(itemBody.name)
@@ -141,10 +141,6 @@ export default function AddDetailsScreen() {
       cancelled = true
     }
   }, [itemId, groupId])
-
-  useEffect(() => {
-    loadRef.current = load
-  })
 
   if (!itemId) {
     return (
@@ -246,28 +242,28 @@ export default function AddDetailsScreen() {
     setLocationError(null)
     try {
       const result = await createLocation(getApiClient(), submittedGroupId, parsed.value)
-      // 追加中に別グループへ切り替わっていたら、成功・失敗どちらの結果も今の画面には関係ない
+      // 作った場所は、別グループへ切り替えてから戻ったときの読み直しにも足すので、照合より先に覚える
+      if (result.ok) {
+        const createdList = (createdLocationsRef.current[submittedGroupId] ??= [])
+        createdList.push(result.location)
+        lastCreatedRef.current = { groupId: submittedGroupId, id: result.location.id }
+      }
+      // 追加中に別グループへ切り替わっていたら、成功・失敗どちらの結果も今の画面には出さない
       if (currentGroupRef.current !== submittedGroupId) return
       if (!result.ok) {
         setLocationError(result.message)
         return
       }
-      const createdList = (createdLocationsRef.current[submittedGroupId] ??= [])
-      createdList.push(result.location)
-      lastCreatedRef.current = { groupId: submittedGroupId, id: result.location.id }
       setLoad((prev) =>
         prev.status === "ok"
           ? (appendCreatedLocation(prev, submittedGroupId, result.location) ?? prev)
           : prev,
       )
-      // load が ok でなければ一覧にまだ無いので、選択は GET 後に lastCreatedRef 経由で行う
-      const currentLoad = loadRef.current
-      if (currentLoad.status === "ok" && currentLoad.groupId === submittedGroupId) {
-        setLocationId(result.location.id)
-      }
+      // 読み直し中でも、GET の後に lastCreatedRef で同じ場所が選び直されるので先に選んでよい
+      setLocationId(result.location.id)
       setLocationName("")
       setLocationError(null)
-      // 場所が無くて保存できなかったときの「場所を選択してください」を残さない
+      // 場所が無くて出た「場所を選択してください」を含め、前回の保存エラーを残さない
       setSaveError(null)
     } finally {
       addingRef.current = false
@@ -314,6 +310,7 @@ export default function AddDetailsScreen() {
           <TextInput
             testID="add-location-input"
             value={locationName}
+            editable={!addingLocation}
             onChangeText={setLocationName}
             placeholder="新しい場所の名前"
             maxLength={100}
@@ -381,9 +378,10 @@ export default function AddDetailsScreen() {
 
       <Pressable
         testID="add-save"
-        style={[styles.primary, saving && styles.primaryDisabled]}
+        style={[styles.primary, (saving || addingLocation) && styles.primaryDisabled]}
         onPress={onSave}
-        disabled={saving}
+        // 場所の追加中に保存すると、作っている場所ではなく前に選んだ場所に入る
+        disabled={saving || addingLocation}
       >
         {saving ? (
           <ActivityIndicator color="#fff" />
