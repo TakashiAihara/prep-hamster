@@ -60,7 +60,8 @@ function StockDetailScreen() {
       void (async () => {
         const r = await loadStockDetail(getApiClient(), id)
         if (cancelled) return
-        // 読み込み中に操作が完了していたら、届く detail は操作前の在庫を持つので stock を残させる
+        // 読み込み中に操作が完了していたら、届く detail は操作前の在庫を持ちうるので stock を残させる。
+        // 操作後の行や他のメンバーの変更を読んでいても捨てるが、次の focus で取り直す
         const keepStock = actionCount.current !== startedAt
         dispatch(
           r.ok
