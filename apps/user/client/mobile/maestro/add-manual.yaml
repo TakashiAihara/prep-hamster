@@ -7,8 +7,7 @@ appId: com.example.prephamster
 ---
 - launchApp:
     clearState: true
-# サインイン済みで始める (scripts/capture-screens.ts が scripts/dev-session.ts の deep link を渡す)
-- openLink: ${DEV_SESSION_URL}
+- runFlow: subflows/dev-sign-in.yaml
 # タブはサインイン後にだけ出る。session の設定が終わる前に撮らない
 - extendedWaitUntil:
     visible:

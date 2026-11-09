@@ -12,8 +12,7 @@ appId: com.example.prephamster
 ---
 - launchApp:
     clearState: true
-# サインイン済みで始める (scripts/capture-screens.ts が scripts/dev-session.ts の deep link を渡す)
-- openLink: ${DEV_SESSION_URL}
+- runFlow: subflows/dev-sign-in.yaml
 # タブはサインイン済みでグループがあるときだけ出る。session の設定が終わる前に進まない
 - extendedWaitUntil:
     visible:
@@ -43,6 +42,8 @@ appId: com.example.prephamster
 - tapOn:
     id: "detail-use-by-input"
 - inputText: "2030-01-31"
+# キーボードが下の備考欄を隠すので閉じてから進む
+- hideKeyboard
 - tapOn:
     id: "detail-note-input"
 - inputText: "maestro"
@@ -57,11 +58,16 @@ appId: com.example.prephamster
 - back
 - waitForAnimationToEnd:
     timeout: 5000
-# 開き直して、保存した値がサーバから返ってくること
-# 他の在庫が残っていても、新しい在庫は期限なしで一覧の末尾に来るので画面外にあるかもしれない
+# 一覧に戻れたことを確かめる。詳細画面にも商品名が出ているので、戻れていないと詳細のまま下の探索と判定が通る
+- assertVisible:
+    id: "stock-list"
+# 開き直して、保存した値がサーバから返ってくること (詳細は focus のたびに API から取り直す)
+# 一覧は期限の近い順なので、期限を付けたこの在庫は期限なしの在庫より上に移る。一覧は tab の中で
+# 開いたままなので、戻ると詳細を開いたときの scroll 位置 (この在庫の元の位置) にいる。そこから上へ探す
 - scrollUntilVisible:
     element:
       text: ${output.name}
+    direction: UP
 - tapOn:
     text: ${output.name}
 - waitForAnimationToEnd:
@@ -69,3 +75,6 @@ appId: com.example.prephamster
 - assertVisible:
     id: "detail-use-by-input"
     text: "2030-01-31"
+- assertVisible:
+    id: "detail-note-input"
+    text: "maestro"

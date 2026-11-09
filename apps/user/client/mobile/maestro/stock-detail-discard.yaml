@@ -12,8 +12,7 @@ appId: com.example.prephamster
 ---
 - launchApp:
     clearState: true
-# サインイン済みで始める (scripts/capture-screens.ts が scripts/dev-session.ts の deep link を渡す)
-- openLink: ${DEV_SESSION_URL}
+- runFlow: subflows/dev-sign-in.yaml
 # タブはサインイン済みでグループがあるときだけ出る。session の設定が終わる前に進まない
 - extendedWaitUntil:
     visible:
@@ -42,7 +41,8 @@ appId: com.example.prephamster
     id: "detail-quantity"
 - tapOn:
     id: "detail-reason-input"
-- inputText: "期限切れ"
+# Maestro は Android で ASCII 以外を入力できない (mobile-dev-inc/maestro#146)
+- inputText: "expired"
 - hideKeyboard
 - tapOn:
     id: "detail-discard"
@@ -60,6 +60,19 @@ appId: com.example.prephamster
 # 一覧が描画されていること (エラー / 読み込み中ではないこと) を確かめてから、この在庫の行だけが無いことを見る
 - assertVisible:
     id: "stock-list|stock-list-empty"
+# notVisible だけでは行が画面外にあっても通る。一覧は期限なしの在庫を作成日時の順で末尾に並べるので、
+# この在庫が残っていれば最後の行になる。末尾の目印まで送り (届かなければここで落ちる)、目印の直上に無いことを見る
+- runFlow:
+    when:
+      visible:
+        id: "stock-list"
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: "stock-list-end"
+          direction: DOWN
+          timeout: 60000
+# 戻った直後は取り直し前の行が残っていることがあるので、消えるまで待つ
 - extendedWaitUntil:
     notVisible:
       text: ${output.name}

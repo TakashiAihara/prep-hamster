@@ -58,6 +58,8 @@ export default function StocksIndex() {
       refreshControl={<RefreshControl refreshing={false} onRefresh={reload} />}
       renderItem={({ item }) => <StockRow row={item} />}
       ItemSeparatorComponent={() => <View style={styles.separator} />}
+      // Maestro の flow が一覧の末尾まで送ったことを確かめる目印
+      ListFooterComponent={<View testID="stock-list-end" style={styles.listEnd} />}
     />
   )
 }
@@ -91,4 +93,6 @@ const styles = StyleSheet.create({
   itemName: { fontSize: 16, fontWeight: "600" },
   meta: { fontSize: 13, color: "#555" },
   separator: { height: 1, backgroundColor: "#eee" },
+  // 高さ 0 の View は UI 階層に出ず、Maestro が見つけられない (高さ 1 なら出る。2026-11-09 実測)
+  listEnd: { height: 1 },
 })
