@@ -58,8 +58,12 @@ appId: com.example.prephamster
 - back
 - waitForAnimationToEnd:
     timeout: 5000
-# 開き直して、保存した値がサーバから返ってくること
-# 一覧は期限の近い順なので、期限を付けたこの在庫は期限なしの在庫より上に移る。戻った位置から上へ探す
+# 一覧に戻れたことを確かめる。詳細画面にも商品名が出ているので、戻れていないと詳細のまま下の探索と判定が通る
+- assertVisible:
+    id: "stock-list"
+# 開き直して、保存した値がサーバから返ってくること (詳細は focus のたびに API から取り直す)
+# 一覧は期限の近い順なので、期限を付けたこの在庫は期限なしの在庫より上に移る。一覧は tab の中で
+# 開いたままなので、戻ると詳細を開いたときの scroll 位置 (この在庫の元の位置) にいる。そこから上へ探す
 - scrollUntilVisible:
     element:
       text: ${output.name}
