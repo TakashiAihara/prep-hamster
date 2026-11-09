@@ -16,6 +16,7 @@ export type StockDto = {
   useByDate: string | null
   bestBeforeDate: string | null
   note: string | null
+  updatedAt: string
 }
 
 export type LocationDto = { id: string; name: string }

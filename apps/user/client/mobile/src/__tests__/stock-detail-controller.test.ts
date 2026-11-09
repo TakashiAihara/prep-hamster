@@ -6,6 +6,7 @@ import {
   createStockActions,
   leaveDetail,
   loadReducer,
+  nextEditValue,
   type ActionMessage,
   type LoadState,
 } from "../stock-detail-controller"
@@ -26,6 +27,7 @@ const stock = (over: Partial<StockDto> = {}): StockDto => ({
   useByDate: null,
   bestBeforeDate: null,
   note: null,
+  updatedAt: "2026-11-09T10:00:00.000Z",
   ...over,
 })
 
@@ -313,4 +315,46 @@ test("loadReducer maps loaded and failed events", () => {
     status: "error",
     message: "HTTP 500",
   })
+})
+
+test("loadReducer keeps the shown stock when a refetch returns an older version of it", () => {
+  // 操作の結果 (新しい在庫) の後に、操作前に出した読み込みが届いた形
+  const shown = stock({ quantity: 2, updatedAt: "2026-11-09T10:05:00.000Z" })
+  const ok: LoadState = { status: "ok", detail: detail(shown) }
+  const stale = { ...detail(stock({ quantity: 5 })), itemName: "Tomato (renamed)" }
+  expect(loadReducer(ok, { type: "loaded", detail: stale })).toEqual({
+    status: "ok",
+    detail: { ...stale, stock: shown },
+  })
+})
+
+test("loadReducer takes the refetched stock when it is as new or newer", () => {
+  const shown = stock({ quantity: 2, updatedAt: "2026-11-09T10:05:00.000Z" })
+  const ok: LoadState = { status: "ok", detail: detail(shown) }
+  const same = detail(stock({ quantity: 3, updatedAt: "2026-11-09T10:05:00.000Z" }))
+  const newer = detail(stock({ quantity: 4, updatedAt: "2026-11-09T10:06:00.000Z" }))
+  expect(loadReducer(ok, { type: "loaded", detail: same })).toEqual({ status: "ok", detail: same })
+  expect(loadReducer(ok, { type: "loaded", detail: newer })).toEqual({
+    status: "ok",
+    detail: newer,
+  })
+})
+
+test("loadReducer takes the loaded detail of another stock even if it is older", () => {
+  const shown = stock({ updatedAt: "2026-11-09T10:05:00.000Z" })
+  const ok: LoadState = { status: "ok", detail: detail(shown) }
+  const other = detail(stock({ id: OTHER_ID, updatedAt: "2026-11-01T00:00:00.000Z" }))
+  expect(loadReducer(ok, { type: "loaded", detail: other })).toEqual({
+    status: "ok",
+    detail: other,
+  })
+})
+
+test("nextEditValue follows the server value only while the field is unedited", () => {
+  expect(nextEditValue("2026-12-01", "2026-12-01", "2026-12-24")).toBe("2026-12-24")
+  expect(nextEditValue("2026-12-05", "2026-12-01", "2026-12-24")).toBe("2026-12-05")
+  expect(nextEditValue("", null, "memo")).toBe("memo")
+  expect(nextEditValue("", "memo", null)).toBe("")
+  expect(nextEditValue("memo", "memo", null)).toBe("")
+  expect(nextEditValue("typed", "memo", null)).toBe("typed")
 })

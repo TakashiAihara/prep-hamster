@@ -37,7 +37,13 @@ export function loadReducer(prev: LoadState, event: LoadEvent): LoadState {
         ? prev
         : { status: "loading" }
     case "loaded":
-      return { status: "ok", detail: event.detail }
+      // 操作の前に出した読み込みが操作の結果より後に届くと古い在庫で上書きするので、
+      // 表示中の在庫の方が新しければ stock だけ残して detail の残りは取り込む
+      return prev.status === "ok" &&
+        prev.detail.stock.id === event.detail.stock.id &&
+        Date.parse(prev.detail.stock.updatedAt) > Date.parse(event.detail.stock.updatedAt)
+        ? { status: "ok", detail: { ...event.detail, stock: prev.detail.stock } }
+        : { status: "ok", detail: event.detail }
     case "failed":
       return { status: "error", message: event.message }
     case "stock-changed":
@@ -45,6 +51,15 @@ export function loadReducer(prev: LoadState, event: LoadEvent): LoadState {
         ? { status: "ok", detail: { ...prev.detail, stock: event.stock } }
         : prev
   }
+}
+
+// current が前回のサーバ値のまま = ユーザーが未編集なら新しいサーバ値に追従させ、編集済みなら入力を残す
+export function nextEditValue(
+  current: string,
+  prevServer: string | null,
+  nextServer: string | null,
+): string {
+  return current === (prevServer ?? "") ? (nextServer ?? "") : current
 }
 
 export type Guard = { run: <T>(fn: () => Promise<T>) => Promise<T | undefined> }

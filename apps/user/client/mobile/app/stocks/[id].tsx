@@ -22,7 +22,12 @@ import {
   type StockDto,
   UNKNOWN_LOCATION_NAME,
 } from "@/stock-detail"
-import { createConfirmDiscard, leaveDetail, loadReducer } from "@/stock-detail-controller"
+import {
+  createConfirmDiscard,
+  leaveDetail,
+  loadReducer,
+  nextEditValue,
+} from "@/stock-detail-controller"
 import { useStockActions } from "@/use-stock-actions"
 
 // 在庫詳細画面 (M-05)。消費 / 廃棄 / 移動 / 編集を 1 画面にまとめる。
@@ -124,6 +129,16 @@ function DetailBody({
   const [useBy, setUseBy] = useState(stock.useByDate ?? "")
   const [bestBefore, setBestBefore] = useState(stock.bestBeforeDate ?? "")
   const [note, setNote] = useState(stock.note ?? "")
+  // 再取得や操作の結果で stock が差し替わったら、未編集の項目だけ新しいサーバ値に追従させる。
+  // 前回の stock は ref ではなく state に持つ (描画が捨てられたときに書き換えだけが残らないよう)
+  const [prevStock, setPrevStock] = useState(stock)
+  if (prevStock !== stock) {
+    const prev = prevStock
+    setUseBy((current) => nextEditValue(current, prev.useByDate, stock.useByDate))
+    setBestBefore((current) => nextEditValue(current, prev.bestBeforeDate, stock.bestBeforeDate))
+    setNote((current) => nextEditValue(current, prev.note, stock.note))
+    setPrevStock(stock)
+  }
   const { busy, message, consume, discard, move, edit } = useStockActions({
     stock,
     onStockChanged,
