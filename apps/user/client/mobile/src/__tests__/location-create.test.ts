@@ -95,10 +95,12 @@ test("appendCreatedLocation returns null when the list now belongs to another gr
 })
 
 test("appendCreatedLocation does not duplicate a location the reloaded list already has", () => {
-  const state = { groupId: GROUP_ID, locations: [LOC_A, created, LOC_B] }
+  // 同じ id で名前だけ違う行を置き、名前で照合する実装を落とす
+  const reloaded = { id: LOC_ID, name: "冷蔵庫 (読み直し)" }
+  const state = { groupId: GROUP_ID, locations: [LOC_A, reloaded, LOC_B] }
   expect(appendCreatedLocation(state, GROUP_ID, created)).toEqual({
     groupId: GROUP_ID,
-    locations: [LOC_A, created, LOC_B],
+    locations: [LOC_A, reloaded, LOC_B],
   })
 })
 

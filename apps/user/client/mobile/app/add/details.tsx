@@ -267,6 +267,8 @@ export default function AddDetailsScreen() {
       }
       setLocationName("")
       setLocationError(null)
+      // 場所が無くて保存できなかったときの「場所を選択してください」を残さない
+      setSaveError(null)
     } finally {
       addingRef.current = false
       setAddingLocation(false)
