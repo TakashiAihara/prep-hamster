@@ -1,5 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router"
-import { useCallback, useReducer, useState } from "react"
+import { useCallback, useReducer, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
@@ -22,7 +22,12 @@ import {
   type StockDto,
   UNKNOWN_LOCATION_NAME,
 } from "@/stock-detail"
-import { createConfirmDiscard, leaveDetail, loadReducer } from "@/stock-detail-controller"
+import {
+  createConfirmDiscard,
+  leaveDetail,
+  loadReducer,
+  syncEditFields,
+} from "@/stock-detail-controller"
 import { useStockActions } from "@/use-stock-actions"
 
 // 在庫詳細画面 (M-05)。消費 / 廃棄 / 移動 / 編集を 1 画面にまとめる。
@@ -43,6 +48,7 @@ function StockDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const [load, dispatch] = useReducer(loadReducer, { status: "loading" })
   const [reloadKey, setReloadKey] = useState(0)
+  const actionCount = useRef(0)
 
   // focus のたびに取り直す (他のメンバーが変えた在庫を古いまま操作しない)。再試行は reloadKey で再実行する
   useFocusEffect(
@@ -50,11 +56,17 @@ function StockDetailScreen() {
       if (!id) return
       let cancelled = false
       dispatch({ type: "start", id })
+      const startedAt = actionCount.current
       void (async () => {
         const r = await loadStockDetail(getApiClient(), id)
         if (cancelled) return
+        // 読み込み中に操作が完了していたら、届く detail は操作前の在庫を持ちうるので stock を残させる。
+        // 操作後の行や他のメンバーの変更を読んでいても捨てるが、次の focus で取り直す
+        const keepStock = actionCount.current !== startedAt
         dispatch(
-          r.ok ? { type: "loaded", detail: r.detail } : { type: "failed", message: r.message },
+          r.ok
+            ? { type: "loaded", detail: r.detail, keepStock }
+            : { type: "failed", message: r.message },
         )
       })()
       return () => {
@@ -63,10 +75,10 @@ function StockDetailScreen() {
     }, [id, reloadKey]),
   )
 
-  const onStockChanged = useCallback(
-    (stock: StockDto) => dispatch({ type: "stock-changed", stock }),
-    [],
-  )
+  const onStockChanged = useCallback((stock: StockDto) => {
+    actionCount.current += 1
+    dispatch({ type: "stock-changed", stock })
+  }, [])
 
   if (!id) {
     return (
@@ -124,6 +136,16 @@ function DetailBody({
   const [useBy, setUseBy] = useState(stock.useByDate ?? "")
   const [bestBefore, setBestBefore] = useState(stock.bestBeforeDate ?? "")
   const [note, setNote] = useState(stock.note ?? "")
+  // 再取得や操作の結果で stock が差し替わったら、未編集の項目だけ新しいサーバ値に追従させる。
+  // 前回の stock は ref ではなく state に持つ (描画が捨てられたときに書き換えだけが残らないよう)
+  const [prevStock, setPrevStock] = useState(stock)
+  if (prevStock !== stock) {
+    const synced = syncEditFields({ useBy, bestBefore, note }, prevStock, stock)
+    setUseBy(synced.useBy)
+    setBestBefore(synced.bestBefore)
+    setNote(synced.note)
+    setPrevStock(stock)
+  }
   const { busy, message, consume, discard, move, edit } = useStockActions({
     stock,
     onStockChanged,

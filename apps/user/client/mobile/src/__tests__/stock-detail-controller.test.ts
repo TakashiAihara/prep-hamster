@@ -6,6 +6,8 @@ import {
   createStockActions,
   leaveDetail,
   loadReducer,
+  nextEditValue,
+  syncEditFields,
   type ActionMessage,
   type LoadState,
 } from "../stock-detail-controller"
@@ -313,4 +315,74 @@ test("loadReducer maps loaded and failed events", () => {
     status: "error",
     message: "HTTP 500",
   })
+})
+
+test("loadReducer keeps the shown stock when an action finished after the refetch started", () => {
+  const shown = stock({ quantity: 2 })
+  const ok: LoadState = { status: "ok", detail: detail(shown) }
+  const stale = { ...detail(stock({ quantity: 5 })), itemName: "Tomato (renamed)" }
+  expect(loadReducer(ok, { type: "loaded", detail: stale, keepStock: true })).toEqual({
+    status: "ok",
+    detail: { ...stale, stock: shown },
+  })
+})
+
+test("loadReducer takes the refetched stock when no action finished during the refetch", () => {
+  const ok: LoadState = { status: "ok", detail: detail(stock({ quantity: 2 })) }
+  const fresh = detail(stock({ quantity: 4 }))
+  expect(loadReducer(ok, { type: "loaded", detail: fresh, keepStock: false })).toEqual({
+    status: "ok",
+    detail: fresh,
+  })
+  expect(loadReducer(ok, { type: "loaded", detail: fresh })).toEqual({
+    status: "ok",
+    detail: fresh,
+  })
+})
+
+test("loadReducer takes the loaded detail of another stock even when keepStock is set", () => {
+  const ok: LoadState = { status: "ok", detail: detail(stock()) }
+  const other = detail(stock({ id: OTHER_ID, quantity: 9 }))
+  expect(loadReducer(ok, { type: "loaded", detail: other, keepStock: true })).toEqual({
+    status: "ok",
+    detail: other,
+  })
+  const loading: LoadState = { status: "loading" }
+  expect(loadReducer(loading, { type: "loaded", detail: other, keepStock: true })).toEqual({
+    status: "ok",
+    detail: other,
+  })
+})
+
+test("loadReducer ignores an action result for another stock", () => {
+  const ok: LoadState = { status: "ok", detail: detail(stock()) }
+  expect(loadReducer(ok, { type: "stock-changed", stock: stock({ id: OTHER_ID }) })).toBe(ok)
+})
+
+test("nextEditValue follows the server value only while the field is unedited", () => {
+  expect(nextEditValue("2026-12-01", "2026-12-01", "2026-12-24")).toBe("2026-12-24")
+  expect(nextEditValue("2026-12-05", "2026-12-01", "2026-12-24")).toBe("2026-12-05")
+  expect(nextEditValue("", null, "memo")).toBe("memo")
+  expect(nextEditValue("memo", "memo", null)).toBe("")
+  expect(nextEditValue("", "memo", "other")).toBe("")
+  expect(nextEditValue("typed", null, "other")).toBe("typed")
+})
+
+test("nextEditValue treats a value that only differs by surrounding spaces as unedited", () => {
+  // 保存は前後の空白を落とすので、"memo " を保存した後の欄は未編集のまま
+  expect(nextEditValue("memo ", "memo", "X")).toBe("X")
+  expect(nextEditValue(" memo", "memo", "X")).toBe("X")
+  // 他の経路 (CLI) で空白付きのまま保存された値と、空白を落として出した欄も同じ値とみなす
+  expect(nextEditValue("memo", "memo ", "X")).toBe("X")
+})
+
+test("syncEditFields updates each unedited field from its own server value", () => {
+  const prev = stock({ useByDate: "2026-12-01", bestBeforeDate: "2026-12-10", note: "a" })
+  const next = stock({ useByDate: "2026-12-02", bestBeforeDate: "2026-12-11", note: "b" })
+  expect(
+    syncEditFields({ useBy: "2026-12-01", bestBefore: "2026-12-10", note: "a" }, prev, next),
+  ).toEqual({ useBy: "2026-12-02", bestBefore: "2026-12-11", note: "b" })
+  expect(
+    syncEditFields({ useBy: "2026-12-05", bestBefore: "2026-12-10", note: "typed" }, prev, next),
+  ).toEqual({ useBy: "2026-12-05", bestBefore: "2026-12-11", note: "typed" })
 })

@@ -25,7 +25,7 @@ export type LoadState =
 
 export type LoadEvent =
   | { type: "start"; id: string }
-  | { type: "loaded"; detail: StockDetail }
+  | { type: "loaded"; detail: StockDetail; keepStock?: boolean }
   | { type: "failed"; message: string }
   | { type: "stock-changed"; stock: StockDto }
 
@@ -37,13 +37,41 @@ export function loadReducer(prev: LoadState, event: LoadEvent): LoadState {
         ? prev
         : { status: "loading" }
     case "loaded":
-      return { status: "ok", detail: event.detail }
+      // keepStock は「読み込み中に操作結果が届いた」の印。detail は操作前の在庫を
+      // 持ちうるので、同じ在庫を表示中なら stock だけ表示中のものを残す
+      return event.keepStock === true &&
+        prev.status === "ok" &&
+        prev.detail.stock.id === event.detail.stock.id
+        ? { status: "ok", detail: { ...event.detail, stock: prev.detail.stock } }
+        : { status: "ok", detail: event.detail }
     case "failed":
       return { status: "error", message: event.message }
     case "stock-changed":
-      return prev.status === "ok"
+      // 前の在庫の操作結果が遅れて届いても、表示中の別の在庫を上書きしない
+      return prev.status === "ok" && prev.detail.stock.id === event.stock.id
         ? { status: "ok", detail: { ...prev.detail, stock: event.stock } }
         : prev
+  }
+}
+
+// current が前回のサーバ値のまま = ユーザーが未編集なら新しいサーバ値に追従させ、編集済みなら入力を残す。
+// 保存時に値は trim されるので、前後の空白だけが違う入力も未編集として扱う
+export function nextEditValue(
+  current: string,
+  prevServer: string | null,
+  nextServer: string | null,
+): string {
+  return current.trim() === (prevServer ?? "").trim() ? (nextServer ?? "") : current
+}
+
+export type EditFields = { useBy: string; bestBefore: string; note: string }
+
+// stock が差し替わったとき、編集フォームの各項目をそれぞれのサーバ値で同期する
+export function syncEditFields(fields: EditFields, prev: StockDto, next: StockDto): EditFields {
+  return {
+    useBy: nextEditValue(fields.useBy, prev.useByDate, next.useByDate),
+    bestBefore: nextEditValue(fields.bestBefore, prev.bestBeforeDate, next.bestBeforeDate),
+    note: nextEditValue(fields.note, prev.note, next.note),
   }
 }
 
