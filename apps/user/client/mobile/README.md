@@ -91,5 +91,5 @@ flow はサインイン済みで始める。Google の画面は Maestro では�
 テスト用ユーザー (`maestro@example.test`) の session を Supabase の Admin API で発行し、その deep link
 (`prep-hamster://auth/dev-session?...`) を各 flow の先頭で開く。受け口は dev build (`__DEV__`) でだけ token を使う。
 `capture` を流すシェルに `SUPABASE_URL` と `SUPABASE_SECRET_KEY` (Supabase の secret key。アプリには入れない) を渡す。
-新しい flow も `launchApp` の後に、サインイン画面 (`Google でサインイン`) が出るのを待ってから `- openLink: ${DEV_SESSION_URL}` を置く (起動直後に開いた link は失われる)。
+新しい flow も `launchApp` の直後に `- runFlow: subflows/dev-sign-in.yaml` を置く (サインイン画面が出るのを待ってから deep link を開く。起動直後に開いた link は失われる)。
 iOS / 実機・本物の barcode 読取は別 Issue で扱う (本仕組みは Android emulator 前提)。

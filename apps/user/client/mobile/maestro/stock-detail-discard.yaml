@@ -12,13 +12,7 @@ appId: com.example.prephamster
 ---
 - launchApp:
     clearState: true
-# サインイン済みで始める (scripts/capture-screens.ts が scripts/dev-session.ts の deep link を渡す)
-# 起動直後に開いた deep link は失われる (アプリが受け取れる前に届く)。画面が出てから開く
-- extendedWaitUntil:
-    visible:
-      text: "Google でサインイン"
-    timeout: 30000
-- openLink: ${DEV_SESSION_URL}
+- runFlow: subflows/dev-sign-in.yaml
 # タブはサインイン済みでグループがあるときだけ出る。session の設定が終わる前に進まない
 - extendedWaitUntil:
     visible:
@@ -66,8 +60,8 @@ appId: com.example.prephamster
 # 一覧が描画されていること (エラー / 読み込み中ではないこと) を確かめてから、この在庫の行だけが無いことを見る
 - assertVisible:
     id: "stock-list|stock-list-empty"
-# notVisible だけでは行が画面外にあっても通るので、一覧を上下の端まで送って探してから見る。
-# 行が残っていればこの scroll で画面に出て、最後の assertNotVisible で落ちる
+# notVisible だけでは行が画面外にあっても通る。一覧は期限なしの在庫を作成日時の順で末尾に並べるので、
+# この在庫が残っていれば最後の行になる。末尾の目印まで送り (届かなければここで落ちる)、目印の直上に無いことを見る
 - runFlow:
     when:
       visible:
@@ -75,15 +69,11 @@ appId: com.example.prephamster
     commands:
       - scrollUntilVisible:
           element:
-            text: ${output.name}
-          direction: UP
-          timeout: 10000
-          optional: true
-      - scrollUntilVisible:
-          element:
-            text: ${output.name}
+            id: "stock-list-end"
           direction: DOWN
-          timeout: 20000
-          optional: true
-- assertNotVisible:
-    text: ${output.name}
+          timeout: 60000
+# 戻った直後は取り直し前の行が残っていることがあるので、消えるまで待つ
+- extendedWaitUntil:
+    notVisible:
+      text: ${output.name}
+    timeout: 5000
