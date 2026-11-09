@@ -13,6 +13,11 @@ appId: com.example.prephamster
 - launchApp:
     clearState: true
 # サインイン済みで始める (scripts/capture-screens.ts が scripts/dev-session.ts の deep link を渡す)
+# 起動直後に開いた deep link は失われる (アプリが受け取れる前に届く)。画面が出てから開く
+- extendedWaitUntil:
+    visible:
+      text: "Google でサインイン"
+    timeout: 30000
 - openLink: ${DEV_SESSION_URL}
 # タブはサインイン済みでグループがあるときだけ出る。session の設定が終わる前に進まない
 - extendedWaitUntil:
@@ -42,7 +47,8 @@ appId: com.example.prephamster
     id: "detail-quantity"
 - tapOn:
     id: "detail-reason-input"
-- inputText: "期限切れ"
+# Maestro は Android で ASCII 以外を入力できない (mobile-dev-inc/maestro#146)
+- inputText: "expired"
 - hideKeyboard
 - tapOn:
     id: "detail-discard"
@@ -60,7 +66,24 @@ appId: com.example.prephamster
 # 一覧が描画されていること (エラー / 読み込み中ではないこと) を確かめてから、この在庫の行だけが無いことを見る
 - assertVisible:
     id: "stock-list|stock-list-empty"
-- extendedWaitUntil:
-    notVisible:
-      text: ${output.name}
-    timeout: 5000
+# notVisible だけでは行が画面外にあっても通るので、一覧を上下の端まで送って探してから見る。
+# 行が残っていればこの scroll で画面に出て、最後の assertNotVisible で落ちる
+- runFlow:
+    when:
+      visible:
+        id: "stock-list"
+    commands:
+      - scrollUntilVisible:
+          element:
+            text: ${output.name}
+          direction: UP
+          timeout: 10000
+          optional: true
+      - scrollUntilVisible:
+          element:
+            text: ${output.name}
+          direction: DOWN
+          timeout: 20000
+          optional: true
+- assertNotVisible:
+    text: ${output.name}
