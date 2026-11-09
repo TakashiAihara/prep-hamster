@@ -13,6 +13,7 @@ import {
 import { getApiClient } from "@/api"
 import { useCurrentGroup } from "@/current-group"
 import { KeyboardScrollView } from "@/keyboard-scroll-view"
+import { appendCreatedLocation, createLocation, parseLocationName } from "@/location-create"
 import { parsePositive } from "@/stock-detail"
 
 // 詳細入力 + 保存画面。
@@ -52,7 +53,18 @@ export default function AddDetailsScreen() {
   const [name, setName] = useState("")
   // グループ切替の読み直しで、利用者が打った名前を item の名前で上書きしない
   const nameSetFor = useRef<string | null>(null)
+  // 場所追加の応答が返る頃には一覧が別グループのものかもしれないので、現在のグループを覚えておく
+  const currentGroupRef = useRef<string | null>(null)
+  // Pressable の disabled は再描画まで効かないので、同じフレームの 2 回目を同期フラグで止める
+  const addingRef = useRef(false)
+  // GET が作成を追い越して一覧に無いまま返ることがあるので、作成した場所をグループごとに覚えておく
+  const createdLocationsRef = useRef<Record<string, { id: string; name: string }[]>>({})
+  // 読み直し後に選択を戻すため、直近に作成した場所を覚えておく
+  const lastCreatedRef = useRef<{ groupId: string; id: string } | null>(null)
   const [locationId, setLocationId] = useState<string | null>(null)
+  const [locationName, setLocationName] = useState("")
+  const [locationError, setLocationError] = useState<string | null>(null)
+  const [addingLocation, setAddingLocation] = useState(false)
   const [quantity, setQuantity] = useState("1")
   const [unit, setUnit] = useState("個")
   const [useByDate, setUseByDate] = useState<Date | null>(null)
@@ -64,6 +76,13 @@ export default function AddDetailsScreen() {
   const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
+    const nextGroupId = groupId ?? null
+    if (currentGroupRef.current !== nextGroupId) {
+      // 別グループに切り替わったので、前のグループ向けに入力中の名前と表示中のエラーは消す
+      setLocationName("")
+      setLocationError(null)
+    }
+    currentGroupRef.current = nextGroupId
     if (!itemId) return
     if (!groupId) {
       setLoad({ status: "error", message: "グループが選ばれていません" })
@@ -90,13 +109,28 @@ export default function AddDetailsScreen() {
         }
         const itemBody = (await itemRes.json()).item
         const locsBody = (await locsRes.json()).locations
+        // 本文を読む間にグループが変わっていたら、前のグループの一覧と選択を書き込まない
+        if (cancelled) return
         if (nameSetFor.current !== itemId) {
           nameSetFor.current = itemId
           setName(itemBody.name)
         }
-        // 場所が 0 件のグループでは、前のグループの場所を残さない
-        setLocationId(locsBody[0]?.id ?? null)
-        setLoad({ status: "ok", item: itemBody, locations: locsBody, groupId })
+        // GET が作成を追い越して一覧に無いまま返ることがあるので、作成済みの場所を足してから出す
+        const merged = (createdLocationsRef.current[groupId] ?? []).reduce(
+          (acc, loc) => appendCreatedLocation(acc, groupId, loc) ?? acc,
+          { groupId, locations: locsBody },
+        )
+        // 場所が 0 件のグループでは、前のグループの場所を残さない。
+        // 直前に作った場所が一覧にあればそれを選ぶ
+        const lastCreated = lastCreatedRef.current
+        setLocationId(
+          lastCreated !== null &&
+            lastCreated.groupId === groupId &&
+            merged.locations.some((l) => l.id === lastCreated.id)
+            ? lastCreated.id
+            : (merged.locations[0]?.id ?? null),
+        )
+        setLoad({ status: "ok", item: itemBody, locations: merged.locations, groupId })
       } catch (err) {
         if (cancelled) return
         const message = err instanceof Error ? err.message : "unknown"
@@ -193,6 +227,50 @@ export default function AddDetailsScreen() {
     }
   }
 
+  async function onAddLocation() {
+    if (addingRef.current) return
+    const parsed = parseLocationName(locationName)
+    if (!parsed.ok) {
+      setLocationError(parsed.message)
+      return
+    }
+    if (load.status !== "ok") return
+    // 場所を読んだグループに作る。読み直しの途中で現在のグループが変わっても、別グループには作らない
+    const submittedGroupId = load.groupId
+    addingRef.current = true
+    setAddingLocation(true)
+    setLocationError(null)
+    try {
+      const result = await createLocation(getApiClient(), submittedGroupId, parsed.value)
+      // 作った場所は、別グループへ切り替えてから戻ったときの読み直しにも足すので、照合より先に覚える
+      if (result.ok) {
+        const createdList = (createdLocationsRef.current[submittedGroupId] ??= [])
+        createdList.push(result.location)
+        lastCreatedRef.current = { groupId: submittedGroupId, id: result.location.id }
+      }
+      // 追加中に別グループへ切り替わっていたら、成功・失敗どちらの結果も今の画面には出さない
+      if (currentGroupRef.current !== submittedGroupId) return
+      if (!result.ok) {
+        setLocationError(result.message)
+        return
+      }
+      setLoad((prev) =>
+        prev.status === "ok"
+          ? (appendCreatedLocation(prev, submittedGroupId, result.location) ?? prev)
+          : prev,
+      )
+      // 読み直し中でも、GET の後に lastCreatedRef で同じ場所が選び直されるので先に選んでよい
+      setLocationId(result.location.id)
+      setLocationName("")
+      setLocationError(null)
+      // 場所が無くて出た「場所を選択してください」を含め、前回の保存エラーを残さない
+      setSaveError(null)
+    } finally {
+      addingRef.current = false
+      setAddingLocation(false)
+    }
+  }
+
   return (
     <KeyboardScrollView contentContainerStyle={styles.container}>
       <Section title={`商品 (${labelForLookup(productLookup)})`}>
@@ -210,9 +288,7 @@ export default function AddDetailsScreen() {
 
       <Section title="保管場所">
         {load.locations.length === 0 ? (
-          <Text style={styles.empty}>
-            場所がまだありません。先に /v1/locations で作成してください。
-          </Text>
+          <Text style={styles.empty}>場所がまだありません。下で追加してください。</Text>
         ) : (
           <View style={styles.choices}>
             {load.locations.map((loc) => (
@@ -230,6 +306,33 @@ export default function AddDetailsScreen() {
             ))}
           </View>
         )}
+        <View style={styles.row}>
+          <TextInput
+            testID="add-location-input"
+            value={locationName}
+            editable={!addingLocation}
+            onChangeText={setLocationName}
+            placeholder="新しい場所の名前"
+            maxLength={100}
+            returnKeyType="done"
+            onSubmitEditing={onAddLocation}
+            style={[styles.input, styles.qtyInput]}
+          />
+          <Pressable
+            testID="add-location-submit"
+            accessibilityRole="button"
+            onPress={onAddLocation}
+            disabled={addingLocation}
+            style={[styles.choice, addingLocation && styles.choiceDisabled]}
+          >
+            {addingLocation ? (
+              <ActivityIndicator size="small" color="#333" />
+            ) : (
+              <Text style={styles.choiceLabel}>場所を追加</Text>
+            )}
+          </Pressable>
+        </View>
+        {locationError ? <Text style={styles.error}>{locationError}</Text> : null}
       </Section>
 
       <Section title="数量 / 単位">
@@ -275,9 +378,10 @@ export default function AddDetailsScreen() {
 
       <Pressable
         testID="add-save"
-        style={[styles.primary, saving && styles.primaryDisabled]}
+        style={[styles.primary, (saving || addingLocation) && styles.primaryDisabled]}
         onPress={onSave}
-        disabled={saving}
+        // 場所の追加中に保存すると、作っている場所ではなく前に選んだ場所に入る
+        disabled={saving || addingLocation}
       >
         {saving ? (
           <ActivityIndicator color="#fff" />
@@ -383,6 +487,7 @@ const styles = StyleSheet.create({
     borderColor: "#aaa",
   },
   choiceSelected: { backgroundColor: "#2c7be5", borderColor: "#2c7be5" },
+  choiceDisabled: { opacity: 0.5 },
   choiceLabel: { fontSize: 13, color: "#333" },
   choiceLabelSelected: { color: "#fff", fontWeight: "600" },
   empty: { color: "#666", fontSize: 13 },
