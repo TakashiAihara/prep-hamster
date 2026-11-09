@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { ApiClient } from "@prep-hamster/api-client"
-import { createLocation, parseLocationName } from "../location-create"
+import { appendCreatedLocation, createLocation, parseLocationName } from "../location-create"
 
 const GROUP_ID = "55555555-5555-4555-8555-555555555555"
 const LOC_ID = "66666666-6666-4666-8666-666666666666"
@@ -55,11 +55,41 @@ test("parseLocationName accepts 100 characters and rejects 101 after trimming", 
   })
 })
 
-test("createLocation posts the group and the name and returns the created location", async () => {
-  const { client, calls } = fakeClient(() => json({ location: locationDto }, 201))
+test("createLocation posts the group and the name and returns the location the API created", async () => {
+  // 応答の名前を送った名前と変え、入力をそのまま返す実装を落とす
+  const { client, calls } = fakeClient(() =>
+    json({ location: { ...locationDto, name: "冷蔵庫 (API)" } }, 201),
+  )
   const res = await createLocation(client, GROUP_ID, "冷蔵庫")
-  expect(res).toEqual({ ok: true, location: { id: LOC_ID, name: "冷蔵庫" } })
+  expect(res).toEqual({ ok: true, location: { id: LOC_ID, name: "冷蔵庫 (API)" } })
   expect(calls).toEqual([{ json: { groupId: GROUP_ID, name: "冷蔵庫" } }])
+})
+
+const OTHER_GROUP_ID = "77777777-7777-4777-8777-777777777777"
+const LOC_A = { id: "88888888-8888-4888-8888-888888888888", name: "冷凍庫" }
+const LOC_B = { id: "99999999-9999-4999-8999-999999999999", name: "棚" }
+const created = { id: LOC_ID, name: "冷蔵庫" }
+
+test("appendCreatedLocation appends the created location to the same group's list", () => {
+  const state = { status: "ok", groupId: GROUP_ID, locations: [LOC_A, LOC_B] }
+  expect(appendCreatedLocation(state, GROUP_ID, created)).toEqual({
+    status: "ok",
+    groupId: GROUP_ID,
+    locations: [LOC_A, LOC_B, created],
+  })
+})
+
+test("appendCreatedLocation returns null when the list now belongs to another group", () => {
+  const state = { groupId: OTHER_GROUP_ID, locations: [LOC_A] }
+  expect(appendCreatedLocation(state, GROUP_ID, created)).toBeNull()
+})
+
+test("appendCreatedLocation does not duplicate a location the reloaded list already has", () => {
+  const state = { groupId: GROUP_ID, locations: [LOC_A, created, LOC_B] }
+  expect(appendCreatedLocation(state, GROUP_ID, created)).toEqual({
+    groupId: GROUP_ID,
+    locations: [LOC_A, created, LOC_B],
+  })
 })
 
 test("createLocation returns the API error message on failure", async () => {
@@ -87,5 +117,15 @@ test("createLocation returns the thrown error message when the request fails", a
   expect(await createLocation(client, GROUP_ID, "冷蔵庫")).toEqual({
     ok: false,
     message: "Network request failed",
+  })
+})
+
+test("createLocation returns unknown when something other than an Error is thrown", async () => {
+  const { client } = fakeClient(() => {
+    throw "boom"
+  })
+  expect(await createLocation(client, GROUP_ID, "冷蔵庫")).toEqual({
+    ok: false,
+    message: "unknown",
   })
 })

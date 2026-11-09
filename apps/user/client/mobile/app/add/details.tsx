@@ -13,7 +13,7 @@ import {
 import { getApiClient } from "@/api"
 import { useCurrentGroup } from "@/current-group"
 import { KeyboardScrollView } from "@/keyboard-scroll-view"
-import { createLocation, parseLocationName } from "@/location-create"
+import { appendCreatedLocation, createLocation, parseLocationName } from "@/location-create"
 import { parsePositive } from "@/stock-detail"
 
 // 詳細入力 + 保存画面。
@@ -53,8 +53,10 @@ export default function AddDetailsScreen() {
   const [name, setName] = useState("")
   // グループ切替の読み直しで、利用者が打った名前を item の名前で上書きしない
   const nameSetFor = useRef<string | null>(null)
-  // 場所追加の応答が返った時点で読み直し済みかを見るための印。読み直しのたびに無効化する
-  const pendingAddGroupId = useRef<string | null>(null)
+  // 場所追加の応答が返る頃には一覧が別グループのものかもしれないので、現在のグループを覚えておく
+  const currentGroupRef = useRef<string | null>(null)
+  // Pressable の disabled は再描画まで効かないので、同じフレームの 2 回目を同期フラグで止める
+  const addingRef = useRef(false)
   const [locationId, setLocationId] = useState<string | null>(null)
   const [locationName, setLocationName] = useState("")
   const [locationError, setLocationError] = useState<string | null>(null)
@@ -70,8 +72,13 @@ export default function AddDetailsScreen() {
   const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
-    // 読み直しが走った時点で、飛行中の場所追加の応答は今の一覧に混ぜられない
-    pendingAddGroupId.current = null
+    const nextGroupId = groupId ?? null
+    if (currentGroupRef.current !== nextGroupId) {
+      // 別グループに切り替わったので、前のグループ向けに入力中の名前と表示中のエラーは消す
+      setLocationName("")
+      setLocationError(null)
+    }
+    currentGroupRef.current = nextGroupId
     if (!itemId) return
     if (!groupId) {
       setLoad({ status: "error", message: "グループが選ばれていません" })
@@ -202,6 +209,7 @@ export default function AddDetailsScreen() {
   }
 
   async function onAddLocation() {
+    if (addingRef.current) return
     const parsed = parseLocationName(locationName)
     if (!parsed.ok) {
       setLocationError(parsed.message)
@@ -210,19 +218,23 @@ export default function AddDetailsScreen() {
     if (load.status !== "ok") return
     // 場所を読んだグループに作る。読み直しの途中で現在のグループが変わっても、別グループには作らない
     const submittedGroupId = load.groupId
-    pendingAddGroupId.current = submittedGroupId
+    addingRef.current = true
     setAddingLocation(true)
     setLocationError(null)
     const result = await createLocation(getApiClient(), submittedGroupId, parsed.value)
+    addingRef.current = false
     setAddingLocation(false)
+    // 追加中に別グループへ切り替わっていたら、成功・失敗どちらの結果も今の画面には関係ない
+    if (currentGroupRef.current !== submittedGroupId) return
     if (!result.ok) {
       setLocationError(result.message)
       return
     }
-    // 追加中に別グループへ読み直されていたら、そちらの場所一覧に混ぜない
-    if (pendingAddGroupId.current !== submittedGroupId) return
-    pendingAddGroupId.current = null
-    setLoad({ ...load, locations: [...load.locations, result.location] })
+    setLoad((prev) =>
+      prev.status === "ok"
+        ? (appendCreatedLocation(prev, submittedGroupId, result.location) ?? prev)
+        : prev,
+    )
     setLocationId(result.location.id)
     setLocationName("")
     setLocationError(null)
@@ -269,10 +281,14 @@ export default function AddDetailsScreen() {
             value={locationName}
             onChangeText={setLocationName}
             placeholder="新しい場所の名前"
+            maxLength={100}
+            returnKeyType="done"
+            onSubmitEditing={onAddLocation}
             style={[styles.input, styles.qtyInput]}
           />
           <Pressable
             testID="add-location-submit"
+            accessibilityRole="button"
             onPress={onAddLocation}
             disabled={addingLocation}
             style={[styles.choice, addingLocation && styles.choiceDisabled]}

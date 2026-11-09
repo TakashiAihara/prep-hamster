@@ -37,3 +37,12 @@ export async function createLocation(
     return { ok: false, message: err instanceof Error ? err.message : "unknown" }
   }
 }
+
+// 読み直した一覧が別グループのものか、作成した場所を既に含むことがあるので、その場合は足さない
+export function appendCreatedLocation<
+  T extends { groupId: string; locations: { id: string; name: string }[] },
+>(state: T, submittedGroupId: string, created: { id: string; name: string }): T | null {
+  if (state.groupId !== submittedGroupId) return null
+  if (state.locations.some((l) => l.id === created.id)) return state
+  return { ...state, locations: [...state.locations, created] } as T
+}
