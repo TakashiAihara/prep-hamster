@@ -13,6 +13,7 @@ import {
 import { getApiClient } from "@/api"
 import { useCurrentGroup } from "@/current-group"
 import { KeyboardScrollView } from "@/keyboard-scroll-view"
+import { createLocation, parseLocationName } from "@/location-create"
 import { parsePositive } from "@/stock-detail"
 
 // 詳細入力 + 保存画面。
@@ -52,7 +53,12 @@ export default function AddDetailsScreen() {
   const [name, setName] = useState("")
   // グループ切替の読み直しで、利用者が打った名前を item の名前で上書きしない
   const nameSetFor = useRef<string | null>(null)
+  // 場所追加の応答が返った時点で読み直し済みかを見るための印。読み直しのたびに無効化する
+  const pendingAddGroupId = useRef<string | null>(null)
   const [locationId, setLocationId] = useState<string | null>(null)
+  const [locationName, setLocationName] = useState("")
+  const [locationError, setLocationError] = useState<string | null>(null)
+  const [addingLocation, setAddingLocation] = useState(false)
   const [quantity, setQuantity] = useState("1")
   const [unit, setUnit] = useState("個")
   const [useByDate, setUseByDate] = useState<Date | null>(null)
@@ -64,6 +70,8 @@ export default function AddDetailsScreen() {
   const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
+    // 読み直しが走った時点で、飛行中の場所追加の応答は今の一覧に混ぜられない
+    pendingAddGroupId.current = null
     if (!itemId) return
     if (!groupId) {
       setLoad({ status: "error", message: "グループが選ばれていません" })
@@ -193,6 +201,33 @@ export default function AddDetailsScreen() {
     }
   }
 
+  async function onAddLocation() {
+    const parsed = parseLocationName(locationName)
+    if (!parsed.ok) {
+      setLocationError(parsed.message)
+      return
+    }
+    if (load.status !== "ok") return
+    // 場所を読んだグループに作る。読み直しの途中で現在のグループが変わっても、別グループには作らない
+    const submittedGroupId = load.groupId
+    pendingAddGroupId.current = submittedGroupId
+    setAddingLocation(true)
+    setLocationError(null)
+    const result = await createLocation(getApiClient(), submittedGroupId, parsed.value)
+    setAddingLocation(false)
+    if (!result.ok) {
+      setLocationError(result.message)
+      return
+    }
+    // 追加中に別グループへ読み直されていたら、そちらの場所一覧に混ぜない
+    if (pendingAddGroupId.current !== submittedGroupId) return
+    pendingAddGroupId.current = null
+    setLoad({ ...load, locations: [...load.locations, result.location] })
+    setLocationId(result.location.id)
+    setLocationName("")
+    setLocationError(null)
+  }
+
   return (
     <KeyboardScrollView contentContainerStyle={styles.container}>
       <Section title={`商品 (${labelForLookup(productLookup)})`}>
@@ -210,9 +245,7 @@ export default function AddDetailsScreen() {
 
       <Section title="保管場所">
         {load.locations.length === 0 ? (
-          <Text style={styles.empty}>
-            場所がまだありません。先に /v1/locations で作成してください。
-          </Text>
+          <Text style={styles.empty}>場所がまだありません。下で追加してください。</Text>
         ) : (
           <View style={styles.choices}>
             {load.locations.map((loc) => (
@@ -230,6 +263,28 @@ export default function AddDetailsScreen() {
             ))}
           </View>
         )}
+        <View style={styles.row}>
+          <TextInput
+            testID="add-location-input"
+            value={locationName}
+            onChangeText={setLocationName}
+            placeholder="新しい場所の名前"
+            style={[styles.input, styles.qtyInput]}
+          />
+          <Pressable
+            testID="add-location-submit"
+            onPress={onAddLocation}
+            disabled={addingLocation}
+            style={[styles.choice, addingLocation && styles.choiceDisabled]}
+          >
+            {addingLocation ? (
+              <ActivityIndicator size="small" color="#333" />
+            ) : (
+              <Text style={styles.choiceLabel}>場所を追加</Text>
+            )}
+          </Pressable>
+        </View>
+        {locationError ? <Text style={styles.error}>{locationError}</Text> : null}
       </Section>
 
       <Section title="数量 / 単位">
@@ -383,6 +438,7 @@ const styles = StyleSheet.create({
     borderColor: "#aaa",
   },
   choiceSelected: { backgroundColor: "#2c7be5", borderColor: "#2c7be5" },
+  choiceDisabled: { opacity: 0.5 },
   choiceLabel: { fontSize: 13, color: "#333" },
   choiceLabelSelected: { color: "#fff", fontWeight: "600" },
   empty: { color: "#666", fontSize: 13 },
