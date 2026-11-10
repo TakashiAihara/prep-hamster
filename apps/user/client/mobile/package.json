@@ -20,7 +20,7 @@
     "@prep-hamster/jan-api": "workspace:*",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "9.2.1",
-    "@supabase/supabase-js": "^2.118.0",
+    "@supabase/supabase-js": "^2.119.0",
     "aes-js": "^3.1.2",
     "expo": "~58.0.23",
     "expo-camera": "~58.0.14",
