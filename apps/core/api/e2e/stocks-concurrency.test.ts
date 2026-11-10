@@ -194,8 +194,10 @@ test("a resend that finds the stock already too low after the race is answered f
   expect(responses.map((r) => r.status)).toEqual([200, 200])
   const bodies = (await Promise.all(responses.map((r) => r.json()))) as Array<{
     event: { id: string }
+    stock: { quantity: number }
   }>
   expect(bodies.map((b) => b.event.id)).toEqual([eventId, eventId])
+  expect(bodies.map((b) => b.stock.quantity)).toEqual([1, 1])
   expect(await quantityOf(stockId)).toBe(1)
   expect(await eventsOf(stockId)).toHaveLength(1)
 })
@@ -212,8 +214,10 @@ test("a discard resend that finds the stock already too low after the race is an
   expect(responses.map((r) => r.status)).toEqual([200, 200])
   const bodies = (await Promise.all(responses.map((r) => r.json()))) as Array<{
     event: { id: string }
+    stock: { quantity: number }
   }>
   expect(bodies.map((b) => b.event.id)).toEqual([eventId, eventId])
+  expect(bodies.map((b) => b.stock.quantity)).toEqual([1, 1])
   expect(await quantityOf(stockId)).toBe(1)
   expect(await eventsOf(stockId)).toHaveLength(1)
 })
@@ -298,6 +302,7 @@ test("two concurrent moves to the same location record one move and reject the o
   if (!rejected) throw new Error("no rejected response")
   expect(((await rejected.json()) as { error: { code: string } }).error.code).toBe("MOVE_NOOP")
   expect(await eventsOf(stockId)).toHaveLength(1)
+  expect(await locationOf(stockId)).toBe(fridge)
 })
 
 test.each(["move-first", "consume-first"] as const)(
