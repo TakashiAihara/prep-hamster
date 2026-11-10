@@ -384,9 +384,23 @@ async function e2e() {
   )
   // maestro talks to the device through adb; use the SDK's even when platform-tools is not on PATH
   const pathEnv = `${dirname(adb)}:${process.env["PATH"] ?? ""}`
-  run("maestro", ["--device", serial, "test", warmup], {
-    env: { ...process.env, PATH: pathEnv },
+  // The device log is the only record of what the app did (a JS error, a crash) when a flow fails
+  cleanups.push(() => {
+    const logcat = spawnSync(adb, ["-s", serial, "logcat", "-d"], { encoding: "utf-8" })
+    writeFileSync(join(cacheDir, "logcat.log"), logcat.stdout ?? "")
   })
+  run(
+    "maestro",
+    [
+      "--device",
+      serial,
+      "test",
+      `--debug-output=${join(cacheDir, "maestro/warmup")}`,
+      "--flatten-debug-output",
+      warmup,
+    ],
+    { env: { ...process.env, PATH: pathEnv } },
+  )
   log("warmed up the app")
 
   run("bun", ["run", join(here, "capture-screens.ts")], {
