@@ -132,23 +132,21 @@ export function createConfirmDiscard(
 
 export type ActionMessage = { kind: "ok" | "error"; text: string }
 
-export type PendingOp = {
-  kind: "consume" | "discard"
-  stockId: string
-  quantity: number
-  reason: string | null
+// 結果が不明な操作の eventId を操作内容ごとに保ち、同じ内容の押し直しで使い回す
+export type PendingEntry = {
   eventId: string
-  baseQuantity: number
+  inFlight: number
+  uncertain: boolean
 }
-
-export type PendingOpRef = { current: PendingOp | null }
+export type PendingOps = Map<string, PendingEntry>
 
 export type StockActionDeps = {
   client: ApiClient
   stock: StockDto
   guard: Guard
-  pending: PendingOpRef
+  pending: PendingOps
   newEventId: () => string
+  currentQuantity: () => number
   setBusy: (busy: boolean) => void
   setMessage: (message: ActionMessage | null) => void
   onStockChanged: (stock: StockDto) => void
@@ -156,6 +154,10 @@ export type StockActionDeps = {
   confirmDiscard: (quantity: number, unit: string) => Promise<boolean>
   leave: () => void
 }
+
+// 詳細画面を閉じて開き直しても eventId を引き継ぐため画面の外に置く。メモリだけなので再起動で消える
+// 結果不明のまま残った記録はアプリを閉じるまで残す。数も量も小さい
+export const sharedPendingOps: PendingOps = new Map()
 
 export function createStockActions(deps: StockActionDeps) {
   const { client, stock, guard } = deps
@@ -187,41 +189,40 @@ export function createStockActions(deps: StockActionDeps) {
     }
   }
 
-  // consume / discard は結果が不明な失敗 (通信断 / 5xx) のとき、同じ eventId で
+  // consume / discard は結果が不明な失敗のとき、同じ eventId で
   // 再送してサーバ側の冪等化に任せる。同じ内容の操作なら eventId を使い回す。
   async function runDelta(
-    kind: PendingOp["kind"],
+    kind: "consume" | "discard",
     quantity: number,
     reason: string | null,
     send: (eventId: string) => Promise<ActionResult>,
   ): Promise<ActionResult> {
-    const pending = deps.pending.current
-    const eventId =
-      pending !== null &&
-      pending.kind === kind &&
-      pending.stockId === stock.id &&
-      pending.quantity === quantity &&
-      pending.reason === reason &&
-      pending.baseQuantity === stock.quantity
-        ? pending.eventId
-        : deps.newEventId()
-    deps.pending.current = {
-      kind,
-      stockId: stock.id,
-      quantity,
-      reason,
-      eventId,
-      baseQuantity: stock.quantity,
+    const key = JSON.stringify([kind, stock.id, quantity, reason, stock.quantity])
+    let entry = deps.pending.get(key)
+    if (entry === undefined) {
+      entry = {
+        eventId: deps.newEventId(),
+        inFlight: 0,
+        uncertain: false,
+      }
+      deps.pending.set(key, entry)
     }
-    const r = await send(eventId)
+    entry.inFlight += 1
+    const r = await send(entry.eventId)
+    entry.inFlight -= 1
+    // 成功ならサーバに記録済み。結果不明のあとの確定失敗でも先の送信が
+    // 適用されうるので、uncertain は下げない
+    if (r.ok) entry.uncertain = false
+    else if (r.uncertain) entry.uncertain = true
+    // 別の画面がまだ送っている間は eventId を残す。全部の送信が終わって確定したときだけ消す
+    if (entry.inFlight === 0 && !entry.uncertain) deps.pending.delete(key)
     if (!r.ok && r.uncertain) {
       // 結果が不明なので押し直してよいことを伝える。取り直しで残量が変わった後は新しい操作になるので、条件を添える
       return {
         ...r,
-        message: `${r.message} (残量の表示が変わっていなければ、同じ内容でもう一度押しても二重には記録されません)`,
+        message: `${r.message} (アプリを閉じず、残量の表示が変わっていなければ、同じ内容でもう一度押しても二重には記録されません)`,
       }
     }
-    deps.pending.current = null
     return r
   }
 
@@ -255,6 +256,12 @@ export function createStockActions(deps: StockActionDeps) {
           if (!confirmed) deps.setBusy(false)
         }
         if (!confirmed) return
+        // 確認中に残量が変わっていたら、確認した内容と違う廃棄を送ることになるので止める
+        if (deps.currentQuantity() !== stock.quantity) {
+          fail("確認中に残量が変わりました。表示を確かめてから、もう一度押してください")
+          deps.setBusy(false)
+          return
+        }
         await perform(
           "廃棄しました",
           () =>

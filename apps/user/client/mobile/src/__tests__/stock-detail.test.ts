@@ -401,3 +401,61 @@ test("loadStockDetail fails when the locations lookup fails", async () => {
   )
   expect(await loadStockDetail(client, STOCK_ID)).toEqual({ ok: false, message: "HTTP 503" })
 })
+
+test("consume and discard mark a 408 response as uncertain", async () => {
+  const consume408 = fakeClient({
+    "stock.consume": () => new Response("timeout", { status: 408 }),
+  })
+  expect(await consumeStock(consume408.client, STOCK_ID, 1, EVENT_ID)).toEqual({
+    ok: false,
+    message: "HTTP 408",
+    uncertain: true,
+  })
+  const discard408 = fakeClient({
+    "stock.discard": () => new Response("timeout", { status: 408 }),
+  })
+  expect(await discardStock(discard408.client, STOCK_ID, 1, null, EVENT_ID)).toEqual({
+    ok: false,
+    message: "HTTP 408",
+    uncertain: true,
+  })
+})
+
+test("consume and discard mark responses rejected before the eventId is looked up as uncertain", async () => {
+  // 401 / 403 / 429 は eventId を照らし合わせる前に断られるので、先の要求が適用済みかは分からない
+  for (const status of [401, 403, 429]) {
+    const consume = fakeClient({ "stock.consume": () => new Response("no", { status }) })
+    // oxlint-disable-next-line no-await-in-loop
+    expect(await consumeStock(consume.client, STOCK_ID, 1, EVENT_ID)).toEqual({
+      ok: false,
+      message: `HTTP ${status}`,
+      uncertain: true,
+    })
+    const discard = fakeClient({ "stock.discard": () => new Response("no", { status }) })
+    // oxlint-disable-next-line no-await-in-loop
+    expect(await discardStock(discard.client, STOCK_ID, 1, null, EVENT_ID)).toEqual({
+      ok: false,
+      message: `HTTP ${status}`,
+      uncertain: true,
+    })
+  }
+})
+
+test("consume and discard treat a 404 as definite", async () => {
+  const consume = fakeClient({
+    "stock.consume": () =>
+      json({ error: { code: "NOT_FOUND", message: "stock が見つかりません" } }, 404),
+  })
+  expect(await consumeStock(consume.client, STOCK_ID, 1, EVENT_ID)).toEqual({
+    ok: false,
+    message: "stock が見つかりません",
+  })
+  const discard = fakeClient({
+    "stock.discard": () =>
+      json({ error: { code: "NOT_FOUND", message: "stock が見つかりません" } }, 404),
+  })
+  expect(await discardStock(discard.client, STOCK_ID, 1, null, EVENT_ID)).toEqual({
+    ok: false,
+    message: "stock が見つかりません",
+  })
+})

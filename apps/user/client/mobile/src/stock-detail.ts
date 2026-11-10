@@ -142,6 +142,14 @@ export async function loadStockDetail(
   }
 }
 
+// 400 / 422 はこのリクエストの内容への判定、404 は在庫が無いという意味なので、
+// この送信は適用されていないと分かる。
+// それ以外は eventId を照合する前に断られたか、先の送信が適用されたかを
+// 何も言わないので結果不明とする
+function isUncertainStatus(status: number) {
+  return status !== 400 && status !== 404 && status !== 422
+}
+
 export async function consumeStock(
   client: ApiClient,
   id: string,
@@ -155,8 +163,8 @@ export async function consumeStock(
     })
     if (!res.ok) {
       const f = await failure(res)
-      // 5xx は届いたか分からないので、同じ eventId で再送してよい印を付ける
-      return res.status >= 500 ? { ...f, uncertain: true } : f
+      // isUncertainStatus の応答はリクエストが適用されたか分からないので、同じ eventId で再送してよい印を付ける
+      return isUncertainStatus(res.status) ? { ...f, uncertain: true } : f
     }
     return { ok: true, stock: (await res.json()).stock }
   } catch (err) {
@@ -178,7 +186,7 @@ export async function discardStock(
     })
     if (!res.ok) {
       const f = await failure(res)
-      return res.status >= 500 ? { ...f, uncertain: true } : f
+      return isUncertainStatus(res.status) ? { ...f, uncertain: true } : f
     }
     return { ok: true, stock: (await res.json()).stock }
   } catch (err) {
