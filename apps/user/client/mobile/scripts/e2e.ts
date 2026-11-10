@@ -397,8 +397,25 @@ async function e2e() {
 
   const serial = process.env["E2E_DEVICE"] || (await bootEmulator())
   // A busy emulator shows "Pixel Launcher isn't responding" over the app, and every flow then
-  // fails to find its screen (seen on CI). The flows test the app, so hide system error dialogs.
-  run(adb, ["-s", serial, "shell", "settings", "put", "global", "hide_error_dialogs", "1"])
+  // fails to find its screen (seen on CI, also with hide_error_dialogs set). The flows start the
+  // app with `am start` and need no launcher; without it the home is Settings' blank FallbackHome.
+  warnIfFailed(
+    "disabling Pixel Launcher",
+    spawnSync(
+      adb,
+      [
+        "-s",
+        serial,
+        "shell",
+        "pm",
+        "disable-user",
+        "--user",
+        "0",
+        "com.google.android.apps.nexuslauncher",
+      ],
+      { stdio: "inherit", timeout: 30_000 },
+    ),
+  )
   run(adb, ["-s", serial, "install", "-r", apk])
 
   // The first launch on a fresh emulator is far slower than the rest (seen failing whichever flow
