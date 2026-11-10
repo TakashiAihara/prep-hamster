@@ -99,7 +99,8 @@ async function findRecordedDeltaEvent(
     reason: string | null
   },
 ): Promise<RecordedDeltaEvent> {
-  // quantity_delta は real (float4) で、DB は有効 6 桁に丸めた文字列で返すため JS 側では元の値と比べられない。
+  // quantity_delta は real (float4) で、保存値は送られた倍精度の値と一致しない。DB の表示桁数の設定
+  // (extra_float_digits) によっては読み出しでさらに丸まり、JS 側では元の float4 にも戻せない。
   // 一致は DB の中で判定する (型の付かない引数は列の型 real として比べられる)
   const [found] = await db
     .select({

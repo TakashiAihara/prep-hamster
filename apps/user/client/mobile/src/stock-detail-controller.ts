@@ -215,8 +215,11 @@ export function createStockActions(deps: StockActionDeps) {
     }
     const r = await send(eventId)
     if (!r.ok && r.uncertain) {
-      // 結果が不明なので、同じ数量で押し直しても二重記録されないことを伝える
-      return { ...r, message: `${r.message} (同じ数量でもう一度押しても二重には記録されません)` }
+      // 結果が不明なので押し直してよいことを伝える。取り直しで残量が変わった後は新しい操作になるので、条件を添える
+      return {
+        ...r,
+        message: `${r.message} (残量の表示が変わっていなければ、同じ数量でもう一度押しても二重には記録されません)`,
+      }
     }
     deps.pending.current = null
     return r
