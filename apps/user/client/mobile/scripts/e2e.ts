@@ -343,6 +343,20 @@ function teardown(): boolean {
 
 async function e2e() {
   mkdirSync(cacheDir, { recursive: true })
+  // The host side of a dropped connection (#200): the adb server logs its restarts and, for a
+  // kill-server, the caller's process chain. Registered first so it runs last and keeps teardown's
+  // adb calls too. Assumes the server was started with this process's TMPDIR (true on CI)
+  const adbServerLog = join(process.env["TMPDIR"] || "/tmp", `adb.${process.getuid?.() ?? 0}.log`)
+  cleanups.push(() => {
+    try {
+      copyFileSync(adbServerLog, join(cacheDir, "adb-server.log"))
+    } catch (err) {
+      // diagnostics only, like logcat.log
+      console.warn(
+        `[e2e] copying ${adbServerLog} failed: ${err instanceof Error ? err.message : err}`,
+      )
+    }
+  })
   // Built first: the port check right before the services start leaves no multi-minute window in
   // which a second run passes it and then stops this run's Supabase (same project_id)
   const apk = buildApk()
@@ -450,19 +464,7 @@ async function e2e() {
     // diagnostics only: a missing log should be visible, not fail the run
     warnIfFailed("adb logcat (logcat.log may be empty or cut short)", r)
   })
-  // The host side of a dropped connection (#200): the adb server logs its restarts and, for a
-  // kill-server, the caller's process chain. It writes to $TMPDIR of whoever started it
-  const adbServerLog = join(process.env["TMPDIR"] ?? "/tmp", `adb.${process.getuid?.() ?? 0}.log`)
-  cleanups.push(() => {
-    try {
-      copyFileSync(adbServerLog, join(cacheDir, "adb-server.log"))
-    } catch (err) {
-      // diagnostics only, like logcat.log
-      console.warn(
-        `[e2e] copying ${adbServerLog} failed: ${err instanceof Error ? err.message : err}`,
-      )
-    }
-  })
+
   run(
     "maestro",
     [
