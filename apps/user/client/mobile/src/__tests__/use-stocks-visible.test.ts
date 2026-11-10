@@ -1,29 +1,6 @@
 import { expect, test } from "bun:test"
 import type { ApiClient } from "@prep-hamster/api-client"
-import { isExpired, loadStockRows, visibleStocks, type StockListItem } from "../stock-join"
-
-const row = (id: string, quantity: number): StockListItem => ({
-  id,
-  itemName: "X",
-  locationName: "Y",
-  quantity,
-  unit: "個",
-  useByDate: null,
-  bestBeforeDate: null,
-})
-
-test("visibleStocks hides empty stocks and keeps order", () => {
-  const rows = [row("a", 2), row("b", 0), row("c", 0.5)]
-  expect(visibleStocks(rows).map((r) => r.id)).toEqual(["a", "c"])
-})
-
-test("visibleStocks returns an empty list when everything is used up", () => {
-  expect(visibleStocks([row("a", 0)])).toEqual([])
-})
-
-test("visibleStocks hides a float residue left by repeated consumption", () => {
-  expect(visibleStocks([row("a", 1 - 0.7 - 0.3)])).toEqual([])
-})
+import { isExpired, loadStockRows } from "../stock-join"
 
 test("isExpired is true on or after the use-by / best-before date and false before it", () => {
   const today = "2026-10-25"
@@ -82,13 +59,15 @@ function fakeListClient(
   return { client, queries }
 }
 
-test("loadStockRows asks for expired stocks too and hides the emptied ones", async () => {
+test("loadStockRows asks for expired stocks too and shows the rows the API returns as is", async () => {
+  // 数量 0 の在庫を除くのは API の既定 (includeEmpty なし)。偽の API にあえて数量 0 の行を返させ、
+  // 端末側では絞り直さずにそのまま出すことを確かめる
   const { client, queries } = fakeListClient()
   const r = await loadStockRows(client, GROUP)
   expect(queries.stocks).toEqual({ groupId: GROUP, includeExpired: "true" })
   expect(queries.items).toEqual({ groupId: GROUP })
   expect(queries.locations).toEqual({ groupId: GROUP })
-  expect(r.ok && r.rows.map((x) => x.id)).toEqual(["alive", "expired"])
+  expect(r.ok && r.rows.map((x) => x.id)).toEqual(["alive", "used-up", "expired"])
   expect(r.ok && r.rows[0]?.itemName).toBe("Tomato")
 })
 

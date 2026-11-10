@@ -6,7 +6,6 @@ import {
   discardStock,
   editStock,
   formatQuantity,
-  isEmptyQuantity,
   loadStockDetail,
   moveStock,
   moveTargets,
@@ -149,7 +148,6 @@ test("a float residue from repeated consumption counts as empty and displays as 
   const residue = 1 - 0.7 - 0.3
   expect(residue).not.toBe(0)
   expect(shouldSuggestShopping(residue)).toBe(true)
-  expect(isEmptyQuantity(residue)).toBe(true)
   expect(formatQuantity(residue)).toBe("0")
   expect(shouldSuggestShopping(0.001)).toBe(false)
   // 0 と表示される量は空、それ以外は在庫あり
