@@ -131,6 +131,12 @@ async function findRecordedDeltaEvent(
 // 場合に起きる。catch 側で最新の行を読み直して 422 / 404 を決める。
 class StockDeltaNotApplied extends Error {}
 
+// move / delete の transaction 内の更新が対象行を取れなかったとき
+// (= 並行して削除された) に外へ出す印。
+class StockMoveNotApplied extends Error {}
+class StockMoveNoop extends Error {}
+class StockDeleteNotApplied extends Error {}
+
 const listStocksRoute = createRoute({
   method: "get",
   path: "/",
@@ -745,8 +751,8 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
         if (recordedReply) return recordedReply
       }
       if (err instanceof StockDeltaNotApplied) {
-        // eventId 付きの再送が数量不足で UPDATE をすり抜けた場合も、記録済み
-        // イベントがあれば再送と同じ結果を返す。
+        // eventId 付きの再送で UPDATE が数量条件に合う行を見つけられなかった
+        // 場合も、記録済みイベントがあれば再送と同じ結果を返す。
         const recordedReply = await respondRecorded()
         if (recordedReply) return recordedReply
         // 早期チェックの後で並行リクエストが残量を減らした (または削除した) ので、
@@ -871,8 +877,8 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
         if (recordedReply) return recordedReply
       }
       if (err instanceof StockDeltaNotApplied) {
-        // eventId 付きの再送が数量不足で UPDATE をすり抜けた場合も、記録済み
-        // イベントがあれば再送と同じ結果を返す。
+        // eventId 付きの再送で UPDATE が数量条件に合う行を見つけられなかった
+        // 場合も、記録済みイベントがあれば再送と同じ結果を返す。
         const recordedReply = await respondRecorded()
         if (recordedReply) return recordedReply
         // 早期チェックの後で並行リクエストが残量を減らした (または削除した) ので、
@@ -945,39 +951,71 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
       )
     }
 
-    const result = await db.transaction(async (tx) => {
-      const now = new Date()
-      const [updated] = await tx
-        .update(stocks)
-        .set({ locationId: body.toLocationId, updatedAt: now })
-        .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
-        .returning()
-      if (!updated) {
-        throw new Error("stock update returned no row")
-      }
-      const [event] = await tx
-        .insert(stockEvents)
-        .values({
-          id: crypto.randomUUID(),
-          groupId: existing.groupId,
-          stockId: id,
-          eventType: "MOVE",
-          // MOVE は数量変動なし
-          quantityDelta: 0,
-          fromLocationId: existing.locationId,
-          toLocationId: body.toLocationId,
-          occurredAt: now,
-          actorUserId: userId,
-          reason: body.reason ?? null,
-        })
-        .returning()
-      if (!event) {
-        throw new Error("stock_event insert returned no row")
-      }
-      return { stock: updated, event }
-    })
+    try {
+      const result = await db.transaction(async (tx) => {
+        const now = new Date()
+        // UPDATE ... RETURNING は更新後の値しか返さないので、移動元を正しく記録する
+        // にはロック取得時点の行を別途読む必要がある。値を変えない UPDATE で
+        // 行をロックしつつ現在値を取る。
+        const [locked] = await tx
+          .update(stocks)
+          .set({ updatedAt: sql`${stocks.updatedAt}` })
+          .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+          .returning()
+        if (!locked) {
+          throw new StockMoveNotApplied()
+        }
+        if (locked.locationId === body.toLocationId) {
+          throw new StockMoveNoop()
+        }
+        const [updated] = await tx
+          .update(stocks)
+          .set({ locationId: body.toLocationId, updatedAt: now })
+          .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+          .returning()
+        if (!updated) {
+          throw new Error("stock update returned no row")
+        }
+        const [event] = await tx
+          .insert(stockEvents)
+          .values({
+            id: crypto.randomUUID(),
+            groupId: existing.groupId,
+            stockId: id,
+            eventType: "MOVE",
+            // MOVE は数量変動なし
+            quantityDelta: 0,
+            fromLocationId: locked.locationId,
+            toLocationId: body.toLocationId,
+            occurredAt: now,
+            actorUserId: userId,
+            reason: body.reason ?? null,
+          })
+          .returning()
+        if (!event) {
+          throw new Error("stock_event insert returned no row")
+        }
+        return { stock: updated, event }
+      })
 
-    return c.json({ stock: toStockDto(result.stock), event: toStockEventDto(result.event) }, 200)
+      return c.json({ stock: toStockDto(result.stock), event: toStockEventDto(result.event) }, 200)
+    } catch (err) {
+      if (err instanceof StockMoveNotApplied) {
+        return c.json({ error: { code: "NOT_FOUND", message: "stock が見つかりません" } }, 404)
+      }
+      if (err instanceof StockMoveNoop) {
+        return c.json(
+          {
+            error: {
+              code: "MOVE_NOOP",
+              message: "移動先が現在の locationId と同じです",
+            },
+          },
+          422,
+        )
+      }
+      throw err
+    }
   })
   .openapi(deleteStockRoute, async (c) => {
     const { id } = c.req.valid("param")
@@ -1001,27 +1039,40 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
     // soft delete + 残数量を DISCARD として 1 件 stock_event に残すことで、
     // 過去の集計 (SUM(quantityDelta)) で「いま 0」を再現できる。
     const now = new Date()
-    await db.transaction(async (tx) => {
-      await tx
-        .update(stocks)
-        .set({ deletedAt: now, updatedAt: now })
-        .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
-      // 残数量があるなら DISCARD イベントを残す。0 ならイベントは作らない。
-      if (existing.quantity > 0) {
-        await tx.insert(stockEvents).values({
-          id: crypto.randomUUID(),
-          groupId: existing.groupId,
-          stockId: id,
-          eventType: "DISCARD",
-          quantityDelta: -existing.quantity,
-          fromLocationId: null,
-          toLocationId: null,
-          occurredAt: now,
-          actorUserId: userId,
-          reason: "soft-delete",
-        })
+    try {
+      await db.transaction(async (tx) => {
+        const [deleted] = await tx
+          .update(stocks)
+          .set({ deletedAt: now, updatedAt: now })
+          .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+          .returning()
+        if (!deleted) {
+          throw new StockDeleteNotApplied()
+        }
+        // 残数量があるなら DISCARD イベントを残す。0 ならイベントは作らない。
+        // quantity は returning の行 (= この UPDATE が行をロックした時点の値) を
+        // 使う。事前に読んだ値だと、間に commit された消費・廃棄を二重に引く。
+        if (deleted.quantity > 0) {
+          await tx.insert(stockEvents).values({
+            id: crypto.randomUUID(),
+            groupId: existing.groupId,
+            stockId: id,
+            eventType: "DISCARD",
+            quantityDelta: -deleted.quantity,
+            fromLocationId: null,
+            toLocationId: null,
+            occurredAt: now,
+            actorUserId: userId,
+            reason: "soft-delete",
+          })
+        }
+      })
+    } catch (err) {
+      if (err instanceof StockDeleteNotApplied) {
+        return c.json({ error: { code: "NOT_FOUND", message: "stock が見つかりません" } }, 404)
       }
-    })
+      throw err
+    }
 
     return c.body(null, 204)
   })

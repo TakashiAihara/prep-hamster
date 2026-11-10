@@ -10,7 +10,8 @@ export async function holdStockRow(stockId: string) {
     taken.resolve()
     await held.promise
   })
-  await taken.promise
+  // 押さえる前に transaction が失敗したら、待ち続けずにその失敗を返す
+  await Promise.race([taken.promise, locker])
   return {
     release: async () => {
       held.resolve()

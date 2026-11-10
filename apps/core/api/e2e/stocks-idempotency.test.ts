@@ -254,8 +254,11 @@ test("a duplicate that collides at the event insert is answered from the record"
     post(stockId, "consume", { quantityDelta: 1, eventId: EVENT_ID }),
     post(stockId, "consume", { quantityDelta: 1, eventId: EVENT_ID }),
   ]
-  await waitForLockWaiters(2)
-  await lock.release()
+  try {
+    await waitForLockWaiters(2)
+  } finally {
+    await lock.release()
+  }
   const responses = await Promise.all(pending)
 
   expect(responses.map((r) => r.status)).toEqual([200, 200])
@@ -273,8 +276,11 @@ test("a duplicate that collides at the insert with different content returns 422
     post(stockId, "consume", { quantityDelta: 1, eventId: EVENT_ID }),
     post(stockId, "consume", { quantityDelta: 2, eventId: EVENT_ID }),
   ]
-  await waitForLockWaiters(2)
-  await lock.release()
+  try {
+    await waitForLockWaiters(2)
+  } finally {
+    await lock.release()
+  }
   const responses = await Promise.all(pending)
   const statuses = responses.map((r) => r.status).toSorted()
 
@@ -295,8 +301,11 @@ test("a discard duplicate that collides at the event insert is answered from the
     post(stockId, "discard", { quantityDelta: 1, eventId: EVENT_ID }),
     post(stockId, "discard", { quantityDelta: 1, eventId: EVENT_ID }),
   ]
-  await waitForLockWaiters(2)
-  await lock.release()
+  try {
+    await waitForLockWaiters(2)
+  } finally {
+    await lock.release()
+  }
   const responses = await Promise.all(pending)
 
   expect(responses.map((r) => r.status)).toEqual([200, 200])
