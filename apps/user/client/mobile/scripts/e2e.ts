@@ -20,6 +20,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import {
+  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -208,6 +209,7 @@ function startSupabase(): { secretKey: string; publishableKey: string } {
   const stop = () =>
     spawnSync("bunx", ["supabase", "stop", "--no-backup", "--workdir", sbWorkdir], {
       stdio: "inherit",
+      timeout: 180_000,
     })
   // A run killed before its teardown leaves the volumes; drop them so the DB starts empty
   if (stop().status !== 0) throw new Error("supabase stop failed; the DB would not start empty")
@@ -298,7 +300,14 @@ async function bootEmulator(): Promise<string> {
 
 function teardown() {
   // Cleanups first: the logcat dump needs the emulator, which is one of the children below
-  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+  for (const cleanup of cleanups.splice(0).toReversed()) {
+    // one failed cleanup must not leave the rest (and the children below) running
+    try {
+      cleanup()
+    } catch (err) {
+      console.error(`[e2e] cleanup failed: ${err instanceof Error ? err.message : err}`)
+    }
+  }
   for (const child of children.splice(0).toReversed()) {
     // detached: the group also holds Metro's / the emulator's own children
     if (child.pid) {
@@ -392,12 +401,14 @@ async function e2e() {
   const pathEnv = `${dirname(adb)}:${process.env["PATH"] ?? ""}`
   // The device log is the only record of what the app did (a JS error, a crash) when a flow fails
   cleanups.push(() => {
+    // Straight to the file: a pipe would cap the dump at spawnSync's 1 MiB maxBuffer.
     // adb waits forever on an emulator that died (seen when the host stalled it); bound it
-    const logcat = spawnSync(adb, ["-s", serial, "logcat", "-d"], {
-      encoding: "utf-8",
+    const fd = openSync(join(cacheDir, "logcat.log"), "w")
+    spawnSync(adb, ["-s", serial, "logcat", "-d"], {
+      stdio: ["ignore", fd, "ignore"],
       timeout: 60_000,
     })
-    writeFileSync(join(cacheDir, "logcat.log"), logcat.stdout ?? "")
+    closeSync(fd)
   })
   run(
     "maestro",
