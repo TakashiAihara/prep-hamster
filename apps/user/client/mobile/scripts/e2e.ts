@@ -213,7 +213,14 @@ function startSupabase(): { secretKey: string; publishableKey: string } {
     })
   // A run killed before its teardown leaves the volumes; drop them so the DB starts empty
   if (stop().status !== 0) throw new Error("supabase stop failed; the DB would not start empty")
-  cleanups.push(stop)
+  cleanups.push(() => {
+    const r = stop()
+    if (r.status !== 0) {
+      throw new Error(
+        `supabase stop failed (${r.error?.message ?? r.status}); containers may be left`,
+      )
+    }
+  })
   // Only Auth (gotrue), its gateway (kong) and the DB are used by the app and the API
   run("bunx", [
     "supabase",
@@ -288,7 +295,11 @@ async function bootEmulator(): Promise<string> {
     process.env,
   )
   cleanups.push(() =>
-    spawnSync(adb, ["-s", serial, "emu", "kill"], { stdio: "ignore", timeout: 30_000 }),
+    // only a warning: the SIGTERM to the emulator's process group in teardown() follows
+    warnIfFailed(
+      "adb emu kill",
+      spawnSync(adb, ["-s", serial, "emu", "kill"], { stdio: "ignore", timeout: 30_000 }),
+    ),
   )
   await waitFor(
     "emulator boot",
@@ -298,7 +309,15 @@ async function bootEmulator(): Promise<string> {
   return serial
 }
 
-function teardown() {
+function warnIfFailed(what: string, r: ReturnType<typeof spawnSync>) {
+  if (r.error || r.status !== 0) {
+    console.warn(`[e2e] ${what} failed: ${r.error?.message ?? `exit ${r.status ?? r.signal}`}`)
+  }
+}
+
+// Returns false when a cleanup failed, so the run does not report success over leftovers
+function teardown(): boolean {
+  let ok = true
   // Cleanups first: the logcat dump needs the emulator, which is one of the children below
   for (const cleanup of cleanups.splice(0).toReversed()) {
     // one failed cleanup must not leave the rest (and the children below) running
@@ -306,6 +325,7 @@ function teardown() {
       cleanup()
     } catch (err) {
       console.error(`[e2e] cleanup failed: ${err instanceof Error ? err.message : err}`)
+      ok = false
     }
   }
   for (const child of children.splice(0).toReversed()) {
@@ -316,6 +336,7 @@ function teardown() {
       } catch {}
     }
   }
+  return ok
 }
 
 // --- main ------------------------------------------------------------------
@@ -404,11 +425,13 @@ async function e2e() {
     // Straight to the file: a pipe would cap the dump at spawnSync's 1 MiB maxBuffer.
     // adb waits forever on an emulator that died (seen when the host stalled it); bound it
     const fd = openSync(join(cacheDir, "logcat.log"), "w")
-    spawnSync(adb, ["-s", serial, "logcat", "-d"], {
+    const r = spawnSync(adb, ["-s", serial, "logcat", "-d"], {
       stdio: ["ignore", fd, "ignore"],
       timeout: 60_000,
     })
     closeSync(fd)
+    // diagnostics only: a missing log should be visible, not fail the run
+    warnIfFailed("adb logcat (logcat.log may be empty or cut short)", r)
   })
   run(
     "maestro",
@@ -466,7 +489,7 @@ async function main() {
     console.error(`[e2e] ${err instanceof Error ? err.message : err}`)
     failed = true
   } finally {
-    teardown()
+    if (!teardown()) failed = true
   }
   process.exit(failed ? 1 : 0)
 }
