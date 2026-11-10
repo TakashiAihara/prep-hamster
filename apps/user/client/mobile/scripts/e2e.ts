@@ -349,6 +349,8 @@ async function e2e() {
   const adbServerLog =
     process.env["ANDROID_ADB_LOG_PATH"] ||
     join(process.env["TMPDIR"] || "/tmp", `adb.${process.getuid?.() ?? 0}.log`)
+  // a failed copy must not leave the previous run's log looking like this run's
+  rmSync(join(cacheDir, "adb-server.log"), { force: true })
   cleanups.push(() => {
     try {
       copyFileSync(adbServerLog, join(cacheDir, "adb-server.log"))
