@@ -399,23 +399,19 @@ async function e2e() {
   // A busy emulator shows "Pixel Launcher isn't responding" over the app, and every flow then
   // fails to find its screen (seen on CI, also with hide_error_dialogs set). The flows start the
   // app with `am start` and need no launcher; without it the home is Settings' blank FallbackHome.
-  warnIfFailed(
-    "disabling Pixel Launcher",
-    spawnSync(
-      adb,
-      [
-        "-s",
-        serial,
-        "shell",
-        "pm",
-        "disable-user",
-        "--user",
-        "0",
-        "com.google.android.apps.nexuslauncher",
-      ],
-      { stdio: "inherit", timeout: 30_000 },
-    ),
-  )
+  // E2E_DEVICE may be someone's everyday emulator: put the launcher back unless it was already off
+  const launcher = "com.google.android.apps.nexuslauncher"
+  const pm = (...args: string[]) =>
+    spawnSync(adb, ["-s", serial, "shell", "pm", ...args], { encoding: "utf-8", timeout: 30_000 })
+  if (!(pm("list", "packages", "-d").stdout ?? "").includes(`package:${launcher}`)) {
+    const disabled = pm("disable-user", "--user", "0", launcher)
+    warnIfFailed("disabling Pixel Launcher", disabled)
+    if (disabled.status === 0) {
+      cleanups.push(() =>
+        warnIfFailed("re-enabling Pixel Launcher", pm("enable", "--user", "0", launcher)),
+      )
+    }
+  }
   run(adb, ["-s", serial, "install", "-r", apk])
 
   // The first launch on a fresh emulator is far slower than the rest (seen failing whichever flow
