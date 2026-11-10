@@ -72,7 +72,10 @@ function devSessionUrl(): string {
 }
 
 function runFlows(): { captured: string[]; failed: string[] } {
-  const flows = readdirSync(flowsDir).filter((f) => f.endsWith(".yaml"))
+  // readdir order is not defined; keep local and CI runs in the same order
+  const flows = readdirSync(flowsDir)
+    .filter((f) => f.endsWith(".yaml"))
+    .toSorted()
   if (flows.length === 0) {
     console.error("[capture-screens] flow が見つかりません: ", flowsDir)
     process.exit(1)
@@ -85,6 +88,8 @@ function runFlows(): { captured: string[]; failed: string[] } {
   // 複数台つながっているとき (scripts/e2e.ts が自前の emulator を起動したとき) は ANDROID_SERIAL の端末で流す
   const serial = process.env["ANDROID_SERIAL"]
   const device = serial ? ["--device", serial] : []
+  // scripts/e2e.ts keeps each flow's failure screenshots and UI hierarchy here (CI uploads them)
+  const debugDir = process.env["MAESTRO_DEBUG_DIR"]
 
   const captured: string[] = []
   const failed: string[] = []
@@ -95,7 +100,14 @@ function runFlows(): { captured: string[]; failed: string[] } {
     const sessionUrl = devSessionUrl()
     const r = spawnSync(
       "maestro",
-      [...device, "test", "-e", `DEV_SESSION_URL=${sessionUrl}`, flowPath],
+      [
+        ...device,
+        "test",
+        ...(debugDir ? [`--debug-output=${join(debugDir, flow)}`, "--flatten-debug-output"] : []),
+        "-e",
+        `DEV_SESSION_URL=${sessionUrl}`,
+        flowPath,
+      ],
       { cwd: outDir, stdio: "inherit" },
     )
     if (r.status !== 0) {

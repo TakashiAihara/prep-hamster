@@ -86,4 +86,5 @@ jobs:
             docs/design/screens-as-is/
             docs/design/screens-as-is.md
             .cache/e2e/*.log
+            .cache/e2e/maestro/
           if-no-files-found: warn

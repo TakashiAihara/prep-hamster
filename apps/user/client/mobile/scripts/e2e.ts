@@ -19,7 +19,15 @@
 //   JAVA_HOME          JDK 17 for gradle
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
 const here = dirname(new URL(import.meta.url).pathname)
@@ -27,9 +35,19 @@ const mobileRoot = resolve(here, "..")
 const repoRoot = resolve(mobileRoot, "../../../..")
 const cacheDir = join(repoRoot, ".cache/e2e")
 
-const sbPort = Number(process.env["E2E_SUPABASE_PORT"] ?? 25321)
-const apiPort = Number(process.env["E2E_API_PORT"] ?? 3100)
-const metroPort = Number(process.env["E2E_METRO_PORT"] ?? 8091)
+function portEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  const port = raw === undefined ? fallback : Number(raw)
+  if (!Number.isInteger(port) || port < 1024 || port > 65534) {
+    console.error(`[e2e] ${name} must be a port number (1024-65534), got ${raw}`)
+    process.exit(2)
+  }
+  return port
+}
+
+const sbPort = portEnv("E2E_SUPABASE_PORT", 25321)
+const apiPort = portEnv("E2E_API_PORT", 3100)
+const metroPort = portEnv("E2E_METRO_PORT", 8091)
 const avd = process.env["E2E_AVD"] ?? "prep_hamster"
 const sdk = process.env["ANDROID_HOME"] ?? join(process.env["HOME"] ?? "", "Android/sdk")
 const adb = join(sdk, "platform-tools/adb")
@@ -125,7 +143,9 @@ function buildApk(): string {
     { cwd: join(mobileRoot, "android"), env },
   )
   mkdirSync(cacheDir, { recursive: true })
-  copyFileSync(join(mobileRoot, "android/app/build/outputs/apk/debug/app-debug.apk"), apk)
+  // rename is atomic: an interrupted copy must not look like a cached APK on the next run
+  copyFileSync(join(mobileRoot, "android/app/build/outputs/apk/debug/app-debug.apk"), `${apk}.tmp`)
+  renameSync(`${apk}.tmp`, apk)
   log(`APK built: ${apk}`)
   return apk
 }
@@ -155,16 +175,29 @@ function background(
 
 function startSupabase(): { secretKey: string; publishableKey: string } {
   // Own project_id and ports, so a `supabase start` of this repo (or another E2E checkout) is untouched
-  let config = readFileSync(join(repoRoot, "supabase/config.toml"), "utf-8")
-  for (const [from, to] of [
-    [/^project_id = .*$/m, `project_id = "prep-hamster-e2e-${sbPort}"`],
-    [/^port = 54321$/m, `port = ${sbPort}`],
-    [/^port = 54322$/m, `port = ${sbPort + 1}`],
-    [/^shadow_port = 54320$/m, `shadow_port = ${sbPort - 1}`],
-  ] as const) {
-    // A silent miss would start Supabase on the dev ports
-    if (!from.test(config)) throw new Error(`supabase/config.toml has no line matching ${from}`)
-    config = config.replace(from, to)
+  // Line by line against the original, so a new value can never be rewritten by a later rule
+  const rules: [RegExp, string][] = [
+    [/^project_id = .*$/, `project_id = "prep-hamster-e2e-${sbPort}"`],
+    [/^port = 54321$/, `port = ${sbPort}`],
+    [/^port = 54322$/, `port = ${sbPort + 1}`],
+    [/^shadow_port = 54320$/, `shadow_port = ${sbPort - 1}`],
+  ]
+  const hits = rules.map(() => 0)
+  const config = readFileSync(join(repoRoot, "supabase/config.toml"), "utf-8")
+    .split("\n")
+    .map((line) => {
+      const i = rules.findIndex(([from]) => from.test(line))
+      if (i < 0) return line
+      hits[i]!++
+      return rules[i]![1]
+    })
+    .join("\n")
+  // A miss would start Supabase on the dev ports; a double hit would give two services one port
+  const bad = rules.filter((_, i) => hits[i] !== 1)
+  if (bad.length > 0) {
+    throw new Error(
+      `supabase/config.toml: expected one line each for ${bad.map(([r]) => r).join(" ")}`,
+    )
   }
   mkdirSync(join(sbWorkdir, "supabase"), { recursive: true })
   writeFileSync(join(sbWorkdir, "supabase/config.toml"), config)
@@ -174,7 +207,7 @@ function startSupabase(): { secretKey: string; publishableKey: string } {
       stdio: "inherit",
     })
   // A run killed before its teardown leaves the volumes; drop them so the DB starts empty
-  stop()
+  if (stop().status !== 0) throw new Error("supabase stop failed; the DB would not start empty")
   cleanups.push(stop)
   // Only Auth (gotrue), its gateway (kong) and the DB are used by the app and the API
   run("bunx", [
@@ -274,6 +307,10 @@ function teardown() {
 
 async function e2e() {
   mkdirSync(cacheDir, { recursive: true })
+  // Built first: the port check right before the services start leaves no multi-minute window in
+  // which a second run passes it and then stops this run's Supabase (same project_id)
+  const apk = buildApk()
+
   const ports = [sbPort - 1, sbPort, sbPort + 1, apiPort, metroPort]
   // the emulator takes its console port and the next one for adb
   if (!process.env["E2E_DEVICE"]) ports.push(emulatorPort, emulatorPort + 1)
@@ -283,7 +320,6 @@ async function e2e() {
     throw new Error(`port ${busy.join(", ")} in use (another E2E run or dev stack?)`)
   }
 
-  const apk = buildApk()
   const { secretKey, publishableKey } = startSupabase()
 
   const dbUrl = `postgresql://postgres:postgres@127.0.0.1:${sbPort + 1}/postgres`
@@ -326,10 +362,31 @@ async function e2e() {
   const serial = process.env["E2E_DEVICE"] || (await bootEmulator())
   run(adb, ["-s", serial, "install", "-r", apk])
 
+  // The first launch on a fresh emulator is far slower than the rest (seen failing whichever flow
+  // ran first, at a 30 s or 15 s wait). Launch once up to the sign-in screen before any flow.
+  const warmup = join(cacheDir, "warmup.yaml")
+  writeFileSync(
+    warmup,
+    [
+      "appId: com.example.prephamster",
+      "---",
+      "- launchApp:",
+      "    clearState: true",
+      "- extendedWaitUntil:",
+      "    visible:",
+      '      text: "Google でサインイン"',
+      "    timeout: 180000",
+      "",
+    ].join("\n"),
+  )
+  run("maestro", ["--device", serial, "test", warmup])
+  log("warmed up the app")
+
   run("bun", ["run", join(here, "capture-screens.ts")], {
     env: {
       ...process.env,
       ANDROID_SERIAL: serial,
+      MAESTRO_DEBUG_DIR: join(cacheDir, "maestro"),
       // capture-screens calls bare adb; use the SDK's even when platform-tools is not on PATH
       PATH: `${dirname(adb)}:${process.env["PATH"] ?? ""}`,
       SUPABASE_URL: sbUrl,
@@ -357,7 +414,7 @@ async function main() {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
       teardown()
-      process.exit(130)
+      process.exit(signal === "SIGINT" ? 130 : 143)
     })
   }
 

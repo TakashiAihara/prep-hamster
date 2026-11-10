@@ -1,11 +1,10 @@
 # テスト用ユーザーとしてサインインする (scripts/capture-screens.ts が scripts/dev-session.ts の deep link を
 # DEV_SESSION_URL で渡す)。起動直後に開いた deep link は失われる (アプリが受け取れる前に届く) ので、
 # サインイン画面が出てから開く。サインインが済んだかは呼び出し側が次の画面を待って確かめる。
-# 起動したばかりの emulator での最初の起動は、Metro から JS を受け取り終わるまで 30 秒を超えた (scripts/e2e.ts)
 appId: com.example.prephamster
 ---
 - extendedWaitUntil:
     visible:
       text: "Google でサインイン"
-    timeout: 90000
+    timeout: 30000
 - openLink: ${DEV_SESSION_URL}
