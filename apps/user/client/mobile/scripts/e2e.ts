@@ -26,6 +26,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs"
 import { dirname, join, resolve } from "node:path"
@@ -123,6 +124,8 @@ function buildApk(): string {
   // prebuild rewrites the android / ios scripts in package.json; keep the committed file as is
   const pkgPath = join(mobileRoot, "package.json")
   const pkg = readFileSync(pkgPath, "utf-8")
+  // Generated and gitignored; a previous build's copy would make prebuild refuse to regenerate it
+  rmSync(join(mobileRoot, "android"), { recursive: true, force: true })
   try {
     run("bunx", ["expo", "prebuild", "--platform", "android", "--no-install"], { cwd: mobileRoot })
   } finally {
@@ -379,7 +382,11 @@ async function e2e() {
       "",
     ].join("\n"),
   )
-  run("maestro", ["--device", serial, "test", warmup])
+  // maestro talks to the device through adb; use the SDK's even when platform-tools is not on PATH
+  const pathEnv = `${dirname(adb)}:${process.env["PATH"] ?? ""}`
+  run("maestro", ["--device", serial, "test", warmup], {
+    env: { ...process.env, PATH: pathEnv },
+  })
   log("warmed up the app")
 
   run("bun", ["run", join(here, "capture-screens.ts")], {
@@ -387,8 +394,7 @@ async function e2e() {
       ...process.env,
       ANDROID_SERIAL: serial,
       MAESTRO_DEBUG_DIR: join(cacheDir, "maestro"),
-      // capture-screens calls bare adb; use the SDK's even when platform-tools is not on PATH
-      PATH: `${dirname(adb)}:${process.env["PATH"] ?? ""}`,
+      PATH: pathEnv,
       SUPABASE_URL: sbUrl,
       SUPABASE_SECRET_KEY: secretKey,
     },
