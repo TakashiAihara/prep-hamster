@@ -99,16 +99,26 @@ async function findRecordedDeltaEvent(
     reason: string | null
   },
 ): Promise<RecordedDeltaEvent> {
-  const [event] = await db.select().from(stockEvents).where(eq(stockEvents.id, eventId)).limit(1)
-  if (!event) return { kind: "none" }
+  // quantity_delta は real (float4) で、DB は有効 6 桁に丸めた文字列で返すため JS 側では元の値と比べられない。
+  // 一致は DB の中で判定する (型の付かない引数は列の型 real として比べられる)
+  const [found] = await db
+    .select({
+      event: stockEvents,
+      sameQuantity: sql<boolean>`${stockEvents.quantityDelta} = ${expected.quantityDelta}`,
+    })
+    .from(stockEvents)
+    .where(eq(stockEvents.id, eventId))
+    .limit(1)
+  if (!found) return { kind: "none" }
+  const { event } = found
   const same =
     event.stockId === expected.stockId &&
     event.eventType === expected.eventType &&
-    event.quantityDelta === expected.quantityDelta &&
+    found.sameQuantity &&
     event.reason === expected.reason
   if (!same) return { kind: "conflict" }
   const [stock] = await db.select().from(stocks).where(eq(stocks.id, expected.stockId)).limit(1)
-  if (!stock) return { kind: "conflict" }
+  if (!stock) throw new Error("stock for a recorded event is missing")
   return { kind: "replay", stock, event }
 }
 
@@ -629,8 +639,8 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
       return c.json(access.body, access.status)
     }
 
-    // eventId 付きの再送は数量チェックより先に記録済み結果を返す
-    // (消費済みで残量が足りなくなっていても、記録時の結果をそのまま返すため)。
+    // eventId 付きの再送は数量チェックより先に、記録済みイベントと現在の在庫を返す
+    // (消費済みで残量が足りなくなった後の再送も、記録済みの結果として返すため)。
     const respondRecorded = async () => {
       if (!body.eventId) return null
       const recorded = await findRecordedDeltaEvent(db, body.eventId, {

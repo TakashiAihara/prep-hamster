@@ -37,7 +37,7 @@ const detail = (s: StockDto): StockDetail => ({ stock: s, itemName: "Tomato", lo
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
-// 応答の stock は呼び出しごとに quantity を引いた値を返す (サーバの consume / discard を模す)。
+// 応答は既定で quantity 4 の stock を返す (opts.result で差し替える)。
 function harness(
   opts: {
     result?: () => Response
@@ -514,4 +514,67 @@ test("the same consume on another stock after an unknown result gets a new event
   const other = harness({ pending, newEventId, stock: stock({ id: OTHER_ID }) })
   await other.actions.consume("1")
   expect(sentEventIds(other)).toEqual(["event-2"])
+})
+
+test("an unknown result tells the user that pressing again with the same amount is safe", async () => {
+  const h = harness({ result: networkError })
+  await h.actions.consume("1")
+  expect(lastMessage(h)).toEqual({
+    kind: "error",
+    text: "Network request failed (同じ数量でもう一度押しても二重には記録されません)",
+  })
+})
+
+test("a definite failure shows the API message as is", async () => {
+  const h = harness({
+    result: () => json({ error: { code: "INSUFFICIENT_QUANTITY", message: "足りません" } }, 422),
+  })
+  await h.actions.consume("1")
+  expect(lastMessage(h)).toEqual({ kind: "error", text: "足りません" })
+})
+
+test("the pending operation is recorded before the request is sent", async () => {
+  const pending: PendingOpRef = { current: null }
+  let seenWhileSending: PendingOpRef["current"] = null
+  const h = harness({
+    pending,
+    result: () => {
+      seenWhileSending = pending.current
+      return json({ stock: stock({ quantity: 4 }), event: {} })
+    },
+  })
+  await h.actions.consume("1")
+  expect(seenWhileSending).toMatchObject({ kind: "consume", quantity: 1, eventId: "event-1" })
+})
+
+test("after the screen shows a changed quantity, the same consume gets a new eventId", async () => {
+  // 結果が不明な消費の後に、取り直しで残量が 5 から 3 に変わった = 前の消費は通っていた。
+  // 同じ数量をもう一度押すのは新しい消費なので、古い eventId を使い回さない
+  const pending: PendingOpRef = { current: null }
+  const newEventId = idSource()
+  const failing = harness({
+    result: networkError,
+    pending,
+    newEventId,
+    stock: stock({ quantity: 5 }),
+  })
+  await failing.actions.consume("2")
+  const refreshed = harness({ pending, newEventId, stock: stock({ quantity: 3 }) })
+  await refreshed.actions.consume("2")
+  expect(sentEventIds(refreshed)).toEqual(["event-2"])
+})
+
+test("while the screen still shows the same quantity, the same consume reuses the eventId", async () => {
+  const pending: PendingOpRef = { current: null }
+  const newEventId = idSource()
+  const failing = harness({
+    result: networkError,
+    pending,
+    newEventId,
+    stock: stock({ quantity: 5 }),
+  })
+  await failing.actions.consume("2")
+  const again = harness({ pending, newEventId, stock: stock({ quantity: 5 }) })
+  await again.actions.consume("2")
+  expect(sentEventIds(again)).toEqual(["event-1"])
 })

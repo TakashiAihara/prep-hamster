@@ -266,7 +266,10 @@ async function waitForLockWaiters(count: number) {
   for (let i = 0; i < 100; i++) {
     // oxlint-disable-next-line no-await-in-loop
     const rows = (await testDb.execute(
-      sql`select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock'`,
+      // 共有の Postgres なので、この DB で在庫を更新しようとして待っている要求だけを数える
+      sql`select count(*)::int as n from pg_stat_activity
+          where wait_event_type = 'Lock' and datname = current_database()
+            and query ilike 'update "stocks"%'`,
     )) as unknown as Array<{ n: number }>
     if ((rows[0]?.n ?? 0) >= count) return
     // oxlint-disable-next-line no-await-in-loop
@@ -306,9 +309,15 @@ test("a duplicate that collides at the insert with different content returns 422
   ]
   await waitForLockWaiters(2)
   await lock.release()
-  const statuses = (await Promise.all(pending)).map((r) => r.status).toSorted()
+  const responses = await Promise.all(pending)
+  const statuses = responses.map((r) => r.status).toSorted()
 
   expect(statuses).toEqual([200, 422])
+  // 負けた 1 本の数量更新は rollback され、勝った 1 本の分だけが残る
+  const winner = responses.find((r) => r.status === 200)
+  const won = (await winner?.json()) as ActionBody
+  expect(await quantityOf(stockId)).toBe(10 + won.event.quantityDelta)
+  expect(won.stock.quantity).toBe(10 + won.event.quantityDelta)
   expect(await eventsOf(stockId)).toHaveLength(1)
 })
 
@@ -325,6 +334,36 @@ test("a discard duplicate that collides at the event insert is answered from the
   const responses = await Promise.all(pending)
 
   expect(responses.map((r) => r.status)).toEqual([200, 200])
+  const bodies = (await Promise.all(responses.map((r) => r.json()))) as ActionBody[]
+  expect(bodies.map((b) => [b.event.id, b.event.eventType, b.event.quantityDelta])).toEqual([
+    [EVENT_ID, "DISCARD", -1],
+    [EVENT_ID, "DISCARD", -1],
+  ])
   expect(await quantityOf(stockId)).toBe(9)
   expect(await eventsOf(stockId)).toHaveLength(1)
+})
+
+test("resending a quantity that a real column cannot store exactly still replays", async () => {
+  // quantity_delta は単精度なので、保存値と送った倍精度の値は === では一致しない
+  const { stockId, post } = await setup(10)
+
+  for (const quantityDelta of [0.123456789, 1 / 3]) {
+    const eventId = quantityDelta === 1 / 3 ? OTHER_EVENT_ID : EVENT_ID
+    // oxlint-disable-next-line no-await-in-loop
+    const first = await post(stockId, "consume", { quantityDelta, eventId })
+    // oxlint-disable-next-line no-await-in-loop
+    const resend = await post(stockId, "consume", { quantityDelta, eventId })
+    expect(first.status).toBe(200)
+    expect(resend.status).toBe(200)
+  }
+  expect(await eventsOf(stockId)).toHaveLength(2)
+})
+
+test("a quantity that differs beyond the real column precision is still treated as different", async () => {
+  const { stockId, post } = await setup(10)
+
+  await post(stockId, "consume", { quantityDelta: 0.5, eventId: EVENT_ID })
+  const res = await post(stockId, "consume", { quantityDelta: 0.5001, eventId: EVENT_ID })
+
+  expect(res.status).toBe(422)
 })

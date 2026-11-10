@@ -138,6 +138,7 @@ export type PendingOp = {
   quantity: number
   reason: string | null
   eventId: string
+  baseQuantity: number
 }
 
 export type PendingOpRef = { current: PendingOp | null }
@@ -200,12 +201,23 @@ export function createStockActions(deps: StockActionDeps) {
       pending.kind === kind &&
       pending.stockId === stock.id &&
       pending.quantity === quantity &&
-      pending.reason === reason
+      pending.reason === reason &&
+      pending.baseQuantity === stock.quantity
         ? pending.eventId
         : deps.newEventId()
-    deps.pending.current = { kind, stockId: stock.id, quantity, reason, eventId }
+    deps.pending.current = {
+      kind,
+      stockId: stock.id,
+      quantity,
+      reason,
+      eventId,
+      baseQuantity: stock.quantity,
+    }
     const r = await send(eventId)
-    if (!r.ok && r.uncertain) return r
+    if (!r.ok && r.uncertain) {
+      // 結果が不明なので、同じ数量で押し直しても二重記録されないことを伝える
+      return { ...r, message: `${r.message} (同じ数量でもう一度押しても二重には記録されません)` }
+    }
     deps.pending.current = null
     return r
   }
