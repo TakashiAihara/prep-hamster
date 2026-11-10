@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
-import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, eq, gte, isNull, lte, or, sql } from "drizzle-orm"
 import { items, locations, stockEvents, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
@@ -125,6 +125,11 @@ async function findRecordedDeltaEvent(
   if (!stock) throw new Error("stock for a recorded event is missing")
   return { kind: "replay", stock, event }
 }
+
+// consume / discard の数量更新が 0 行を返したときに transaction を抜けるための印。
+// 早期チェックを通った後に並行リクエストが残量を減らした (または在庫を削除した)
+// 場合に起きる。catch 側で最新の行を読み直して 422 / 404 を決める。
+class StockDeltaNotApplied extends Error {}
 
 const listStocksRoute = createRoute({
   method: "get",
@@ -690,13 +695,24 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
     try {
       const result = await db.transaction(async (tx) => {
         const now = new Date()
+        // 読み取り時の数量から計算した値を書き戻すと並行リクエスト同士で減算を
+        // 上書きし合うため、DB 側で引き算し、残量が足りる行だけを更新する。
         const [updated] = await tx
           .update(stocks)
-          .set({ quantity: newQty, updatedAt: now })
-          .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+          .set({
+            quantity: sql`${stocks.quantity} - ${body.quantityDelta}`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(stocks.id, id),
+              isNull(stocks.deletedAt),
+              gte(stocks.quantity, body.quantityDelta),
+            ),
+          )
           .returning()
         if (!updated) {
-          throw new Error("stock update returned no row")
+          throw new StockDeltaNotApplied()
         }
         const [event] = await tx
           .insert(stockEvents)
@@ -727,6 +743,27 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
       if (isUniqueViolation(err)) {
         const recordedReply = await respondRecorded()
         if (recordedReply) return recordedReply
+      }
+      if (err instanceof StockDeltaNotApplied) {
+        // eventId 付きの再送が数量不足で UPDATE をすり抜けた場合も、記録済み
+        // イベントがあれば再送と同じ結果を返す。
+        const recordedReply = await respondRecorded()
+        if (recordedReply) return recordedReply
+        // 早期チェックの後で並行リクエストが残量を減らした (または削除した) ので、
+        // 最新の行を読み直して数量不足か削除済みかを判定する。
+        const [current] = await db.select().from(stocks).where(eq(stocks.id, id)).limit(1)
+        if (!current || current.deletedAt) {
+          return c.json({ error: { code: "NOT_FOUND", message: "stock が見つかりません" } }, 404)
+        }
+        return c.json(
+          {
+            error: {
+              code: "INSUFFICIENT_QUANTITY",
+              message: `在庫数量 ${current.quantity} に対して消費量 ${body.quantityDelta} が大きすぎます`,
+            },
+          },
+          422,
+        )
       }
       throw err
     }
@@ -787,13 +824,24 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
     try {
       const result = await db.transaction(async (tx) => {
         const now = new Date()
+        // 読み取り時の数量から計算した値を書き戻すと並行リクエスト同士で減算を
+        // 上書きし合うため、DB 側で引き算し、残量が足りる行だけを更新する。
         const [updated] = await tx
           .update(stocks)
-          .set({ quantity: newQty, updatedAt: now })
-          .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+          .set({
+            quantity: sql`${stocks.quantity} - ${body.quantityDelta}`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(stocks.id, id),
+              isNull(stocks.deletedAt),
+              gte(stocks.quantity, body.quantityDelta),
+            ),
+          )
           .returning()
         if (!updated) {
-          throw new Error("stock update returned no row")
+          throw new StockDeltaNotApplied()
         }
         const [event] = await tx
           .insert(stockEvents)
@@ -821,6 +869,27 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
       if (isUniqueViolation(err)) {
         const recordedReply = await respondRecorded()
         if (recordedReply) return recordedReply
+      }
+      if (err instanceof StockDeltaNotApplied) {
+        // eventId 付きの再送が数量不足で UPDATE をすり抜けた場合も、記録済み
+        // イベントがあれば再送と同じ結果を返す。
+        const recordedReply = await respondRecorded()
+        if (recordedReply) return recordedReply
+        // 早期チェックの後で並行リクエストが残量を減らした (または削除した) ので、
+        // 最新の行を読み直して数量不足か削除済みかを判定する。
+        const [current] = await db.select().from(stocks).where(eq(stocks.id, id)).limit(1)
+        if (!current || current.deletedAt) {
+          return c.json({ error: { code: "NOT_FOUND", message: "stock が見つかりません" } }, 404)
+        }
+        return c.json(
+          {
+            error: {
+              code: "INSUFFICIENT_QUANTITY",
+              message: `在庫数量 ${current.quantity} に対して廃棄量 ${body.quantityDelta} が大きすぎます`,
+            },
+          },
+          422,
+        )
       }
       throw err
     }

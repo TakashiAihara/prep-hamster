@@ -1,10 +1,11 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
-import { eq, sql } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { stockEvents, stocks } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import { seedGroupWithMembership, seedItem, seedLocation, seedStock, seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
 import { bearer, e2eAuth } from "./auth-helper"
+import { holdStockRow, waitForLockWaiters } from "./lock-helper"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -242,41 +243,6 @@ test("a discard resend is answered from the record even when the remaining quant
   expect(((await resend.json()) as ActionBody).stock.quantity).toBe(1)
   expect(await eventsOf(stockId)).toHaveLength(1)
 })
-
-// 別の接続で在庫の行を FOR UPDATE で押さえ、release で放して commit まで待つ
-async function holdStockRow(stockId: string) {
-  const held = Promise.withResolvers<void>()
-  const taken = Promise.withResolvers<void>()
-  const locker = testDb.transaction(async (tx) => {
-    await tx.execute(sql`select id from stocks where id = ${stockId} for update`)
-    taken.resolve()
-    await held.promise
-  })
-  await taken.promise
-  return {
-    release: async () => {
-      held.resolve()
-      await locker
-    },
-  }
-}
-
-async function waitForLockWaiters(count: number) {
-  // 待ちの数が揃うまで順に見に行くポーリングなので、ループの中で待つ
-  for (let i = 0; i < 100; i++) {
-    // oxlint-disable-next-line no-await-in-loop
-    const rows = (await testDb.execute(
-      // 共有の Postgres なので、この DB で在庫を更新しようとして待っている要求だけを数える
-      sql`select count(*)::int as n from pg_stat_activity
-          where wait_event_type = 'Lock' and datname = current_database()
-            and query ilike 'update "stocks"%'`,
-    )) as unknown as Array<{ n: number }>
-    if ((rows[0]?.n ?? 0) >= count) return
-    // oxlint-disable-next-line no-await-in-loop
-    await new Promise((r) => setTimeout(r, 50))
-  }
-  throw new Error(`lock waiters did not reach ${count}`)
-}
 
 test("a duplicate that collides at the event insert is answered from the record", async () => {
   // 在庫の行を押さえて 2 本とも記録の照会を通り抜けさせ、数量更新で待たせてから放す。
