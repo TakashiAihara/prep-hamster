@@ -591,7 +591,7 @@ test("after the screen shows a changed quantity, the same consume gets a new eve
   await refreshed.actions.consume("2")
   expect(sentEventIds(refreshed)).toEqual(["event-2"])
   // 残量 5 のときの記録は、残量 5 を表示したままの別の画面が押し直すときのために残す
-  expect(pending.size).toBe(1)
+  expect([...pending.values()].map((e) => e.eventId)).toEqual(["event-1"])
 })
 
 test("a send from a screen showing a lower quantity keeps another screen's unknown result", async () => {
