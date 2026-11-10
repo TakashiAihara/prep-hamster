@@ -135,8 +135,6 @@ export type ActionMessage = { kind: "ok" | "error"; text: string }
 // 結果が不明な操作の eventId を操作内容ごとに保ち、同じ内容の押し直しで使い回す
 export type PendingEntry = {
   eventId: string
-  stockId: string
-  baseQuantity: number
   inFlight: number
   uncertain: boolean
 }
@@ -158,6 +156,7 @@ export type StockActionDeps = {
 }
 
 // 詳細画面を閉じて開き直しても eventId を引き継ぐため画面の外に置く。メモリだけなので再起動で消える
+// 結果不明のまま残った記録はアプリを閉じるまで残す。数も量も小さい
 export const sharedPendingOps: PendingOps = new Map()
 
 export function createStockActions(deps: StockActionDeps) {
@@ -199,19 +198,10 @@ export function createStockActions(deps: StockActionDeps) {
     send: (eventId: string) => Promise<ActionResult>,
   ): Promise<ActionResult> {
     const key = JSON.stringify([kind, stock.id, quantity, reason, stock.quantity])
-    // 残量が変わった記録はもう一致しない。残すと残量が元に戻ったとき古い eventId を
-    // 再生してしまうので、送信中のものを除いて消す
-    for (const [k, e] of deps.pending) {
-      if (e.stockId === stock.id && e.baseQuantity !== stock.quantity && e.inFlight === 0) {
-        deps.pending.delete(k)
-      }
-    }
     let entry = deps.pending.get(key)
     if (entry === undefined) {
       entry = {
         eventId: deps.newEventId(),
-        stockId: stock.id,
-        baseQuantity: stock.quantity,
         inFlight: 0,
         uncertain: false,
       }

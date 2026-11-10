@@ -142,8 +142,10 @@ export async function loadStockDetail(
   }
 }
 
-// 400 / 404 / 422 はこのリクエストの内容への判定なので、適用されていないと分かる。
-// それ以外は eventId を照合する前に断られたか、先の送信が適用されたか分からない
+// 400 / 422 はこのリクエストの内容への判定、404 は在庫が無いという意味なので、
+// この送信は適用されていないと分かる。
+// それ以外は eventId を照合する前に断られたか、先の送信が適用されたかを
+// 何も言わないので結果不明とする
 function isUncertainStatus(status: number) {
   return status !== 400 && status !== 404 && status !== 422
 }

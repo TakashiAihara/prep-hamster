@@ -590,8 +590,19 @@ test("after the screen shows a changed quantity, the same consume gets a new eve
   const refreshed = harness({ pending, newEventId, stock: stock({ quantity: 3 }) })
   await refreshed.actions.consume("2")
   expect(sentEventIds(refreshed)).toEqual(["event-2"])
-  // 残量 5 のときの記録はもう一致しないので、残さない
-  expect(pending.size).toBe(0)
+  // 残量 5 のときの記録は、残量 5 を表示したままの別の画面が押し直すときのために残す
+  expect(pending.size).toBe(1)
+})
+
+test("a send from a screen showing a lower quantity keeps another screen's unknown result", async () => {
+  // 残量 5 のまま開いている画面の結果不明の記録を、残量 3 を表示した同じ在庫の画面の操作で消さない
+  const { pending, failing } = twoScreens({ result: networkError })
+  await failing.actions.consume("2")
+  const lower = harness({ pending, newEventId: () => "event-2", stock: stock({ quantity: 3 }) })
+  await lower.actions.consume("1")
+  const again = harness({ pending, newEventId: () => "event-unused" })
+  await again.actions.consume("2")
+  expect(sentEventIds(again)).toEqual(["event-1"])
 })
 
 test("while the screen still shows the same quantity, the same consume reuses the eventId", async () => {
