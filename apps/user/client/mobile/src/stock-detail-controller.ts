@@ -218,7 +218,7 @@ export function createStockActions(deps: StockActionDeps) {
       // 結果が不明なので押し直してよいことを伝える。取り直しで残量が変わった後は新しい操作になるので、条件を添える
       return {
         ...r,
-        message: `${r.message} (残量の表示が変わっていなければ、同じ数量でもう一度押しても二重には記録されません)`,
+        message: `${r.message} (残量の表示が変わっていなければ、同じ内容でもう一度押しても二重には記録されません)`,
       }
     }
     deps.pending.current = null

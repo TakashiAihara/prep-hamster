@@ -329,7 +329,13 @@ export const stockEventDtoSchema = z
 // stock_events には `-quantityDelta` を保存することで集計時の SUM 整合を保つ。
 export const stockQuantityDeltaBodyDtoSchema = z
   .object({
-    quantityDelta: z.number().positive(),
+    // 保存先の列は real (float4)。単精度に丸めて 0 や無限大になる値は DB に渡す前に弾く
+    quantityDelta: z
+      .number()
+      .positive()
+      .refine((v) => Math.fround(v) > 0 && Number.isFinite(Math.fround(v)), {
+        message: "数量が大きすぎるか小さすぎます",
+      }),
     reason: z.string().max(500).nullable().optional(),
     eventId: z.string().guid().optional(),
   })

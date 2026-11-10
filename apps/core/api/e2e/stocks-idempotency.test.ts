@@ -367,3 +367,16 @@ test("a quantity that differs beyond the real column precision is still treated 
 
   expect(res.status).toBe(422)
 })
+
+test("a quantity outside the real column range is rejected with 422 before touching the database", async () => {
+  const { stockId, post } = await setup(10)
+
+  for (const quantityDelta of [1e39, 1e-46]) {
+    // oxlint-disable-next-line no-await-in-loop
+    const res = await post(stockId, "consume", { quantityDelta, eventId: EVENT_ID })
+    expect(res.status).toBe(422)
+    // oxlint-disable-next-line no-await-in-loop
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_ERROR")
+  }
+  expect(await quantityOf(stockId)).toBe(10)
+})

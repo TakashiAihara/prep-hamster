@@ -521,7 +521,7 @@ test("an unknown result tells the user that pressing again with the same amount 
   await h.actions.consume("1")
   expect(lastMessage(h)).toEqual({
     kind: "error",
-    text: "Network request failed (残量の表示が変わっていなければ、同じ数量でもう一度押しても二重には記録されません)",
+    text: "Network request failed (残量の表示が変わっていなければ、同じ内容でもう一度押しても二重には記録されません)",
   })
 })
 
