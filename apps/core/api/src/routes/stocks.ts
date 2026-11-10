@@ -35,6 +35,7 @@ const ListQuerySchema = z.object({
   locationId: z.string().guid().optional(),
   expiringBefore: z.string().date().optional(),
   includeExpired: booleanQuery.optional(),
+  includeEmpty: booleanQuery.optional(),
 })
 
 // drizzle 行を API DTO 形式 (timestamp は ISO string、id は plain UUID) に変換
@@ -420,7 +421,8 @@ const deleteStockRoute = createRoute({
 
 export const stocksRouter = new OpenAPIHono<AppEnv>()
   .openapi(listStocksRoute, async (c) => {
-    const { groupId, categoryId, locationId, expiringBefore, includeExpired } = c.req.valid("query")
+    const { groupId, categoryId, locationId, expiringBefore, includeExpired, includeEmpty } =
+      c.req.valid("query")
     const db = c.get("db")
 
     // YYYY-MM-DD 文字列で比較するため、PG 上の DATE 列に対しても辞書順 = 日付順で正しく動く。
@@ -446,6 +448,11 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
         or(isNull(stocks.bestBeforeDate), sql`${stocks.bestBeforeDate} > ${today}`),
       )
       if (notExpired) conditions.push(notExpired)
+    }
+    if (!includeEmpty) {
+      // 使い切った在庫を既定で除外する。端末の表示判定と同じく小数第 6 位で丸めて比べる
+      // (消費の繰り返しで残る浮動小数点の端数も使い切り扱いにするため)。
+      conditions.push(sql`round(${stocks.quantity}::numeric, 6) > 0`)
     }
 
     const baseQuery = db

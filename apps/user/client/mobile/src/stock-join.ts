@@ -1,5 +1,5 @@
 import type { ApiClient } from "@prep-hamster/api-client"
-import { isEmptyQuantity, UNKNOWN_ITEM_NAME, UNKNOWN_LOCATION_NAME } from "./stock-detail"
+import { UNKNOWN_ITEM_NAME, UNKNOWN_LOCATION_NAME } from "./stock-detail"
 
 export type StockListItem = {
   id: string
@@ -42,11 +42,6 @@ export function joinStocksWithMasters(
   }))
 }
 
-// 残量 0 (消費 / 廃棄し切った在庫) は API が行を残すので、一覧では隠す。
-export function visibleStocks(rows: StockListItem[]): StockListItem[] {
-  return rows.filter((r) => !isEmptyQuantity(r.quantity))
-}
-
 // API の一覧が includeExpired なしで除外するのと同じ基準: 期限日が today 以前なら期限切れ。
 // today は API と同じ UTC の YYYY-MM-DD。
 export function isExpired(
@@ -79,5 +74,5 @@ export async function loadStockRows(client: ApiClient, groupId: string): Promise
   const stocks = (await stocksRes.json()).stocks
   const items = (await itemsRes.json()).items
   const locations = (await locationsRes.json()).locations
-  return { ok: true, rows: visibleStocks(joinStocksWithMasters(stocks, items, locations)) }
+  return { ok: true, rows: joinStocksWithMasters(stocks, items, locations) }
 }

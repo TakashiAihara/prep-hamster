@@ -98,11 +98,6 @@ export function shouldSuggestShopping(quantity: number): boolean {
   return roundQuantity(quantity) <= 0
 }
 
-// 一覧で隠す / 詳細で提案を出す判定は同じ「残量なし」を使う。
-export function isEmptyQuantity(quantity: number): boolean {
-  return shouldSuggestShopping(quantity)
-}
-
 const roundQuantity = (quantity: number): number => Number(quantity.toFixed(6))
 
 export function formatQuantity(quantity: number): string {
