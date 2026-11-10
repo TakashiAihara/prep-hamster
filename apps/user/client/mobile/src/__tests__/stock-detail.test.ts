@@ -22,6 +22,7 @@ const LOC_A = "22222222-2222-4222-8222-222222222222"
 const LOC_B = "33333333-3333-4333-8333-333333333333"
 const ITEM_ID = "44444444-4444-4444-8444-444444444444"
 const GROUP_ID = "55555555-5555-4555-8555-555555555555"
+const EVENT_ID = "77777777-7777-4777-8777-777777777777"
 
 const stockDto = (over: Record<string, unknown> = {}) => ({
   id: STOCK_ID,
@@ -200,11 +201,14 @@ test("consumeStock posts quantityDelta and returns the updated stock", async () 
   const { client, calls } = fakeClient({
     "stock.consume": () => json({ stock: stockDto({ quantity: 3 }), event: {} }),
   })
-  const r = await consumeStock(client, STOCK_ID, 2)
+  const r = await consumeStock(client, STOCK_ID, 2, EVENT_ID)
   expect(r.ok).toBe(true)
   if (r.ok) expect(r.stock.quantity).toBe(3)
   expect(calls).toEqual([
-    { name: "stock.consume", args: { param: { id: STOCK_ID }, json: { quantityDelta: 2 } } },
+    {
+      name: "stock.consume",
+      args: { param: { id: STOCK_ID }, json: { quantityDelta: 2, eventId: EVENT_ID } },
+    },
   ])
 })
 
@@ -212,11 +216,11 @@ test("discardStock sends the reason and returns an empty stock as quantity 0", a
   const { client, calls } = fakeClient({
     "stock.discard": () => json({ stock: stockDto({ quantity: 0 }), event: {} }),
   })
-  const r = await discardStock(client, STOCK_ID, 5, "期限切れ")
+  const r = await discardStock(client, STOCK_ID, 5, "期限切れ", EVENT_ID)
   expect(r.ok && r.stock.quantity).toBe(0)
   expect(calls[0]?.args).toEqual({
     param: { id: STOCK_ID },
-    json: { quantityDelta: 5, reason: "期限切れ" },
+    json: { quantityDelta: 5, reason: "期限切れ", eventId: EVENT_ID },
   })
 })
 
@@ -224,10 +228,13 @@ test("discardStock omits reason entirely when there is none", async () => {
   const { client, calls } = fakeClient({
     "stock.discard": () => json({ stock: stockDto({ quantity: 4 }), event: {} }),
   })
-  await discardStock(client, STOCK_ID, 1, null)
-  expect(calls[0]?.args).toEqual({ param: { id: STOCK_ID }, json: { quantityDelta: 1 } })
+  await discardStock(client, STOCK_ID, 1, null, EVENT_ID)
+  expect(calls[0]?.args).toEqual({
+    param: { id: STOCK_ID },
+    json: { quantityDelta: 1, eventId: EVENT_ID },
+  })
   const args = calls[0]?.args as { json: object }
-  expect(Object.keys(args.json)).toEqual(["quantityDelta"])
+  expect(Object.keys(args.json).toSorted()).toEqual(["eventId", "quantityDelta"])
 })
 
 test("moveStock posts toLocationId and returns the new location", async () => {
@@ -253,7 +260,7 @@ test("action failures return the API error message, or the HTTP status without a
     "stock.consume": () =>
       json({ error: { code: "INSUFFICIENT_QUANTITY", message: "在庫が足りません" } }, 422),
   })
-  expect(await consumeStock(withBody.client, STOCK_ID, 9)).toEqual({
+  expect(await consumeStock(withBody.client, STOCK_ID, 9, EVENT_ID)).toEqual({
     ok: false,
     message: "在庫が足りません",
   })
@@ -267,14 +274,14 @@ test("action failures return the API error message, or the HTTP status without a
 
 test("a JSON error body without a message, or with an empty one, falls back to the HTTP status", async () => {
   const noMessage = fakeClient({ "stock.consume": () => json({ error: { code: "X" } }, 400) })
-  expect(await consumeStock(noMessage.client, STOCK_ID, 1)).toEqual({
+  expect(await consumeStock(noMessage.client, STOCK_ID, 1, EVENT_ID)).toEqual({
     ok: false,
     message: "HTTP 400",
   })
   const emptyMessage = fakeClient({
     "stock.consume": () => json({ error: { code: "X", message: "" } }, 422),
   })
-  expect(await consumeStock(emptyMessage.client, STOCK_ID, 1)).toEqual({
+  expect(await consumeStock(emptyMessage.client, STOCK_ID, 1, EVENT_ID)).toEqual({
     ok: false,
     message: "HTTP 422",
   })
@@ -286,9 +293,41 @@ test("action returns a network error as a failed result instead of throwing", as
       throw new Error("Network request failed")
     },
   })
-  expect(await consumeStock(client, STOCK_ID, 1)).toEqual({
+  // 送れたかどうか分からないので、同じ eventId で再送してよい印を付ける
+  expect(await consumeStock(client, STOCK_ID, 1, EVENT_ID)).toEqual({
     ok: false,
     message: "Network request failed",
+    uncertain: true,
+  })
+})
+
+test("consume and discard mark a 5xx response as uncertain and a 4xx response as definite", async () => {
+  const gateway = fakeClient({
+    "stock.consume": () => new Response("bad gateway", { status: 502 }),
+  })
+  expect(await consumeStock(gateway.client, STOCK_ID, 1, EVENT_ID)).toEqual({
+    ok: false,
+    message: "HTTP 502",
+    uncertain: true,
+  })
+  const discard503 = fakeClient({
+    "stock.discard": () => new Response("unavailable", { status: 503 }),
+  })
+  expect(await discardStock(discard503.client, STOCK_ID, 1, null, EVENT_ID)).toEqual({
+    ok: false,
+    message: "HTTP 503",
+    uncertain: true,
+  })
+  const conflict = fakeClient({
+    "stock.discard": () =>
+      json(
+        { error: { code: "IDEMPOTENCY_KEY_REUSED", message: "別の内容で使われた操作 ID です" } },
+        422,
+      ),
+  })
+  expect(await discardStock(conflict.client, STOCK_ID, 1, null, EVENT_ID)).toEqual({
+    ok: false,
+    message: "別の内容で使われた操作 ID です",
   })
 })
 

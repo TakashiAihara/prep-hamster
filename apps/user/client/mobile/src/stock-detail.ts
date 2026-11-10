@@ -28,7 +28,9 @@ export type EditPatch = {
   note?: string | null
 }
 
-export type ActionResult = { ok: true; stock: StockDto } | { ok: false; message: string }
+export type ActionResult =
+  | { ok: true; stock: StockDto }
+  | { ok: false; message: string; uncertain?: true }
 
 const REASON_MAX = 500
 export const UNKNOWN_ITEM_NAME = "不明な商品"
@@ -149,16 +151,21 @@ export async function consumeStock(
   client: ApiClient,
   id: string,
   quantityDelta: number,
+  eventId: string,
 ): Promise<ActionResult> {
   try {
     const res = await client.v1.stocks[":id"].consume.$post({
       param: { id },
-      json: { quantityDelta },
+      json: { quantityDelta, eventId },
     })
-    if (!res.ok) return await failure(res)
+    if (!res.ok) {
+      const f = await failure(res)
+      // 5xx は届いたか分からないので、同じ eventId で再送してよい印を付ける
+      return res.status >= 500 ? { ...f, uncertain: true } : f
+    }
     return { ok: true, stock: (await res.json()).stock }
   } catch (err) {
-    return errorMessage(err)
+    return { ...errorMessage(err), uncertain: true }
   }
 }
 
@@ -167,16 +174,20 @@ export async function discardStock(
   id: string,
   quantityDelta: number,
   reason: string | null,
+  eventId: string,
 ): Promise<ActionResult> {
   try {
     const res = await client.v1.stocks[":id"].discard.$post({
       param: { id },
-      json: { quantityDelta, ...(reason === null ? {} : { reason }) },
+      json: { quantityDelta, ...(reason === null ? {} : { reason }), eventId },
     })
-    if (!res.ok) return await failure(res)
+    if (!res.ok) {
+      const f = await failure(res)
+      return res.status >= 500 ? { ...f, uncertain: true } : f
+    }
     return { ok: true, stock: (await res.json()).stock }
   } catch (err) {
-    return errorMessage(err)
+    return { ...errorMessage(err), uncertain: true }
   }
 }
 

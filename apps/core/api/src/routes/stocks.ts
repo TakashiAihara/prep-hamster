@@ -14,6 +14,7 @@ import {
   stockQuantityDeltaBodyDtoSchema,
   updateStockBodyDtoSchema,
 } from "./schemas"
+import { isUniqueViolation } from "./items"
 
 const IdParamSchema = z.object({
   id: z
@@ -68,6 +69,59 @@ const toStockEventDto = (
   reason: row.reason,
   createdAt: row.createdAt.toISOString(),
 })
+
+const IDEMPOTENCY_REUSED_RESPONSE = {
+  error: {
+    code: "IDEMPOTENCY_KEY_REUSED",
+    message: "この操作 ID は別の内容で使われています",
+  },
+} as const
+
+type RecordedDeltaEvent =
+  | { kind: "none" }
+  | { kind: "conflict" }
+  | {
+      kind: "replay"
+      stock: typeof stocks.$inferSelect
+      event: typeof stockEvents.$inferSelect
+    }
+
+// consume / discard の eventId 冪等化。記録済みイベントを引いて内容を比較する。
+// 同じ stock / 種別 / quantityDelta (保存値は負) / reason なら replay、
+// 別 stock の eventId や内容違いは conflict (相手のイベント内容は返さない)。
+async function findRecordedDeltaEvent(
+  db: AppEnv["Variables"]["db"],
+  eventId: string,
+  expected: {
+    stockId: string
+    eventType: "CONSUME" | "DISCARD"
+    quantityDelta: number
+    reason: string | null
+  },
+): Promise<RecordedDeltaEvent> {
+  // quantity_delta は real (float4) で、保存値は送られた倍精度の値と一致しない。DB の表示桁数の設定
+  // (extra_float_digits) によっては読み出しでさらに丸まり、JS 側では元の float4 にも戻せない。
+  // 一致は DB の中で判定する (型の付かない引数は列の型 real として比べられる)
+  const [found] = await db
+    .select({
+      event: stockEvents,
+      sameQuantity: sql<boolean>`${stockEvents.quantityDelta} = ${expected.quantityDelta}`,
+    })
+    .from(stockEvents)
+    .where(eq(stockEvents.id, eventId))
+    .limit(1)
+  if (!found) return { kind: "none" }
+  const { event } = found
+  const same =
+    event.stockId === expected.stockId &&
+    event.eventType === expected.eventType &&
+    found.sameQuantity &&
+    event.reason === expected.reason
+  if (!same) return { kind: "conflict" }
+  const [stock] = await db.select().from(stocks).where(eq(stocks.id, expected.stockId)).limit(1)
+  if (!stock) throw new Error("stock for a recorded event is missing")
+  return { kind: "replay", stock, event }
+}
 
 const listStocksRoute = createRoute({
   method: "get",
@@ -251,7 +305,8 @@ const consumeStockRoute = createRoute({
       content: { "application/json": { schema: errorResponseSchema } },
     },
     422: {
-      description: "数量不正 (delta 負 / 結果が負)",
+      description:
+        "数量不正 (delta 負 / 結果が負) / eventId が別内容で再利用 (IDEMPOTENCY_KEY_REUSED)",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },
@@ -290,7 +345,7 @@ const discardStockRoute = createRoute({
       content: { "application/json": { schema: errorResponseSchema } },
     },
     422: {
-      description: "数量不正",
+      description: "数量不正 / eventId が別内容で再利用 (IDEMPOTENCY_KEY_REUSED)",
       content: { "application/json": { schema: errorResponseSchema } },
     },
   },
@@ -585,6 +640,28 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
       return c.json(access.body, access.status)
     }
 
+    // eventId 付きの再送は数量チェックより先に、記録済みイベントと現在の在庫を返す
+    // (消費済みで残量が足りなくなった後の再送も、記録済みの結果として返すため)。
+    const respondRecorded = async () => {
+      if (!body.eventId) return null
+      const recorded = await findRecordedDeltaEvent(db, body.eventId, {
+        stockId: id,
+        eventType: "CONSUME",
+        quantityDelta: -body.quantityDelta,
+        reason: body.reason ?? null,
+      })
+      if (recorded.kind === "none") return null
+      if (recorded.kind === "conflict") {
+        return c.json(IDEMPOTENCY_REUSED_RESPONSE, 422)
+      }
+      return c.json(
+        { stock: toStockDto(recorded.stock), event: toStockEventDto(recorded.event) },
+        200,
+      )
+    }
+    const replay = await respondRecorded()
+    if (replay) return replay
+
     const newQty = existing.quantity - body.quantityDelta
     if (newQty < 0) {
       return c.json(
@@ -600,39 +677,49 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
 
     // quantity 更新 + stock_events 追加を 1 transaction で原子化。
     // 失敗時に片方だけ反映されるのを防ぐ。
-    const result = await db.transaction(async (tx) => {
-      const now = new Date()
-      const [updated] = await tx
-        .update(stocks)
-        .set({ quantity: newQty, updatedAt: now })
-        .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
-        .returning()
-      if (!updated) {
-        throw new Error("stock update returned no row")
-      }
-      const [event] = await tx
-        .insert(stockEvents)
-        .values({
-          id: crypto.randomUUID(),
-          groupId: existing.groupId,
-          stockId: id,
-          eventType: "CONSUME",
-          // 集計を SUM(quantityDelta) で取れるよう、CONSUME は負値で記録
-          quantityDelta: -body.quantityDelta,
-          fromLocationId: null,
-          toLocationId: null,
-          occurredAt: now,
-          actorUserId: userId,
-          reason: body.reason ?? null,
-        })
-        .returning()
-      if (!event) {
-        throw new Error("stock_event insert returned no row")
-      }
-      return { stock: updated, event }
-    })
+    try {
+      const result = await db.transaction(async (tx) => {
+        const now = new Date()
+        const [updated] = await tx
+          .update(stocks)
+          .set({ quantity: newQty, updatedAt: now })
+          .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+          .returning()
+        if (!updated) {
+          throw new Error("stock update returned no row")
+        }
+        const [event] = await tx
+          .insert(stockEvents)
+          .values({
+            id: body.eventId ?? crypto.randomUUID(),
+            groupId: existing.groupId,
+            stockId: id,
+            eventType: "CONSUME",
+            // 集計を SUM(quantityDelta) で取れるよう、CONSUME は負値で記録
+            quantityDelta: -body.quantityDelta,
+            fromLocationId: null,
+            toLocationId: null,
+            occurredAt: now,
+            actorUserId: userId,
+            reason: body.reason ?? null,
+          })
+          .returning()
+        if (!event) {
+          throw new Error("stock_event insert returned no row")
+        }
+        return { stock: updated, event }
+      })
 
-    return c.json({ stock: toStockDto(result.stock), event: toStockEventDto(result.event) }, 200)
+      return c.json({ stock: toStockDto(result.stock), event: toStockEventDto(result.event) }, 200)
+    } catch (err) {
+      // 同じ eventId の並行リクエストが先に commit した場合、quantity 更新ごと
+      // rollback されているので、記録済みイベントを引き直して再送と同じく答える。
+      if (isUniqueViolation(err)) {
+        const recordedReply = await respondRecorded()
+        if (recordedReply) return recordedReply
+      }
+      throw err
+    }
   })
   .openapi(discardStockRoute, async (c) => {
     const { id } = c.req.valid("param")
@@ -654,6 +741,26 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
       return c.json(access.body, access.status)
     }
 
+    const respondRecorded = async () => {
+      if (!body.eventId) return null
+      const recorded = await findRecordedDeltaEvent(db, body.eventId, {
+        stockId: id,
+        eventType: "DISCARD",
+        quantityDelta: -body.quantityDelta,
+        reason: body.reason ?? null,
+      })
+      if (recorded.kind === "none") return null
+      if (recorded.kind === "conflict") {
+        return c.json(IDEMPOTENCY_REUSED_RESPONSE, 422)
+      }
+      return c.json(
+        { stock: toStockDto(recorded.stock), event: toStockEventDto(recorded.event) },
+        200,
+      )
+    }
+    const replay = await respondRecorded()
+    if (replay) return replay
+
     const newQty = existing.quantity - body.quantityDelta
     if (newQty < 0) {
       return c.json(
@@ -667,38 +774,46 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
       )
     }
 
-    const result = await db.transaction(async (tx) => {
-      const now = new Date()
-      const [updated] = await tx
-        .update(stocks)
-        .set({ quantity: newQty, updatedAt: now })
-        .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
-        .returning()
-      if (!updated) {
-        throw new Error("stock update returned no row")
-      }
-      const [event] = await tx
-        .insert(stockEvents)
-        .values({
-          id: crypto.randomUUID(),
-          groupId: existing.groupId,
-          stockId: id,
-          eventType: "DISCARD",
-          quantityDelta: -body.quantityDelta,
-          fromLocationId: null,
-          toLocationId: null,
-          occurredAt: now,
-          actorUserId: userId,
-          reason: body.reason ?? null,
-        })
-        .returning()
-      if (!event) {
-        throw new Error("stock_event insert returned no row")
-      }
-      return { stock: updated, event }
-    })
+    try {
+      const result = await db.transaction(async (tx) => {
+        const now = new Date()
+        const [updated] = await tx
+          .update(stocks)
+          .set({ quantity: newQty, updatedAt: now })
+          .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+          .returning()
+        if (!updated) {
+          throw new Error("stock update returned no row")
+        }
+        const [event] = await tx
+          .insert(stockEvents)
+          .values({
+            id: body.eventId ?? crypto.randomUUID(),
+            groupId: existing.groupId,
+            stockId: id,
+            eventType: "DISCARD",
+            quantityDelta: -body.quantityDelta,
+            fromLocationId: null,
+            toLocationId: null,
+            occurredAt: now,
+            actorUserId: userId,
+            reason: body.reason ?? null,
+          })
+          .returning()
+        if (!event) {
+          throw new Error("stock_event insert returned no row")
+        }
+        return { stock: updated, event }
+      })
 
-    return c.json({ stock: toStockDto(result.stock), event: toStockEventDto(result.event) }, 200)
+      return c.json({ stock: toStockDto(result.stock), event: toStockEventDto(result.event) }, 200)
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        const recordedReply = await respondRecorded()
+        if (recordedReply) return recordedReply
+      }
+      throw err
+    }
   })
   .openapi(moveStockRoute, async (c) => {
     const { id } = c.req.valid("param")
