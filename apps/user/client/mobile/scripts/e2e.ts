@@ -363,6 +363,9 @@ async function e2e() {
   log("Metro bundled the app")
 
   const serial = process.env["E2E_DEVICE"] || (await bootEmulator())
+  // A busy emulator shows "Pixel Launcher isn't responding" over the app, and every flow then
+  // fails to find its screen (seen on CI). The flows test the app, so hide system error dialogs.
+  run(adb, ["-s", serial, "shell", "settings", "put", "global", "hide_error_dialogs", "1"])
   run(adb, ["-s", serial, "install", "-r", apk])
 
   // The first launch on a fresh emulator is far slower than the rest (seen failing whichever flow
