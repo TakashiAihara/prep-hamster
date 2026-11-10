@@ -299,3 +299,24 @@ test("two concurrent moves to the same location record one move and reject the o
   expect(((await rejected.json()) as { error: { code: string } }).error.code).toBe("MOVE_NOOP")
   expect(await eventsOf(stockId)).toHaveLength(1)
 })
+
+test.each(["move-first", "consume-first"] as const)(
+  "a move and a consume on the same stock both apply (%s)",
+  async (order) => {
+    const { stockId, locationId, post, move, addLocation } = await setup(10)
+    const fridge = await addLocation("Fridge")
+    const requests = [() => move(fridge), () => post("consume", 3)]
+    if (order === "consume-first") requests.reverse()
+
+    const responses = await race(stockId, requests)
+
+    expect(responses.map((r) => r.status)).toEqual([200, 200])
+    expect(await quantityOf(stockId)).toBe(7)
+    expect(await locationOf(stockId)).toBe(fridge)
+    const events = await eventsOf(stockId)
+    expect(events.map((e) => [e.eventType, e.quantityDelta, e.fromLocationId]).toSorted()).toEqual([
+      ["CONSUME", -3, null],
+      ["MOVE", 0, locationId],
+    ])
+  },
+)
