@@ -19,7 +19,7 @@
 //   JAVA_HOME          JDK 17 for gradle
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
 const here = dirname(new URL(import.meta.url).pathname)
@@ -143,10 +143,11 @@ function background(
   env: NodeJS.ProcessEnv,
 ) {
   const logPath = join(cacheDir, `${name}.log`)
-  const out = Bun.file(logPath).writer()
-  const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true })
-  child.stdout?.on("data", (d) => out.write(d))
-  child.stderr?.on("data", (d) => out.write(d))
+  // The child writes the file itself: nothing is buffered here and lost when this process exits
+  const fd = openSync(logPath, "w")
+  const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", fd, fd], detached: true })
+  // A missing binary is an 'error' event; unhandled, it would crash past the teardown
+  child.on("error", (err) => console.error(`[e2e] ${name}: ${err.message}`))
   children.push(child)
   log(`${name} started (log: ${logPath})`)
   return child
@@ -154,19 +155,27 @@ function background(
 
 function startSupabase(): { secretKey: string; publishableKey: string } {
   // Own project_id and ports, so a `supabase start` of this repo (or another E2E checkout) is untouched
-  const config = readFileSync(join(repoRoot, "supabase/config.toml"), "utf-8")
-    .replace(/^project_id = .*$/m, `project_id = "prep-hamster-e2e-${sbPort}"`)
-    .replace(/^port = 54321$/m, `port = ${sbPort}`)
-    .replace(/^port = 54322$/m, `port = ${sbPort + 1}`)
-    .replace(/^shadow_port = 54320$/m, `shadow_port = ${sbPort - 1}`)
+  let config = readFileSync(join(repoRoot, "supabase/config.toml"), "utf-8")
+  for (const [from, to] of [
+    [/^project_id = .*$/m, `project_id = "prep-hamster-e2e-${sbPort}"`],
+    [/^port = 54321$/m, `port = ${sbPort}`],
+    [/^port = 54322$/m, `port = ${sbPort + 1}`],
+    [/^shadow_port = 54320$/m, `shadow_port = ${sbPort - 1}`],
+  ] as const) {
+    // A silent miss would start Supabase on the dev ports
+    if (!from.test(config)) throw new Error(`supabase/config.toml has no line matching ${from}`)
+    config = config.replace(from, to)
+  }
   mkdirSync(join(sbWorkdir, "supabase"), { recursive: true })
   writeFileSync(join(sbWorkdir, "supabase/config.toml"), config)
 
-  cleanups.push(() =>
+  const stop = () =>
     spawnSync("bunx", ["supabase", "stop", "--no-backup", "--workdir", sbWorkdir], {
       stdio: "inherit",
-    }),
-  )
+    })
+  // A run killed before its teardown leaves the volumes; drop them so the DB starts empty
+  stop()
+  cleanups.push(stop)
   // Only Auth (gotrue), its gateway (kong) and the DB are used by the app and the API
   run("bunx", [
     "supabase",
@@ -190,7 +199,7 @@ function devSession(secretKey: string): string {
     ...process.env,
     SUPABASE_URL: sbUrl,
     SUPABASE_SECRET_KEY: secretKey,
-  })
+  }).split("\n")[0]!
 }
 
 // The flows need the test user to be EDITOR+ of a group with two locations (move needs a target)
@@ -213,8 +222,11 @@ async function seed(secretKey: string) {
   log("seeded the test user's group and locations")
 }
 
+// Fixed console port: one E2E run per machine at a time (the port check stops a second one)
+const emulatorPort = 5600
+
 async function bootEmulator(): Promise<string> {
-  const port = 5600
+  const port = emulatorPort
   const serial = `emulator-${port}`
   background(
     "emulator",
@@ -246,11 +258,25 @@ async function bootEmulator(): Promise<string> {
   return serial
 }
 
+function teardown() {
+  for (const child of children.splice(0).toReversed()) {
+    // detached: the group also holds Metro's / the emulator's own children
+    if (child.pid) {
+      try {
+        process.kill(-child.pid, "SIGTERM")
+      } catch {}
+    }
+  }
+  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+}
+
 // --- main ------------------------------------------------------------------
 
 async function e2e() {
   mkdirSync(cacheDir, { recursive: true })
-  const ports = [sbPort, sbPort + 1, apiPort, metroPort]
+  const ports = [sbPort - 1, sbPort, sbPort + 1, apiPort, metroPort]
+  // the emulator takes its console port and the next one for adb
+  if (!process.env["E2E_DEVICE"]) ports.push(emulatorPort, emulatorPort + 1)
   const free = await Promise.all(ports.map(portFree))
   const busy = ports.filter((_, i) => !free[i])
   if (busy.length > 0) {
@@ -304,6 +330,8 @@ async function e2e() {
     env: {
       ...process.env,
       ANDROID_SERIAL: serial,
+      // capture-screens calls bare adb; use the SDK's even when platform-tools is not on PATH
+      PATH: `${dirname(adb)}:${process.env["PATH"] ?? ""}`,
       SUPABASE_URL: sbUrl,
       SUPABASE_SECRET_KEY: secretKey,
     },
@@ -325,6 +353,14 @@ async function main() {
     process.exit(2)
   }
 
+  // Ctrl-C would otherwise leave the detached emulator / Metro and the containers running
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      teardown()
+      process.exit(130)
+    })
+  }
+
   let failed = false
   try {
     await e2e()
@@ -332,15 +368,7 @@ async function main() {
     console.error(`[e2e] ${err instanceof Error ? err.message : err}`)
     failed = true
   } finally {
-    for (const child of children.toReversed()) {
-      // detached: the group also holds Metro's / the emulator's own children
-      if (child.pid) {
-        try {
-          process.kill(-child.pid, "SIGTERM")
-        } catch {}
-      }
-    }
-    for (const cleanup of cleanups.toReversed()) cleanup()
+    teardown()
   }
   process.exit(failed ? 1 : 0)
 }

@@ -10,6 +10,8 @@ on:
       - "packages/**"
       - "supabase/**"
       - "bun.lock"
+      - "package.json"
+      - "bunfig.toml"
       - ".github/workflows/mobile-e2e.yml"
   workflow_dispatch:
 

@@ -16,7 +16,7 @@
 // Supabase local / API / Metro / emulator の起動から片付けまで通すなら scripts/e2e.ts (CI もこちら)。
 
 import { spawnSync } from "node:child_process"
-import { mkdirSync, readdirSync, rmSync } from "node:fs"
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
 const here = dirname(new URL(import.meta.url).pathname)
@@ -171,7 +171,8 @@ function main(): void {
   }
   const md = generateMarkdown(captured)
   const mdPath = join(repoRoot, "docs/design/screens-as-is.md")
-  Bun.write(mdPath, md)
+  // sync: the failure path below exits right after, which would drop a pending async write
+  writeFileSync(mdPath, md)
   console.log(`[capture-screens] ${captured.length} png を ${outDir} に出力しました。`)
   console.log(`[capture-screens] ${mdPath} を更新しました。`)
   // 撮れた分の md を書いてから落とす。E2E (scripts/e2e.ts / CI) は exit code で失敗を知る

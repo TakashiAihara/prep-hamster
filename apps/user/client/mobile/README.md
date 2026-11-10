@@ -71,9 +71,9 @@ JAVA_HOME=<JDK 17> bun run --filter @prep-hamster/mobile e2e
 1 回の実行で Supabase local (Auth と DB だけ) → migration → API → テスト用ユーザーのグループと場所 2 件の seed → Metro → headless の emulator → debug APK の install → `maestro/*.yaml` の全 flow → 全部の停止まで通す。Supabase の project には繋がず、毎回空の DB から始まる。
 
 - port は `supabase start` / `expo start` の既定と重ならない値 (Supabase 25320-25322 / API 3100 / Metro 8091。Linux の一時ポート範囲 32768 以上は、外向きの接続が使っている番号を docker が bind できず落ちるので避ける) を使い、`E2E_SUPABASE_PORT` / `E2E_API_PORT` / `E2E_METRO_PORT` で変えられる。埋まっていれば始める前に止まる
-- emulator は AVD `E2E_AVD` (既定 `prep_hamster`) を `-read-only` で port 5600 に起動し、終わったら止める。起動済みの端末で流すなら `E2E_DEVICE=<adb の serial>`
+- emulator は AVD `E2E_AVD` (既定 `prep_hamster`) を `-read-only` で port 5600 に起動し、終わったら止める。起動済みの x86_64 の emulator で流すなら `E2E_DEVICE=<adb の serial>` (APK は x86_64 だけ、アプリの向き先は emulator から見た host の `10.0.2.2` なので、実機と arm64 では動かない)。emulator の console port が固定なので、1 台のマシンで同時に流せるのは 1 本
 - debug APK は `.cache/e2e/` に置き、native 部分 (`@expo/fingerprint`) と Metro の port が変わったときだけ build し直す。`bun run --filter @prep-hamster/mobile e2e build` で build だけ
-- キャプチャは `docs/design/screens-as-is/`、各サービスのログは `.cache/e2e/*.log`
+- キャプチャは `docs/design/screens-as-is/` (と `screens-as-is.md`) を上書きするので、流した後は `git status` に差分が出る。撮り直しとして commit しないなら `git checkout -- docs/design/` で戻す。各サービスのログは `.cache/e2e/*.log`
 - CI では `.github/workflows/mobile-e2e.yml` が同じスクリプトを GitHub Actions の emulator で流す (mobile / API / packages を変えた PR と手動実行)
 
 ## As-Is screen catalog (Maestro)
