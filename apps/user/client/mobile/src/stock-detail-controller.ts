@@ -132,23 +132,16 @@ export function createConfirmDiscard(
 
 export type ActionMessage = { kind: "ok" | "error"; text: string }
 
-export type PendingOp = {
-  kind: "consume" | "discard"
-  stockId: string
-  quantity: number
-  reason: string | null
-  eventId: string
-  baseQuantity: number
-}
-
-export type PendingOpRef = { current: PendingOp | null }
+// 結果が不明な操作の eventId を操作内容ごとに保ち、同じ内容の押し直しで使い回す
+export type PendingOps = Map<string, string>
 
 export type StockActionDeps = {
   client: ApiClient
   stock: StockDto
   guard: Guard
-  pending: PendingOpRef
+  pending: PendingOps
   newEventId: () => string
+  currentQuantity: () => number
   setBusy: (busy: boolean) => void
   setMessage: (message: ActionMessage | null) => void
   onStockChanged: (stock: StockDto) => void
@@ -156,6 +149,9 @@ export type StockActionDeps = {
   confirmDiscard: (quantity: number, unit: string) => Promise<boolean>
   leave: () => void
 }
+
+// 詳細画面を閉じて開き直しても eventId を引き継ぐため画面の外に置く。メモリだけなので再起動で消える
+export const sharedPendingOps: PendingOps = new Map()
 
 export function createStockActions(deps: StockActionDeps) {
   const { client, stock, guard } = deps
@@ -187,32 +183,18 @@ export function createStockActions(deps: StockActionDeps) {
     }
   }
 
-  // consume / discard は結果が不明な失敗 (通信断 / 5xx) のとき、同じ eventId で
+  // consume / discard は結果が不明な失敗 (通信断 / 408 / 5xx) のとき、同じ eventId で
   // 再送してサーバ側の冪等化に任せる。同じ内容の操作なら eventId を使い回す。
   async function runDelta(
-    kind: PendingOp["kind"],
+    kind: "consume" | "discard",
     quantity: number,
     reason: string | null,
     send: (eventId: string) => Promise<ActionResult>,
   ): Promise<ActionResult> {
-    const pending = deps.pending.current
-    const eventId =
-      pending !== null &&
-      pending.kind === kind &&
-      pending.stockId === stock.id &&
-      pending.quantity === quantity &&
-      pending.reason === reason &&
-      pending.baseQuantity === stock.quantity
-        ? pending.eventId
-        : deps.newEventId()
-    deps.pending.current = {
-      kind,
-      stockId: stock.id,
-      quantity,
-      reason,
-      eventId,
-      baseQuantity: stock.quantity,
-    }
+    const key = JSON.stringify([kind, stock.id, quantity, reason, stock.quantity])
+    const eventId = deps.pending.get(key) ?? deps.newEventId()
+    // 送信前に記録する。応答を待つ間に画面が作り直されても eventId を辿れるように
+    deps.pending.set(key, eventId)
     const r = await send(eventId)
     if (!r.ok && r.uncertain) {
       // 結果が不明なので押し直してよいことを伝える。取り直しで残量が変わった後は新しい操作になるので、条件を添える
@@ -221,7 +203,8 @@ export function createStockActions(deps: StockActionDeps) {
         message: `${r.message} (残量の表示が変わっていなければ、同じ内容でもう一度押しても二重には記録されません)`,
       }
     }
-    deps.pending.current = null
+    // この操作の分だけ消す。他の操作の pending は残す
+    deps.pending.delete(key)
     return r
   }
 
@@ -255,6 +238,12 @@ export function createStockActions(deps: StockActionDeps) {
           if (!confirmed) deps.setBusy(false)
         }
         if (!confirmed) return
+        // 確認中に残量が変わっていたら、確認した内容と違う廃棄を送ることになるので止める
+        if (deps.currentQuantity() !== stock.quantity) {
+          fail("確認中に残量が変わりました。表示を確かめてから、もう一度押してください")
+          deps.setBusy(false)
+          return
+        }
         await perform(
           "廃棄しました",
           () =>

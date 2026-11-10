@@ -9,7 +9,7 @@ import {
   nextEditValue,
   syncEditFields,
   type ActionMessage,
-  type PendingOpRef,
+  type PendingOps,
   type LoadState,
 } from "../stock-detail-controller"
 import type { StockDetail, StockDto } from "../stock-detail"
@@ -42,12 +42,13 @@ function harness(
   opts: {
     result?: () => Response
     confirm?: boolean
-    pending?: PendingOpRef
+    pending?: PendingOps
     newEventId?: () => string
     stock?: StockDto
+    currentQuantity?: () => number
   } = {},
 ) {
-  const pending: PendingOpRef = opts.pending ?? { current: null }
+  const pending: PendingOps = opts.pending ?? new Map()
   const posts: string[] = []
   const sent: unknown[] = []
   const events: string[] = []
@@ -92,6 +93,7 @@ function harness(
     leave: () => events.push("leave"),
     pending,
     newEventId: opts.newEventId ?? idSource(),
+    currentQuantity: opts.currentQuantity ?? (() => (opts.stock ?? stock()).quantity),
   })
   return {
     actions,
@@ -428,7 +430,7 @@ const networkError = () => {
 
 // 1 回目の画面 (failing) と、作り直した 2 回目の画面 (next) で pending と採番を共有する
 function twoScreens(first: { result?: () => Response }) {
-  const pending: PendingOpRef = { current: null }
+  const pending: PendingOps = new Map()
   const newEventId = idSource()
   const failing = harness({ ...first, pending, newEventId })
   const next = harness({ pending, newEventId })
@@ -440,17 +442,17 @@ test("each consume sends a fresh eventId after a success", async () => {
   await h.actions.consume("1")
   await h.actions.consume("1")
   expect(sentEventIds(h)).toEqual(["event-1", "event-2"])
-  expect(h.pending.current).toBeNull()
+  expect(h.pending.size).toBe(0)
 })
 
 test("a consume whose result is unknown is resent with the same eventId", async () => {
   const { pending, failing, next } = twoScreens({ result: networkError })
   await failing.actions.consume("2")
-  expect(pending.current).not.toBeNull()
+  expect(pending.size).toBe(1)
   await next.actions.consume("2")
   expect(sentEventIds(failing)).toEqual(["event-1"])
   expect(sentEventIds(next)).toEqual(["event-1"])
-  expect(pending.current).toBeNull()
+  expect(pending.size).toBe(0)
 })
 
 test("a 5xx response also keeps the eventId for the same consume", async () => {
@@ -462,12 +464,32 @@ test("a 5xx response also keeps the eventId for the same consume", async () => {
   expect(sentEventIds(next)).toEqual(["event-1"])
 })
 
+test("a 408 response also keeps the eventId for the same consume", async () => {
+  const { failing, next } = twoScreens({
+    result: () => new Response("timeout", { status: 408 }),
+  })
+  await failing.actions.consume("2")
+  await next.actions.consume("2")
+  expect(sentEventIds(next)).toEqual(["event-1"])
+})
+
+test("an unknown consume keeps its eventId through another operation in between", async () => {
+  const { pending, failing, next } = twoScreens({ result: networkError })
+  await failing.actions.consume("2")
+  await next.actions.consume("1")
+  const third = harness({ pending, newEventId: () => "event-unused" })
+  await third.actions.consume("2")
+  expect(sentEventIds(next)).toEqual(["event-2"])
+  expect(sentEventIds(third)).toEqual(["event-1"])
+  expect(pending.size).toBe(0)
+})
+
 test("a different amount after an unknown result gets a new eventId", async () => {
   const { pending, failing, next } = twoScreens({ result: networkError })
   await failing.actions.consume("2")
   await next.actions.consume("1")
   expect(sentEventIds(next)).toEqual(["event-2"])
-  expect(pending.current).toBeNull()
+  expect(pending.size).toBe(1)
 })
 
 test("a definite API failure does not keep the eventId", async () => {
@@ -475,7 +497,7 @@ test("a definite API failure does not keep the eventId", async () => {
     result: () => json({ error: { code: "INSUFFICIENT_QUANTITY", message: "足りません" } }, 422),
   })
   await failing.actions.consume("2")
-  expect(pending.current).toBeNull()
+  expect(pending.size).toBe(0)
   await next.actions.consume("2")
   expect(sentEventIds(failing)).toEqual(["event-1"])
   expect(sentEventIds(next)).toEqual(["event-2"])
@@ -495,7 +517,7 @@ test("a discard after an unknown consume of the same amount gets a new eventId",
   await next.actions.discard("1", "")
   expect(sentEventIds(failing)).toEqual(["event-1"])
   expect(sentEventIds(next)).toEqual(["event-2"])
-  expect(pending.current).toBeNull()
+  expect(pending.size).toBe(1)
 })
 
 test("a discard with a different reason after an unknown result gets a new eventId", async () => {
@@ -503,11 +525,11 @@ test("a discard with a different reason after an unknown result gets a new event
   await failing.actions.discard("1", "期限切れ")
   await next.actions.discard("1", "傷んだ")
   expect(sentEventIds(next)).toEqual(["event-2"])
-  expect(pending.current).toBeNull()
+  expect(pending.size).toBe(1)
 })
 
 test("the same consume on another stock after an unknown result gets a new eventId", async () => {
-  const pending: PendingOpRef = { current: null }
+  const pending: PendingOps = new Map()
   const newEventId = idSource()
   const failing = harness({ result: networkError, pending, newEventId })
   await failing.actions.consume("1")
@@ -534,23 +556,23 @@ test("a definite failure shows the API message as is", async () => {
 })
 
 test("the pending operation is recorded before the request is sent", async () => {
-  const pending: PendingOpRef = { current: null }
-  let seenWhileSending: PendingOpRef["current"] = null
+  const pending: PendingOps = new Map()
+  let seenWhileSending: string[] = []
   const h = harness({
     pending,
     result: () => {
-      seenWhileSending = pending.current
+      seenWhileSending = [...pending.values()]
       return json({ stock: stock({ quantity: 4 }), event: {} })
     },
   })
   await h.actions.consume("1")
-  expect(seenWhileSending).toMatchObject({ kind: "consume", quantity: 1, eventId: "event-1" })
+  expect(seenWhileSending).toEqual(["event-1"])
 })
 
 test("after the screen shows a changed quantity, the same consume gets a new eventId", async () => {
   // 結果が不明な消費の後に、取り直しで残量が 5 から 3 に変わった = 前の消費は通っていた。
   // 同じ数量をもう一度押すのは新しい消費なので、古い eventId を使い回さない
-  const pending: PendingOpRef = { current: null }
+  const pending: PendingOps = new Map()
   const newEventId = idSource()
   const failing = harness({
     result: networkError,
@@ -565,7 +587,7 @@ test("after the screen shows a changed quantity, the same consume gets a new eve
 })
 
 test("while the screen still shows the same quantity, the same consume reuses the eventId", async () => {
-  const pending: PendingOpRef = { current: null }
+  const pending: PendingOps = new Map()
   const newEventId = idSource()
   const failing = harness({
     result: networkError,
@@ -577,4 +599,16 @@ test("while the screen still shows the same quantity, the same consume reuses th
   const again = harness({ pending, newEventId, stock: stock({ quantity: 5 }) })
   await again.actions.consume("2")
   expect(sentEventIds(again)).toEqual(["event-1"])
+})
+
+test("a discard is not sent when the quantity changed while the confirmation was open", async () => {
+  // 確認を押した時点の残量 5 で入力を判定したが、確認中の取り直しで 2 に変わった
+  const h = harness({ stock: stock({ quantity: 5 }), currentQuantity: () => 2 })
+  await h.actions.discard("3", "")
+  expect(h.posts).toEqual([])
+  expect(lastMessage(h)).toEqual({
+    kind: "error",
+    text: "確認中に残量が変わりました。表示を確かめてから、もう一度押してください",
+  })
+  expect(h.busy.at(-1)).toBe(false)
 })

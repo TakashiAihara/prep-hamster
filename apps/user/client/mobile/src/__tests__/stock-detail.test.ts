@@ -401,3 +401,22 @@ test("loadStockDetail fails when the locations lookup fails", async () => {
   )
   expect(await loadStockDetail(client, STOCK_ID)).toEqual({ ok: false, message: "HTTP 503" })
 })
+
+test("consume and discard mark a 408 response as uncertain", async () => {
+  const consume408 = fakeClient({
+    "stock.consume": () => new Response("timeout", { status: 408 }),
+  })
+  expect(await consumeStock(consume408.client, STOCK_ID, 1, EVENT_ID)).toEqual({
+    ok: false,
+    message: "HTTP 408",
+    uncertain: true,
+  })
+  const discard408 = fakeClient({
+    "stock.discard": () => new Response("timeout", { status: 408 }),
+  })
+  expect(await discardStock(discard408.client, STOCK_ID, 1, null, EVENT_ID)).toEqual({
+    ok: false,
+    message: "HTTP 408",
+    uncertain: true,
+  })
+})

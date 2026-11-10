@@ -142,6 +142,11 @@ export async function loadStockDetail(
   }
 }
 
+// 中継層の 408 は API の定義に無いので、生成された型の外の status として受ける
+function isUncertainStatus(status: number) {
+  return status === 408 || status >= 500
+}
+
 export async function consumeStock(
   client: ApiClient,
   id: string,
@@ -155,8 +160,8 @@ export async function consumeStock(
     })
     if (!res.ok) {
       const f = await failure(res)
-      // 5xx は届いたか分からないので、同じ eventId で再送してよい印を付ける
-      return res.status >= 500 ? { ...f, uncertain: true } : f
+      // 408 と 5xx はリクエストが適用されたか分からないので、同じ eventId で再送してよい印を付ける
+      return isUncertainStatus(res.status) ? { ...f, uncertain: true } : f
     }
     return { ok: true, stock: (await res.json()).stock }
   } catch (err) {
@@ -178,7 +183,7 @@ export async function discardStock(
     })
     if (!res.ok) {
       const f = await failure(res)
-      return res.status >= 500 ? { ...f, uncertain: true } : f
+      return isUncertainStatus(res.status) ? { ...f, uncertain: true } : f
     }
     return { ok: true, stock: (await res.json()).stock }
   } catch (err) {
