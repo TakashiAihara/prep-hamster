@@ -19,7 +19,8 @@
 | `/add/scan`            | M-07    | カメラ許可の確認、EAN-13 / EAN-8 の読み取り、商品の照会                                                             | 追加タブの「カメラで読み取る」                                                      |
 | `/add/manual`          | 新規    | JAN コードを手で入力して照会する debug 入口。scan と同じ後続に乗る                                                  | 追加タブの「手動で barcode を入力 (debug)」                                         |
 | `/add/details`         | M-06    | 保管場所・数量 / 単位・期限・メモを入れて保存。保管場所はその場で追加できる。照会が miss のときだけ品名を編集できる | scan または manual の照会成功（`router.replace`、itemId と productLookup を渡す）   |
-| `/groups`（modal）     | M-10    | 所属グループの一覧と切替、招待コードの発行、招待コードで参加、新規作成                                              | ヘッダー左のグループ名ピル                                                          |
+| `/groups`（modal）     | M-10    | 所属グループの一覧と切替、招待コードの発行、招待コードで参加、新規作成、保管場所管理への入口                        | ヘッダー左のグループ名ピル                                                          |
+| `/locations`（modal）  | 新規    | 現在グループの保管場所の一覧。rename は行内編集、delete は確認のあと実行（参照する在庫があると 422）                | `/groups` の「保管場所を管理」                                                      |
 
 - タブ画面（在庫・追加）と M-10 を開くピル、サインアウトは、グループが決まったときだけヘッダーに出る
 - サインアウトは独立した画面ではなく、タブのヘッダー右のボタン
@@ -79,9 +80,11 @@ flowchart TD
         Invite -. "403 等: エラー表示" .-> GList
         GList -- "招待コードで参加" --> Close
         GList -- "新しいグループを作る" --> Close
+        GList -- "保管場所を管理" --> Locations["/locations<br/>場所の rename / delete"]
     end
 
     Close --> Tabs
+    Locations -- "戻る" --> GList
 
     Tabs -- "サインアウト" --> SignOut["supabase signOut"]
     SignOut --> AuthLoad
@@ -117,13 +120,14 @@ flowchart TD
 - グループ切替（M-10）: 計画のホーム上部のピルから、タブのヘッダー左のピルに移った。root の Stack の modal として開く。決定は `docs/design/mobile-groups.md`
 - 招待: 計画は招待リンク（URL / QR）で、深リンクか短縮 URL + コードかが未確定だった。実装は M-10 の「このグループに招待する」で招待コードを発行し、共有シートで送る。受け取った側は「招待コードで参加」に貼る。深リンクは build を配るようになってから足す（`docs/design/mobile-groups.md` の「招待 (D-13)」節）。招待の発行は OWNER 以外 403 になる
 - グループ作成・招待は計画では Web 管理画面（W-03 / W-05）の操作だったが、モバイルでもできる
+- 場所の管理: rename / delete は計画では Web 管理画面（W-07 カテゴリ・場所管理）の領分だったが、モバイルの `/locations` modal で実装した。決定は `docs/design/mobile-locations.md`。新規作成は `/add/details` の保管場所欄からその場で行う
 - 保存後の遷移: 計画は在庫一覧（M-04）へ戻る。実装も `/(tabs)` へ replace し、タブ復帰で一覧を取り直す
 - 保存の入力項目: 場所・数量 / 単位・使用期限 / 賞味期限・メモ。品名は照会が miss のときだけ編集でき、保存前に品目を PATCH する
 
 ### 4. フローに置けなかったもの
 
 - `/add/*` は AuthGate を通らない。未サインインで deep link から開くと、サインイン画面へ回すゲートが無い（API 呼び出しの失敗として表示される）
-- `/groups` は AuthGate ではなく、`status` が `ok` でなければ `/` へ Redirect する独自の判定。サインアウトや読み込み前に開かれた場合の入口戻し
+- `/groups` と `/locations` は AuthGate ではなく、`status` が `ok` でなければ `/` へ Redirect する独自の判定（`/locations` はグループ未確定でも戻す）。サインアウトや読み込み前に開かれた場合の入口戻し
 - `/add/details` は `itemId` が無いと「itemId が指定されていません」を出して止まる（deep link 直打ちのとき）
 - 画面遷移図は現行コードのルート定義から起こしたもの。`docs/design/screens-as-is.md` の遷移図は認証・グループ導入前のため、ここでは使っていない
 
