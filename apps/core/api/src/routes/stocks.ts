@@ -35,7 +35,9 @@ const ListQuerySchema = z.object({
   locationId: z.string().guid().optional(),
   expiringBefore: z.string().date().optional(),
   includeExpired: booleanQuery.optional(),
-  includeEmpty: booleanQuery.optional(),
+  includeEmpty: booleanQuery.optional().openapi({
+    description: "true で使い切った在庫 (小数第 6 位で丸めて 0 以下) も含める。既定は含めない",
+  }),
 })
 
 // drizzle 行を API DTO 形式 (timestamp は ISO string、id は plain UUID) に変換
@@ -128,7 +130,8 @@ const listStocksRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["stocks"],
-  summary: "在庫一覧を取得 (categoryId / locationId / 期限で絞り込み可)",
+  summary:
+    "在庫一覧を取得 (categoryId / locationId / 期限で絞り込み可。使い切った在庫は includeEmpty=true のときだけ含む)",
   middleware: [withGroupAccess({ in: "query", name: "groupId" })] as const,
   request: {
     query: ListQuerySchema,

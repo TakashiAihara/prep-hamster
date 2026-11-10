@@ -49,8 +49,10 @@ test("GET /v1/stocks treats a residue below the sixth decimal as used up", async
   const { ids, seed } = await setup()
   await seed(0.0000004)
   const smallest = await seed(0.000001)
+  // 切り捨てではなく四捨五入で比べる (0.0000006 は 0.000001 に丸まって残る)
+  const roundedUp = await seed(0.0000006)
 
-  expect(await ids("")).toEqual([smallest])
+  expect(await ids("")).toEqual([smallest, roundedUp].toSorted())
 })
 
 test("GET /v1/stocks?includeEmpty=true includes used-up stocks", async () => {
