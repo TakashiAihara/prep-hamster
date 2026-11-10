@@ -13,10 +13,10 @@
 // 使い方:
 //   bun run --filter @prep-hamster/mobile capture
 //
-// CI 自動化は v1.0.0 では out of scope (Maestro Cloud / EAS 連携が前提)。
+// Supabase local / API / Metro / emulator の起動から片付けまで通すなら scripts/e2e.ts (CI もこちら)。
 
 import { spawnSync } from "node:child_process"
-import { mkdirSync, readdirSync, rmSync } from "node:fs"
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
 const here = dirname(new URL(import.meta.url).pathname)
@@ -71,8 +71,11 @@ function devSessionUrl(): string {
   return url
 }
 
-function runFlows(): string[] {
-  const flows = readdirSync(flowsDir).filter((f) => f.endsWith(".yaml"))
+function runFlows(): { captured: string[]; failed: string[] } {
+  // readdir order is not defined; keep local and CI runs in the same order
+  const flows = readdirSync(flowsDir)
+    .filter((f) => f.endsWith(".yaml"))
+    .toSorted()
   if (flows.length === 0) {
     console.error("[capture-screens] flow が見つかりません: ", flowsDir)
     process.exit(1)
@@ -82,17 +85,33 @@ function runFlows(): string[] {
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
 
+  // 複数台つながっているとき (scripts/e2e.ts が自前の emulator を起動したとき) は ANDROID_SERIAL の端末で流す
+  const serial = process.env["ANDROID_SERIAL"]
+  const device = serial ? ["--device", serial] : []
+  // scripts/e2e.ts keeps each flow's failure screenshots and UI hierarchy here (CI uploads them)
+  const debugDir = process.env["MAESTRO_DEBUG_DIR"]
+
   const captured: string[] = []
+  const failed: string[] = []
   for (const flow of flows) {
     const flowPath = join(flowsDir, flow)
     console.log(`[capture-screens] running ${flow}`)
     // refresh token は 1 回しか使えないので、flow ごとに新しい組を発行する
     const sessionUrl = devSessionUrl()
-    const r = spawnSync("maestro", ["test", "-e", `DEV_SESSION_URL=${sessionUrl}`, flowPath], {
-      cwd: outDir,
-      stdio: "inherit",
-    })
+    const r = spawnSync(
+      "maestro",
+      [
+        ...device,
+        "test",
+        ...(debugDir ? [`--debug-output=${join(debugDir, flow)}`, "--flatten-debug-output"] : []),
+        "-e",
+        `DEV_SESSION_URL=${sessionUrl}`,
+        flowPath,
+      ],
+      { cwd: outDir, stdio: "inherit" },
+    )
     if (r.status !== 0) {
+      failed.push(flow)
       console.warn(
         `[capture-screens] ${flow} が失敗しましたが、それまでに撮れた png は残しています。`,
       )
@@ -103,7 +122,7 @@ function runFlows(): string[] {
   for (const f of readdirSync(outDir)) {
     if (f.endsWith(".png")) captured.push(f)
   }
-  return captured
+  return { captured, failed }
 }
 
 function generateMarkdown(captured: string[]): string {
@@ -155,7 +174,7 @@ function generateMarkdown(captured: string[]): string {
 function main(): void {
   checkMaestro()
   checkDevice()
-  const captured = runFlows()
+  const { captured, failed } = runFlows()
   if (captured.length === 0) {
     console.error(
       "[capture-screens] png が 1 件も出力されませんでした。flow / app の状態を確認してください。",
@@ -164,9 +183,15 @@ function main(): void {
   }
   const md = generateMarkdown(captured)
   const mdPath = join(repoRoot, "docs/design/screens-as-is.md")
-  Bun.write(mdPath, md)
+  // sync: the failure path below exits right after, which would drop a pending async write
+  writeFileSync(mdPath, md)
   console.log(`[capture-screens] ${captured.length} png を ${outDir} に出力しました。`)
   console.log(`[capture-screens] ${mdPath} を更新しました。`)
+  // 撮れた分の md を書いてから落とす。E2E (scripts/e2e.ts / CI) は exit code で失敗を知る
+  if (failed.length > 0) {
+    console.error(`[capture-screens] 失敗した flow: ${failed.join(", ")}`)
+    process.exit(1)
+  }
 }
 
 main()

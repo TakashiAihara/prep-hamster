@@ -12,7 +12,8 @@
     "web": "expo start --web",
     "typecheck": "tsgo --noEmit",
     "test": "bun test src",
-    "capture": "bun run scripts/capture-screens.ts"
+    "capture": "bun run scripts/capture-screens.ts",
+    "e2e": "bun run scripts/e2e.ts"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",

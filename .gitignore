@@ -47,3 +47,6 @@ Thumbs.db
 
 # Testing
 coverage/
+
+# expo prebuild output (scripts/e2e.ts generates it; the native project is not committed)
+apps/user/client/mobile/android/
