@@ -474,8 +474,14 @@ test("a 408 response also keeps the eventId for the same consume", async () => {
 })
 
 test("an unknown consume keeps its eventId through another operation in between", async () => {
-  const { pending, failing, next } = twoScreens({ result: networkError })
+  // 間の操作は別の在庫にする。同じ在庫なら残量が変わり、元の操作は新しい操作として扱われる
+  const { pending, failing } = twoScreens({ result: networkError })
   await failing.actions.consume("2")
+  const next = harness({
+    pending,
+    newEventId: () => "event-2",
+    stock: stock({ id: OTHER_ID }),
+  })
   await next.actions.consume("1")
   const third = harness({ pending, newEventId: () => "event-unused" })
   await third.actions.consume("2")
@@ -543,7 +549,7 @@ test("an unknown result tells the user that pressing again with the same amount 
   await h.actions.consume("1")
   expect(lastMessage(h)).toEqual({
     kind: "error",
-    text: "Network request failed (残量の表示が変わっていなければ、同じ内容でもう一度押しても二重には記録されません)",
+    text: "Network request failed (アプリを閉じず、残量の表示が変わっていなければ、同じ内容でもう一度押しても二重には記録されません)",
   })
 })
 
@@ -561,7 +567,7 @@ test("the pending operation is recorded before the request is sent", async () =>
   const h = harness({
     pending,
     result: () => {
-      seenWhileSending = [...pending.values()]
+      seenWhileSending = [...pending.values()].map((e) => e.eventId)
       return json({ stock: stock({ quantity: 4 }), event: {} })
     },
   })
@@ -584,6 +590,8 @@ test("after the screen shows a changed quantity, the same consume gets a new eve
   const refreshed = harness({ pending, newEventId, stock: stock({ quantity: 3 }) })
   await refreshed.actions.consume("2")
   expect(sentEventIds(refreshed)).toEqual(["event-2"])
+  // 残量 5 のときの記録はもう一致しないので、残さない
+  expect(pending.size).toBe(0)
 })
 
 test("while the screen still shows the same quantity, the same consume reuses the eventId", async () => {
@@ -605,10 +613,85 @@ test("a discard is not sent when the quantity changed while the confirmation was
   // 確認を押した時点の残量 5 で入力を判定したが、確認中の取り直しで 2 に変わった
   const h = harness({ stock: stock({ quantity: 5 }), currentQuantity: () => 2 })
   await h.actions.discard("3", "")
+  // 確認を出した後で比べる (確認の前に比べる作りでは確認が出ない)
+  expect(h.events).toEqual(["confirm"])
   expect(h.posts).toEqual([])
   expect(lastMessage(h)).toEqual({
     kind: "error",
     text: "確認中に残量が変わりました。表示を確かめてから、もう一度押してください",
   })
   expect(h.busy.at(-1)).toBe(false)
+})
+
+test("a 429 after an unknown result keeps the eventId for the next press", async () => {
+  const { pending, failing, next } = twoScreens({ result: networkError })
+  await failing.actions.consume("2")
+  const limited = harness({
+    pending,
+    newEventId: () => "event-unused",
+    result: () => new Response("slow down", { status: 429 }),
+  })
+  await limited.actions.consume("2")
+  await next.actions.consume("2")
+  expect(sentEventIds(limited)).toEqual(["event-1"])
+  expect(sentEventIds(next)).toEqual(["event-1"])
+})
+
+test("a definite failure after an unknown result keeps the eventId", async () => {
+  // 先の要求は応答を失っただけで、後から適用されうる。422 だけでは記録が無いと言い切れない
+  const { pending, failing } = twoScreens({ result: networkError })
+  await failing.actions.consume("2")
+  const rejected = harness({
+    pending,
+    newEventId: () => "event-unused",
+    result: () => json({ error: { code: "INSUFFICIENT_QUANTITY", message: "足りません" } }, 422),
+  })
+  await rejected.actions.consume("2")
+  const again = harness({ pending, newEventId: () => "event-unused" })
+  await again.actions.consume("2")
+  expect(sentEventIds(again)).toEqual(["event-1"])
+})
+
+test("a definite failure on one screen does not drop the eventId another screen is still sending", async () => {
+  // 開き直した画面が同じ操作を送っている間に、元の画面の要求が 422 で返る
+  const pending: PendingOps = new Map()
+  const newEventId = idSource()
+  const first = harness({
+    pending,
+    newEventId,
+    result: () => json({ error: { code: "INSUFFICIENT_QUANTITY", message: "足りません" } }, 422),
+  })
+  const reopened = harness({ pending, newEventId, result: networkError })
+  await Promise.all([first.actions.consume("2"), reopened.actions.consume("2")])
+  const again = harness({ pending, newEventId })
+  await again.actions.consume("2")
+  expect(sentEventIds(reopened)).toEqual(["event-1"])
+  expect(sentEventIds(again)).toEqual(["event-1"])
+  expect(pending.size).toBe(0)
+})
+
+test("an operation on another stock with a different quantity keeps this stock's eventId", async () => {
+  const { pending, failing } = twoScreens({ result: networkError })
+  await failing.actions.consume("2")
+  const other = harness({
+    pending,
+    newEventId: () => "event-2",
+    stock: stock({ id: OTHER_ID, quantity: 3 }),
+  })
+  await other.actions.consume("1")
+  const again = harness({ pending, newEventId: () => "event-unused" })
+  await again.actions.consume("2")
+  expect(sentEventIds(again)).toEqual(["event-1"])
+})
+
+test("a screen showing a changed quantity does not drop an eventId still being sent", async () => {
+  // 残量 5 の画面の送信が応答を待っている間に、残量 3 を表示した画面が操作する
+  const pending: PendingOps = new Map()
+  const newEventId = idSource()
+  const sending = harness({ pending, newEventId, result: networkError })
+  const refreshed = harness({ pending, newEventId, stock: stock({ quantity: 3 }) })
+  await Promise.all([sending.actions.consume("2"), refreshed.actions.consume("1")])
+  const again = harness({ pending, newEventId })
+  await again.actions.consume("2")
+  expect(sentEventIds(again)).toEqual(["event-1"])
 })

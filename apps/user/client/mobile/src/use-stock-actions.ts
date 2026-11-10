@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { randomUUID } from "expo-crypto"
 import { getApiClient } from "./api"
 import {
@@ -19,9 +19,12 @@ export function useStockActions(options: Options) {
   const [guard] = useState(createGuard)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<ActionMessage | null>(null)
-  // 廃棄の確認中に stock が差し替わるので、いま表示している残量は ref 経由で読む
+  // ネイティブでは廃棄の確認 Alert を開いている間に再取得で stock が差し替わりうる。
+  // いま表示している残量は ref 経由で読む (render 中の ref 書き換えは禁止なので effect で更新する)
   const latest = useRef(options.stock)
-  latest.current = options.stock
+  useLayoutEffect(() => {
+    latest.current = options.stock
+  })
   const actions = createStockActions({
     client: getApiClient(),
     guard,

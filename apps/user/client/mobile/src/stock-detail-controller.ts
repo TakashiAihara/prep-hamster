@@ -133,7 +133,14 @@ export function createConfirmDiscard(
 export type ActionMessage = { kind: "ok" | "error"; text: string }
 
 // 結果が不明な操作の eventId を操作内容ごとに保ち、同じ内容の押し直しで使い回す
-export type PendingOps = Map<string, string>
+export type PendingEntry = {
+  eventId: string
+  stockId: string
+  baseQuantity: number
+  inFlight: number
+  uncertain: boolean
+}
+export type PendingOps = Map<string, PendingEntry>
 
 export type StockActionDeps = {
   client: ApiClient
@@ -183,7 +190,7 @@ export function createStockActions(deps: StockActionDeps) {
     }
   }
 
-  // consume / discard は結果が不明な失敗 (通信断 / 408 / 5xx) のとき、同じ eventId で
+  // consume / discard は結果が不明な失敗のとき、同じ eventId で
   // 再送してサーバ側の冪等化に任せる。同じ内容の操作なら eventId を使い回す。
   async function runDelta(
     kind: "consume" | "discard",
@@ -192,19 +199,40 @@ export function createStockActions(deps: StockActionDeps) {
     send: (eventId: string) => Promise<ActionResult>,
   ): Promise<ActionResult> {
     const key = JSON.stringify([kind, stock.id, quantity, reason, stock.quantity])
-    const eventId = deps.pending.get(key) ?? deps.newEventId()
-    // 送信前に記録する。応答を待つ間に画面が作り直されても eventId を辿れるように
-    deps.pending.set(key, eventId)
-    const r = await send(eventId)
+    // 残量が変わった記録はもう一致しない。残すと残量が元に戻ったとき古い eventId を
+    // 再生してしまうので、送信中のものを除いて消す
+    for (const [k, e] of deps.pending) {
+      if (e.stockId === stock.id && e.baseQuantity !== stock.quantity && e.inFlight === 0) {
+        deps.pending.delete(k)
+      }
+    }
+    let entry = deps.pending.get(key)
+    if (entry === undefined) {
+      entry = {
+        eventId: deps.newEventId(),
+        stockId: stock.id,
+        baseQuantity: stock.quantity,
+        inFlight: 0,
+        uncertain: false,
+      }
+      deps.pending.set(key, entry)
+    }
+    entry.inFlight += 1
+    const r = await send(entry.eventId)
+    entry.inFlight -= 1
+    // 成功ならサーバに記録済み。結果不明のあとの確定失敗でも先の送信が
+    // 適用されうるので、uncertain は下げない
+    if (r.ok) entry.uncertain = false
+    else if (r.uncertain) entry.uncertain = true
+    // 別の画面がまだ送っている間は eventId を残す。全部の送信が終わって確定したときだけ消す
+    if (entry.inFlight === 0 && !entry.uncertain) deps.pending.delete(key)
     if (!r.ok && r.uncertain) {
       // 結果が不明なので押し直してよいことを伝える。取り直しで残量が変わった後は新しい操作になるので、条件を添える
       return {
         ...r,
-        message: `${r.message} (残量の表示が変わっていなければ、同じ内容でもう一度押しても二重には記録されません)`,
+        message: `${r.message} (アプリを閉じず、残量の表示が変わっていなければ、同じ内容でもう一度押しても二重には記録されません)`,
       }
     }
-    // この操作の分だけ消す。他の操作の pending は残す
-    deps.pending.delete(key)
     return r
   }
 

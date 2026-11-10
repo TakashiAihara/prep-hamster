@@ -142,9 +142,10 @@ export async function loadStockDetail(
   }
 }
 
-// 中継層の 408 は API の定義に無いので、生成された型の外の status として受ける
+// 400 / 404 / 422 はこのリクエストの内容への判定なので、適用されていないと分かる。
+// それ以外は eventId を照合する前に断られたか、先の送信が適用されたか分からない
 function isUncertainStatus(status: number) {
-  return status === 408 || status >= 500
+  return status !== 400 && status !== 404 && status !== 422
 }
 
 export async function consumeStock(
@@ -160,7 +161,7 @@ export async function consumeStock(
     })
     if (!res.ok) {
       const f = await failure(res)
-      // 408 と 5xx はリクエストが適用されたか分からないので、同じ eventId で再送してよい印を付ける
+      // isUncertainStatus の応答はリクエストが適用されたか分からないので、同じ eventId で再送してよい印を付ける
       return isUncertainStatus(res.status) ? { ...f, uncertain: true } : f
     }
     return { ok: true, stock: (await res.json()).stock }
