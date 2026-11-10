@@ -285,7 +285,9 @@ async function bootEmulator(): Promise<string> {
     repoRoot,
     process.env,
   )
-  cleanups.push(() => spawnSync(adb, ["-s", serial, "emu", "kill"], { stdio: "ignore" }))
+  cleanups.push(() =>
+    spawnSync(adb, ["-s", serial, "emu", "kill"], { stdio: "ignore", timeout: 30_000 }),
+  )
   await waitFor(
     "emulator boot",
     async () => capture(adb, ["-s", serial, "shell", "getprop", "sys.boot_completed"]) === "1",
@@ -295,6 +297,8 @@ async function bootEmulator(): Promise<string> {
 }
 
 function teardown() {
+  // Cleanups first: the logcat dump needs the emulator, which is one of the children below
+  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
   for (const child of children.splice(0).toReversed()) {
     // detached: the group also holds Metro's / the emulator's own children
     if (child.pid) {
@@ -303,7 +307,6 @@ function teardown() {
       } catch {}
     }
   }
-  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
 }
 
 // --- main ------------------------------------------------------------------
@@ -389,7 +392,11 @@ async function e2e() {
   const pathEnv = `${dirname(adb)}:${process.env["PATH"] ?? ""}`
   // The device log is the only record of what the app did (a JS error, a crash) when a flow fails
   cleanups.push(() => {
-    const logcat = spawnSync(adb, ["-s", serial, "logcat", "-d"], { encoding: "utf-8" })
+    // adb waits forever on an emulator that died (seen when the host stalled it); bound it
+    const logcat = spawnSync(adb, ["-s", serial, "logcat", "-d"], {
+      encoding: "utf-8",
+      timeout: 60_000,
+    })
     writeFileSync(join(cacheDir, "logcat.log"), logcat.stdout ?? "")
   })
   run(
