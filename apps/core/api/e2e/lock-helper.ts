@@ -25,10 +25,11 @@ export async function waitForLockWaiters(count: number) {
   for (let i = 0; i < 100; i++) {
     // oxlint-disable-next-line no-await-in-loop
     const rows = (await testDb.execute(
-      // 共有の Postgres なので、この DB で在庫を更新しようとして待っている要求だけを数える
+      // 共有の Postgres なので、この DB で在庫の行を更新するか押さえようとして待っている要求だけを数える
       sql`select count(*)::int as n from pg_stat_activity
           where wait_event_type = 'Lock' and datname = current_database()
-            and query ilike 'update "stocks"%'`,
+            and (query ilike 'update "stocks"%'
+              or (query ilike 'select %from "stocks"%' and query ilike '% for %update%'))`,
     )) as unknown as Array<{ n: number }>
     if ((rows[0]?.n ?? 0) >= count) return
     // oxlint-disable-next-line no-await-in-loop

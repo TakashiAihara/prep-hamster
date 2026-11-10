@@ -46,6 +46,16 @@ async function quantityOf(stockId: string) {
   return row?.quantity
 }
 
+async function deletedAtOf(stockId: string) {
+  const [row] = await testDb.select().from(stocks).where(eq(stocks.id, stockId))
+  return row?.deletedAt
+}
+
+async function locationOf(stockId: string) {
+  const [row] = await testDb.select().from(stocks).where(eq(stocks.id, stockId))
+  return row?.locationId
+}
+
 async function eventsOf(stockId: string) {
   return testDb.select().from(stockEvents).where(eq(stockEvents.stockId, stockId))
 }
@@ -96,9 +106,8 @@ test("each response returns the quantity left after its own subtraction", async 
   const quantities = (await Promise.all(responses.map((r) => r.json()))) as Array<{
     stock: { quantity: number }
   }>
-  // 3 を引く要求と 4 を引く要求のどちらが先に通るかで、応答の組は 2 通りに決まる
-  const pair = quantities.map((b) => b.stock.quantity).join(",")
-  expect(["7,3", "3,6"]).toContain(pair)
+  // race() は配列の順に通すので、3 を引いた残り 7、続けて 4 を引いた残り 3
+  expect(quantities.map((b) => b.stock.quantity)).toEqual([7, 3])
 })
 
 test("when concurrent consumes together exceed the stock, only the ones that fit are applied", async () => {
@@ -106,7 +115,7 @@ test("when concurrent consumes together exceed the stock, only the ones that fit
 
   const responses = await race(stockId, [() => post("consume", 3), () => post("consume", 3)])
 
-  expect(responses.map((r) => r.status).toSorted()).toEqual([200, 422])
+  expect(responses.map((r) => r.status)).toEqual([200, 422])
   const rejected = responses.find((r) => r.status === 422)
   if (!rejected) throw new Error("no rejected response")
   expect(((await rejected.json()) as { error: { code: string } }).error.code).toBe(
@@ -162,7 +171,12 @@ test("when concurrent discards together exceed the stock, only the ones that fit
 
   const responses = await race(stockId, [() => post("discard", 3), () => post("discard", 3)])
 
-  expect(responses.map((r) => r.status).toSorted()).toEqual([200, 422])
+  expect(responses.map((r) => r.status)).toEqual([200, 422])
+  const rejected = responses[1]
+  if (!rejected) throw new Error("no rejected response")
+  expect(((await rejected.json()) as { error: { code: string } }).error.code).toBe(
+    "INSUFFICIENT_QUANTITY",
+  )
   expect(await quantityOf(stockId)).toBe(2)
   expect(await eventsOf(stockId)).toHaveLength(1)
 })
@@ -196,6 +210,10 @@ test("a discard resend that finds the stock already too low after the race is an
   ])
 
   expect(responses.map((r) => r.status)).toEqual([200, 200])
+  const bodies = (await Promise.all(responses.map((r) => r.json()))) as Array<{
+    event: { id: string }
+  }>
+  expect(bodies.map((b) => b.event.id)).toEqual([eventId, eventId])
   expect(await quantityOf(stockId)).toBe(1)
   expect(await eventsOf(stockId)).toHaveLength(1)
 })
@@ -209,6 +227,7 @@ test("a delete that waits behind a consume discards only what the consume left",
   )
 
   expect(statuses).toEqual([200, 204])
+  expect(await deletedAtOf(stockId)).toBeInstanceOf(Date)
   const events = await eventsOf(stockId)
   expect(events.map((e) => [e.eventType, e.quantityDelta]).toSorted()).toEqual([
     ["CONSUME", -3],
@@ -224,6 +243,7 @@ test("a delete that waits behind a consume emptying the stock records no discard
   )
 
   expect(statuses).toEqual([200, 204])
+  expect(await deletedAtOf(stockId)).toBeInstanceOf(Date)
   const events = await eventsOf(stockId)
   expect(events.map((e) => [e.eventType, e.quantityDelta])).toEqual([["CONSUME", -10]])
 })
@@ -233,7 +253,7 @@ test("two concurrent deletes record a single discard event", async () => {
 
   const responses = await race(stockId, [() => remove(), () => remove()])
 
-  expect(responses.map((r) => r.status).toSorted()).toEqual([204, 404])
+  expect(responses.map((r) => r.status)).toEqual([204, 404])
   const events = await eventsOf(stockId)
   expect(events.map((e) => [e.eventType, e.quantityDelta])).toEqual([["DISCARD", -10]])
 })
@@ -247,22 +267,24 @@ test("two concurrent moves record the location each move actually left", async (
 
   expect(responses.map((r) => r.status)).toEqual([200, 200])
   const events = await eventsOf(stockId)
-  const first = events.find((e) => e.fromLocationId === locationId)
-  const second = events.find((e) => e !== first)
-  if (!first || !second) throw new Error("expected two move events")
-  expect(second.fromLocationId).toBe(first.toLocationId)
-  const [row] = await testDb.select().from(stocks).where(eq(stocks.id, stockId))
-  expect(row?.locationId).toBe(second.toLocationId ?? "")
+  expect(events.map((e) => [e.fromLocationId, e.toLocationId]).toSorted()).toEqual(
+    [
+      [locationId, fridge],
+      [fridge, shelf],
+    ].toSorted(),
+  )
+  expect(await locationOf(stockId)).toBe(shelf)
 })
 
 test("a move that loses the race to a delete returns 404 without recording an event", async () => {
-  const { stockId, move, addLocation } = await setup(10)
+  const { stockId, locationId, move, addLocation } = await setup(10)
   const fridge = await addLocation("Fridge")
 
   const res = await raceAgainstDelete(stockId, () => move(fridge))
 
   expect(res.status).toBe(404)
   expect(await eventsOf(stockId)).toHaveLength(0)
+  expect(await locationOf(stockId)).toBe(locationId)
 })
 
 test("two concurrent moves to the same location record one move and reject the other", async () => {
@@ -271,7 +293,7 @@ test("two concurrent moves to the same location record one move and reject the o
 
   const responses = await race(stockId, [() => move(fridge), () => move(fridge)])
 
-  expect(responses.map((r) => r.status).toSorted()).toEqual([200, 422])
+  expect(responses.map((r) => r.status)).toEqual([200, 422])
   const rejected = responses.find((r) => r.status === 422)
   if (!rejected) throw new Error("no rejected response")
   expect(((await rejected.json()) as { error: { code: string } }).error.code).toBe("MOVE_NOOP")

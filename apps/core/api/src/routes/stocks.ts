@@ -131,10 +131,11 @@ async function findRecordedDeltaEvent(
 // 場合に起きる。catch 側で最新の行を読み直して 422 / 404 を決める。
 class StockDeltaNotApplied extends Error {}
 
-// move / delete の transaction 内の更新が対象行を取れなかったとき
-// (= 並行して削除された) に外へ出す印。
+// move の transaction 内で対象行を取れなかった (= 並行して削除された) ときの印。
 class StockMoveNotApplied extends Error {}
+// ロックした行が既に移動先 locationId にあったときの印。
 class StockMoveNoop extends Error {}
+// delete の transaction 内で対象行を取れなかった (= 並行して削除された) ときの印。
 class StockDeleteNotApplied extends Error {}
 
 const listStocksRoute = createRoute({
@@ -954,14 +955,14 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
     try {
       const result = await db.transaction(async (tx) => {
         const now = new Date()
-        // UPDATE ... RETURNING は更新後の値しか返さないので、移動元を正しく記録する
-        // にはロック取得時点の行を別途読む必要がある。値を変えない UPDATE で
-        // 行をロックしつつ現在値を取る。
+        // MOVE イベントの移動元には、このリクエストが行をロックした時点の
+        // locationId を記録する。UPDATE の RETURNING は更新後の値しか返さないので、
+        // UPDATE の前に FOR NO KEY UPDATE で行をロックして現在値を取る。
         const [locked] = await tx
-          .update(stocks)
-          .set({ updatedAt: sql`${stocks.updatedAt}` })
+          .select()
+          .from(stocks)
           .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
-          .returning()
+          .for("no key update")
         if (!locked) {
           throw new StockMoveNotApplied()
         }
