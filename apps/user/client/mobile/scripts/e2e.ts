@@ -20,6 +20,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import {
+  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -208,10 +209,18 @@ function startSupabase(): { secretKey: string; publishableKey: string } {
   const stop = () =>
     spawnSync("bunx", ["supabase", "stop", "--no-backup", "--workdir", sbWorkdir], {
       stdio: "inherit",
+      timeout: 180_000,
     })
   // A run killed before its teardown leaves the volumes; drop them so the DB starts empty
   if (stop().status !== 0) throw new Error("supabase stop failed; the DB would not start empty")
-  cleanups.push(stop)
+  cleanups.push(() => {
+    const r = stop()
+    if (r.status !== 0) {
+      throw new Error(
+        `supabase stop failed (${r.error?.message ?? r.status}); containers may be left`,
+      )
+    }
+  })
   // Only Auth (gotrue), its gateway (kong) and the DB are used by the app and the API
   run("bunx", [
     "supabase",
@@ -285,7 +294,13 @@ async function bootEmulator(): Promise<string> {
     repoRoot,
     process.env,
   )
-  cleanups.push(() => spawnSync(adb, ["-s", serial, "emu", "kill"], { stdio: "ignore" }))
+  cleanups.push(() =>
+    // only a warning: the SIGTERM to the emulator's process group in teardown() follows
+    warnIfFailed(
+      "adb emu kill",
+      spawnSync(adb, ["-s", serial, "emu", "kill"], { stdio: "ignore", timeout: 30_000 }),
+    ),
+  )
   await waitFor(
     "emulator boot",
     async () => capture(adb, ["-s", serial, "shell", "getprop", "sys.boot_completed"]) === "1",
@@ -294,7 +309,25 @@ async function bootEmulator(): Promise<string> {
   return serial
 }
 
-function teardown() {
+function warnIfFailed(what: string, r: ReturnType<typeof spawnSync>) {
+  if (r.error || r.status !== 0) {
+    console.warn(`[e2e] ${what} failed: ${r.error?.message ?? `exit ${r.status ?? r.signal}`}`)
+  }
+}
+
+// Returns false when a cleanup failed, so the run does not report success over leftovers
+function teardown(): boolean {
+  let ok = true
+  // Cleanups first: the logcat dump needs the emulator, which is one of the children below
+  for (const cleanup of cleanups.splice(0).toReversed()) {
+    // one failed cleanup must not leave the rest (and the children below) running
+    try {
+      cleanup()
+    } catch (err) {
+      console.error(`[e2e] cleanup failed: ${err instanceof Error ? err.message : err}`)
+      ok = false
+    }
+  }
   for (const child of children.splice(0).toReversed()) {
     // detached: the group also holds Metro's / the emulator's own children
     if (child.pid) {
@@ -303,7 +336,7 @@ function teardown() {
       } catch {}
     }
   }
-  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+  return ok
 }
 
 // --- main ------------------------------------------------------------------
@@ -364,8 +397,25 @@ async function e2e() {
 
   const serial = process.env["E2E_DEVICE"] || (await bootEmulator())
   // A busy emulator shows "Pixel Launcher isn't responding" over the app, and every flow then
-  // fails to find its screen (seen on CI). The flows test the app, so hide system error dialogs.
-  run(adb, ["-s", serial, "shell", "settings", "put", "global", "hide_error_dialogs", "1"])
+  // fails to find its screen (seen on CI, also with hide_error_dialogs set). The flows start the
+  // app with `am start` and need no launcher; without it the home is Settings' blank FallbackHome.
+  // E2E_DEVICE may be someone's everyday emulator: put the launcher back unless it was already off
+  const launcher = "com.google.android.apps.nexuslauncher"
+  const pm = (...args: string[]) =>
+    spawnSync(adb, ["-s", serial, "shell", "pm", ...args], { encoding: "utf-8", timeout: 30_000 })
+  const before = pm("list", "packages", "-d")
+  // Unknown state (the list failed): leave the launcher alone rather than "restore" it wrongly
+  if (before.status !== 0) {
+    warnIfFailed("listing disabled packages (Pixel Launcher left as is)", before)
+  } else if (!before.stdout.includes(`package:${launcher}`)) {
+    const disabled = pm("disable-user", "--user", "0", launcher)
+    warnIfFailed("disabling Pixel Launcher", disabled)
+    if (disabled.status === 0) {
+      cleanups.push(() =>
+        warnIfFailed("re-enabling Pixel Launcher", pm("enable", "--user", "0", launcher)),
+      )
+    }
+  }
   run(adb, ["-s", serial, "install", "-r", apk])
 
   // The first launch on a fresh emulator is far slower than the rest (seen failing whichever flow
@@ -389,8 +439,16 @@ async function e2e() {
   const pathEnv = `${dirname(adb)}:${process.env["PATH"] ?? ""}`
   // The device log is the only record of what the app did (a JS error, a crash) when a flow fails
   cleanups.push(() => {
-    const logcat = spawnSync(adb, ["-s", serial, "logcat", "-d"], { encoding: "utf-8" })
-    writeFileSync(join(cacheDir, "logcat.log"), logcat.stdout ?? "")
+    // Straight to the file: a pipe would cap the dump at spawnSync's 1 MiB maxBuffer.
+    // adb waits forever on an emulator that died (seen when the host stalled it); bound it
+    const fd = openSync(join(cacheDir, "logcat.log"), "w")
+    const r = spawnSync(adb, ["-s", serial, "logcat", "-d"], {
+      stdio: ["ignore", fd, "ignore"],
+      timeout: 60_000,
+    })
+    closeSync(fd)
+    // diagnostics only: a missing log should be visible, not fail the run
+    warnIfFailed("adb logcat (logcat.log may be empty or cut short)", r)
   })
   run(
     "maestro",
@@ -448,7 +506,7 @@ async function main() {
     console.error(`[e2e] ${err instanceof Error ? err.message : err}`)
     failed = true
   } finally {
-    teardown()
+    if (!teardown()) failed = true
   }
   process.exit(failed ? 1 : 0)
 }
