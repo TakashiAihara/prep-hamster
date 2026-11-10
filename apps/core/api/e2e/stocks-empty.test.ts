@@ -86,3 +86,14 @@ test("an includeEmpty value that is not true or false is rejected with 422", asy
 
   expect(res.status).toBe(422)
 })
+
+test("includeEmpty and includeExpired together bring back used-up expired stocks", async () => {
+  const { ids, seed } = await setup()
+  const emptyExpired = await seed(0, { useByDate: "2000-01-01" })
+  const aliveExpired = await seed(2, { useByDate: "2000-01-01" })
+
+  expect(await ids("&includeEmpty=true&includeExpired=true")).toEqual(
+    [emptyExpired, aliveExpired].toSorted(),
+  )
+  expect(await ids("&includeExpired=true")).toEqual([aliveExpired])
+})

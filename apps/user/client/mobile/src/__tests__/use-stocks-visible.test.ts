@@ -60,7 +60,8 @@ function fakeListClient(
 }
 
 test("loadStockRows asks for expired stocks too and shows the rows the API returns as is", async () => {
-  // 数量 0 の在庫を除くのは API の既定 (includeEmpty なし)。端末側では絞り直さない
+  // 数量 0 の在庫を除くのは API の既定 (includeEmpty なし)。偽の API にあえて数量 0 の行を返させ、
+  // 端末側では絞り直さずにそのまま出すことを確かめる
   const { client, queries } = fakeListClient()
   const r = await loadStockRows(client, GROUP)
   expect(queries.stocks).toEqual({ groupId: GROUP, includeExpired: "true" })
