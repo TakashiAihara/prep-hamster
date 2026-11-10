@@ -403,7 +403,11 @@ async function e2e() {
   const launcher = "com.google.android.apps.nexuslauncher"
   const pm = (...args: string[]) =>
     spawnSync(adb, ["-s", serial, "shell", "pm", ...args], { encoding: "utf-8", timeout: 30_000 })
-  if (!(pm("list", "packages", "-d").stdout ?? "").includes(`package:${launcher}`)) {
+  const before = pm("list", "packages", "-d")
+  // Unknown state (the list failed): leave the launcher alone rather than "restore" it wrongly
+  if (before.status !== 0) {
+    warnIfFailed("listing disabled packages (Pixel Launcher left as is)", before)
+  } else if (!before.stdout.includes(`package:${launcher}`)) {
     const disabled = pm("disable-user", "--user", "0", launcher)
     warnIfFailed("disabling Pixel Launcher", disabled)
     if (disabled.status === 0) {
