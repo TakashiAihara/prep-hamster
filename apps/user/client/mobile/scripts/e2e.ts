@@ -1,0 +1,348 @@
+#!/usr/bin/env bun
+// Runs the Maestro flows end to end on this machine: Supabase local (Auth + DB) → migrations → API →
+// seed (test user's group and locations) → Metro → emulator → debug APK → flows (scripts/capture-screens.ts)
+// → tear everything down. Every run starts from an empty DB, and nothing talks to the Supabase project.
+//
+// usage:
+//   bun run e2e              full run (boots its own headless emulator unless E2E_DEVICE is set)
+//   bun run e2e build        only build the debug APK into .cache/e2e (CI builds before booting the emulator)
+//   bun run e2e fingerprint  print the cache key of the APK (native fingerprint + Metro port)
+//
+// env (defaults avoid the ports of `supabase start` / `expo start` so a dev stack can keep running):
+//   E2E_SUPABASE_PORT  25321 (DB = +1, shadow DB = -1). Keep it below the ephemeral range
+//                      (32768+): docker fails to bind a port an outgoing connection is using
+//   E2E_API_PORT       3100
+//   E2E_METRO_PORT     8091  (baked into the APK; the debug build fetches JS from 10.0.2.2:<port>)
+//   E2E_DEVICE         adb serial of an already running device. Unset: boot E2E_AVD on port 5600
+//   E2E_AVD            prep_hamster
+//   ANDROID_HOME       Android SDK (emulator / adb / gradle)
+//   JAVA_HOME          JDK 17 for gradle
+
+import { spawn, spawnSync, type ChildProcess } from "node:child_process"
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
+
+const here = dirname(new URL(import.meta.url).pathname)
+const mobileRoot = resolve(here, "..")
+const repoRoot = resolve(mobileRoot, "../../../..")
+const cacheDir = join(repoRoot, ".cache/e2e")
+
+const sbPort = Number(process.env["E2E_SUPABASE_PORT"] ?? 25321)
+const apiPort = Number(process.env["E2E_API_PORT"] ?? 3100)
+const metroPort = Number(process.env["E2E_METRO_PORT"] ?? 8091)
+const avd = process.env["E2E_AVD"] ?? "prep_hamster"
+const sdk = process.env["ANDROID_HOME"] ?? join(process.env["HOME"] ?? "", "Android/sdk")
+const adb = join(sdk, "platform-tools/adb")
+const sbWorkdir = join(cacheDir, "supabase")
+const sbUrl = `http://127.0.0.1:${sbPort}`
+// 10.0.2.2 is the host's loopback as seen from the Android emulator
+const hostFromEmulator = "10.0.2.2"
+
+const log = (msg: string) => console.log(`[e2e] ${msg}`)
+
+function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
+  const r = spawnSync(cmd, args, { stdio: "inherit", cwd: opts.cwd ?? repoRoot, env: opts.env })
+  if (r.status !== 0) {
+    throw new Error(`${cmd} ${args.join(" ")} exited with ${r.status ?? r.signal}`)
+  }
+}
+
+function capture(cmd: string, args: string[], env?: NodeJS.ProcessEnv): string {
+  const r = spawnSync(cmd, args, {
+    cwd: repoRoot,
+    env,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "inherit"],
+  })
+  if (r.status !== 0) {
+    throw new Error(`${cmd} ${args.join(" ")} exited with ${r.status ?? r.signal}`)
+  }
+  return r.stdout.trim()
+}
+
+async function waitFor(what: string, check: () => Promise<boolean>, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    // oxlint-disable-next-line no-await-in-loop -- polling: each try must finish before the next
+    if (await check().catch(() => false)) return
+    // oxlint-disable-next-line no-await-in-loop -- polling interval
+    await Bun.sleep(2000)
+  }
+  throw new Error(`timed out after ${timeoutMs / 1000}s waiting for ${what}`)
+}
+
+async function portFree(port: number): Promise<boolean> {
+  try {
+    const conn = await Bun.connect({ hostname: "127.0.0.1", port, socket: { data() {} } })
+    conn.end()
+    return false
+  } catch {
+    return true
+  }
+}
+
+// --- APK -------------------------------------------------------------------
+
+function fingerprint(): string {
+  const out = capture("bunx", ["fingerprint", "fingerprint:generate", mobileRoot])
+  const hash = (JSON.parse(out) as { hash?: string }).hash
+  if (!hash) throw new Error("@expo/fingerprint returned no hash")
+  return `${hash}-${metroPort}`
+}
+
+function apkPath(): string {
+  return join(cacheDir, `app-debug-${fingerprint()}.apk`)
+}
+
+// Only a native change (fingerprint) or another Metro port needs a new APK; JS comes from Metro.
+function buildApk(): string {
+  const apk = apkPath()
+  if (existsSync(apk)) {
+    log(`APK up to date: ${apk}`)
+    return apk
+  }
+
+  // prebuild rewrites the android / ios scripts in package.json; keep the committed file as is
+  const pkgPath = join(mobileRoot, "package.json")
+  const pkg = readFileSync(pkgPath, "utf-8")
+  try {
+    run("bunx", ["expo", "prebuild", "--platform", "android", "--no-install"], { cwd: mobileRoot })
+  } finally {
+    writeFileSync(pkgPath, pkg)
+  }
+
+  // A stale ANDROID_SDK_ROOT that disagrees with ANDROID_HOME fails the gradle configure step
+  const env = { ...process.env, ANDROID_HOME: sdk }
+  delete env["ANDROID_SDK_ROOT"]
+  run(
+    "./gradlew",
+    [
+      "assembleDebug",
+      // the emulator is x86_64; building one ABI instead of four cuts the native build
+      "-PreactNativeArchitectures=x86_64",
+      `-PreactNativeDevServerPort=${metroPort}`,
+    ],
+    { cwd: join(mobileRoot, "android"), env },
+  )
+  mkdirSync(cacheDir, { recursive: true })
+  copyFileSync(join(mobileRoot, "android/app/build/outputs/apk/debug/app-debug.apk"), apk)
+  log(`APK built: ${apk}`)
+  return apk
+}
+
+// --- services --------------------------------------------------------------
+
+const children: ChildProcess[] = []
+const cleanups: (() => void)[] = []
+
+function background(
+  name: string,
+  cmd: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+) {
+  const logPath = join(cacheDir, `${name}.log`)
+  const out = Bun.file(logPath).writer()
+  const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true })
+  child.stdout?.on("data", (d) => out.write(d))
+  child.stderr?.on("data", (d) => out.write(d))
+  children.push(child)
+  log(`${name} started (log: ${logPath})`)
+  return child
+}
+
+function startSupabase(): { secretKey: string; publishableKey: string } {
+  // Own project_id and ports, so a `supabase start` of this repo (or another E2E checkout) is untouched
+  const config = readFileSync(join(repoRoot, "supabase/config.toml"), "utf-8")
+    .replace(/^project_id = .*$/m, `project_id = "prep-hamster-e2e-${sbPort}"`)
+    .replace(/^port = 54321$/m, `port = ${sbPort}`)
+    .replace(/^port = 54322$/m, `port = ${sbPort + 1}`)
+    .replace(/^shadow_port = 54320$/m, `shadow_port = ${sbPort - 1}`)
+  mkdirSync(join(sbWorkdir, "supabase"), { recursive: true })
+  writeFileSync(join(sbWorkdir, "supabase/config.toml"), config)
+
+  cleanups.push(() =>
+    spawnSync("bunx", ["supabase", "stop", "--no-backup", "--workdir", sbWorkdir], {
+      stdio: "inherit",
+    }),
+  )
+  // Only Auth (gotrue), its gateway (kong) and the DB are used by the app and the API
+  run("bunx", [
+    "supabase",
+    "start",
+    "--workdir",
+    sbWorkdir,
+    "-x",
+    "realtime,storage-api,imgproxy,mailpit,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor",
+  ])
+  const status = JSON.parse(
+    capture("bunx", ["supabase", "status", "--workdir", sbWorkdir, "-o", "json"]),
+  ) as { SECRET_KEY?: string; PUBLISHABLE_KEY?: string }
+  if (!status.SECRET_KEY || !status.PUBLISHABLE_KEY) {
+    throw new Error("supabase status returned no keys")
+  }
+  return { secretKey: status.SECRET_KEY, publishableKey: status.PUBLISHABLE_KEY }
+}
+
+function devSession(secretKey: string): string {
+  return capture("bun", ["run", join(here, "dev-session.ts")], {
+    ...process.env,
+    SUPABASE_URL: sbUrl,
+    SUPABASE_SECRET_KEY: secretKey,
+  })
+}
+
+// The flows need the test user to be EDITOR+ of a group with two locations (move needs a target)
+async function seed(secretKey: string) {
+  const token = new URL(devSession(secretKey)).searchParams.get("access_token")
+  if (!token) throw new Error("dev-session returned no access token")
+  const post = async (path: string, body: unknown) => {
+    const res = await fetch(`http://127.0.0.1:${apiPort}${path}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    if (res.status !== 201) throw new Error(`seed ${path}: ${res.status} ${await res.text()}`)
+    return res.json()
+  }
+  const { group } = (await post("/v1/groups", { name: "E2E" })) as { group: { id: string } }
+  await Promise.all(
+    ["冷蔵庫", "パントリー"].map((name) => post("/v1/locations", { groupId: group.id, name })),
+  )
+  log("seeded the test user's group and locations")
+}
+
+async function bootEmulator(): Promise<string> {
+  const port = 5600
+  const serial = `emulator-${port}`
+  background(
+    "emulator",
+    join(sdk, "emulator/emulator"),
+    // -read-only lets another session keep the same AVD open
+    [
+      "-avd",
+      avd,
+      "-port",
+      String(port),
+      "-read-only",
+      "-no-window",
+      "-no-audio",
+      "-no-snapshot",
+      "-no-boot-anim",
+      "-gpu",
+      "swiftshader_indirect",
+      "-no-metrics",
+    ],
+    repoRoot,
+    process.env,
+  )
+  cleanups.push(() => spawnSync(adb, ["-s", serial, "emu", "kill"], { stdio: "ignore" }))
+  await waitFor(
+    "emulator boot",
+    async () => capture(adb, ["-s", serial, "shell", "getprop", "sys.boot_completed"]) === "1",
+    300_000,
+  )
+  return serial
+}
+
+// --- main ------------------------------------------------------------------
+
+async function e2e() {
+  mkdirSync(cacheDir, { recursive: true })
+  const ports = [sbPort, sbPort + 1, apiPort, metroPort]
+  const free = await Promise.all(ports.map(portFree))
+  const busy = ports.filter((_, i) => !free[i])
+  if (busy.length > 0) {
+    throw new Error(`port ${busy.join(", ")} in use (another E2E run or dev stack?)`)
+  }
+
+  const apk = buildApk()
+  const { secretKey, publishableKey } = startSupabase()
+
+  const dbUrl = `postgresql://postgres:postgres@127.0.0.1:${sbPort + 1}/postgres`
+  run("bun", ["run", "--filter", "@prep-hamster/db", "db:migrate"], {
+    env: { ...process.env, DATABASE_URL: dbUrl },
+  })
+
+  background("api", "bun", ["run", "apps/core/api/src/index.ts"], repoRoot, {
+    ...process.env,
+    PORT: String(apiPort),
+    DATABASE_URL: dbUrl,
+    SUPABASE_URL: sbUrl,
+  })
+  await waitFor("API", async () => (await fetch(`http://127.0.0.1:${apiPort}/health`)).ok, 60_000)
+  await seed(secretKey)
+
+  // EXPO_PUBLIC_* are inlined by Metro, so the same APK serves any ports / keys
+  background("metro", "bunx", ["expo", "start", "--port", String(metroPort)], mobileRoot, {
+    ...process.env,
+    CI: "1",
+    EXPO_PUBLIC_API_BASE_URL: `http://${hostFromEmulator}:${apiPort}`,
+    EXPO_PUBLIC_SUPABASE_URL: `http://${hostFromEmulator}:${sbPort}`,
+    EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publishableKey,
+  })
+  await waitFor(
+    "Metro",
+    async () =>
+      (await (await fetch(`http://127.0.0.1:${metroPort}/status`)).text()) ===
+      "packager-status:running",
+    120_000,
+  )
+  // Bundle once before the first flow: a cold bundle takes longer than the flow waits for sign-in
+  const bundle = await fetch(
+    `http://127.0.0.1:${metroPort}/.expo/.virtual-metro-entry.bundle?platform=android&dev=true&minify=false`,
+  )
+  if (!bundle.ok) throw new Error(`Metro could not bundle the app: ${bundle.status}`)
+  await bundle.arrayBuffer()
+  log("Metro bundled the app")
+
+  const serial = process.env["E2E_DEVICE"] || (await bootEmulator())
+  run(adb, ["-s", serial, "install", "-r", apk])
+
+  run("bun", ["run", join(here, "capture-screens.ts")], {
+    env: {
+      ...process.env,
+      ANDROID_SERIAL: serial,
+      SUPABASE_URL: sbUrl,
+      SUPABASE_SECRET_KEY: secretKey,
+    },
+  })
+}
+
+async function main() {
+  const command = process.argv[2] ?? "run"
+  if (command === "fingerprint") {
+    console.log(fingerprint())
+    return
+  }
+  if (command === "build") {
+    buildApk()
+    return
+  }
+  if (command !== "run") {
+    console.error(`[e2e] unknown command: ${command} (run | build | fingerprint)`)
+    process.exit(2)
+  }
+
+  let failed = false
+  try {
+    await e2e()
+  } catch (err) {
+    console.error(`[e2e] ${err instanceof Error ? err.message : err}`)
+    failed = true
+  } finally {
+    for (const child of children.toReversed()) {
+      // detached: the group also holds Metro's / the emulator's own children
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, "SIGTERM")
+        } catch {}
+      }
+    }
+    for (const cleanup of cleanups.toReversed()) cleanup()
+  }
+  process.exit(failed ? 1 : 0)
+}
+
+await main()

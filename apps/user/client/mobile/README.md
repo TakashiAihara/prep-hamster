@@ -61,6 +61,21 @@ EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase の publishable key>
 
 `bun --filter @prep-hamster/mobile typecheck` が CI で通ることが merge 条件。
 
+## E2E (Maestro, ローカルで完結)
+
+```sh
+# repo root から。Docker / Android SDK (emulator と AVD) / JDK 17 / Maestro CLI が要る
+JAVA_HOME=<JDK 17> bun run --filter @prep-hamster/mobile e2e
+```
+
+1 回の実行で Supabase local (Auth と DB だけ) → migration → API → テスト用ユーザーのグループと場所 2 件の seed → Metro → headless の emulator → debug APK の install → `maestro/*.yaml` の全 flow → 全部の停止まで通す。Supabase の project には繋がず、毎回空の DB から始まる。
+
+- port は `supabase start` / `expo start` の既定と重ならない値 (Supabase 25320-25322 / API 3100 / Metro 8091。Linux の一時ポート範囲 32768 以上は、外向きの接続が使っている番号を docker が bind できず落ちるので避ける) を使い、`E2E_SUPABASE_PORT` / `E2E_API_PORT` / `E2E_METRO_PORT` で変えられる。埋まっていれば始める前に止まる
+- emulator は AVD `E2E_AVD` (既定 `prep_hamster`) を `-read-only` で port 5600 に起動し、終わったら止める。起動済みの端末で流すなら `E2E_DEVICE=<adb の serial>`
+- debug APK は `.cache/e2e/` に置き、native 部分 (`@expo/fingerprint`) と Metro の port が変わったときだけ build し直す。`bun run --filter @prep-hamster/mobile e2e build` で build だけ
+- キャプチャは `docs/design/screens-as-is/`、各サービスのログは `.cache/e2e/*.log`
+- CI では `.github/workflows/mobile-e2e.yml` が同じスクリプトを GitHub Actions の emulator で流す (mobile / API / packages を変えた PR と手動実行)
+
 ## As-Is screen catalog (Maestro)
 
 `docs/design/screens-as-is.md` に画面遷移図 + 各画面のキャプチャを集める。再生成手順:
