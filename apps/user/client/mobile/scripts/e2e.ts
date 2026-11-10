@@ -345,8 +345,10 @@ async function e2e() {
   mkdirSync(cacheDir, { recursive: true })
   // The host side of a dropped connection (#200): the adb server logs its restarts and, for a
   // kill-server, the caller's process chain. Registered first so it runs last and keeps teardown's
-  // adb calls too. Assumes the server was started with this process's TMPDIR (true on CI)
-  const adbServerLog = join(process.env["TMPDIR"] || "/tmp", `adb.${process.getuid?.() ?? 0}.log`)
+  // adb calls too. Assumes the server was started with this process's env (true on CI)
+  const adbServerLog =
+    process.env["ANDROID_ADB_LOG_PATH"] ||
+    join(process.env["TMPDIR"] || "/tmp", `adb.${process.getuid?.() ?? 0}.log`)
   cleanups.push(() => {
     try {
       copyFileSync(adbServerLog, join(cacheDir, "adb-server.log"))
