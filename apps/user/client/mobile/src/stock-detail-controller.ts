@@ -132,10 +132,22 @@ export function createConfirmDiscard(
 
 export type ActionMessage = { kind: "ok" | "error"; text: string }
 
+export type PendingOp = {
+  kind: "consume" | "discard"
+  stockId: string
+  quantity: number
+  reason: string | null
+  eventId: string
+}
+
+export type PendingOpRef = { current: PendingOp | null }
+
 export type StockActionDeps = {
   client: ApiClient
   stock: StockDto
   guard: Guard
+  pending: PendingOpRef
+  newEventId: () => string
   setBusy: (busy: boolean) => void
   setMessage: (message: ActionMessage | null) => void
   onStockChanged: (stock: StockDto) => void
@@ -174,12 +186,43 @@ export function createStockActions(deps: StockActionDeps) {
     }
   }
 
+  // consume / discard は結果が不明な失敗 (通信断 / 5xx) のとき、同じ eventId で
+  // 再送してサーバ側の冪等化に任せる。同じ内容の操作なら eventId を使い回す。
+  async function runDelta(
+    kind: PendingOp["kind"],
+    quantity: number,
+    reason: string | null,
+    send: (eventId: string) => Promise<ActionResult>,
+  ): Promise<ActionResult> {
+    const pending = deps.pending.current
+    const eventId =
+      pending !== null &&
+      pending.kind === kind &&
+      pending.stockId === stock.id &&
+      pending.quantity === quantity &&
+      pending.reason === reason
+        ? pending.eventId
+        : deps.newEventId()
+    deps.pending.current = { kind, stockId: stock.id, quantity, reason, eventId }
+    const r = await send(eventId)
+    if (!r.ok && r.uncertain) return r
+    deps.pending.current = null
+    return r
+  }
+
   return {
     consume: (amountInput: string) =>
       guard.run(async () => {
         const qty = parseAmount(amountInput, stock.quantity)
         if (!qty.ok) return fail(qty.message)
-        await perform("消費しました", () => consumeStock(client, stock.id, qty.value), true)
+        await perform(
+          "消費しました",
+          () =>
+            runDelta("consume", qty.value, null, (eventId) =>
+              consumeStock(client, stock.id, qty.value, eventId),
+            ),
+          true,
+        )
       }),
 
     discard: (amountInput: string, reasonInput: string) =>
@@ -199,7 +242,10 @@ export function createStockActions(deps: StockActionDeps) {
         if (!confirmed) return
         await perform(
           "廃棄しました",
-          () => discardStock(client, stock.id, qty.value, why.value),
+          () =>
+            runDelta("discard", qty.value, why.value, (eventId) =>
+              discardStock(client, stock.id, qty.value, why.value, eventId),
+            ),
           true,
         )
       }),

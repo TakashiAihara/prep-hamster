@@ -1,9 +1,11 @@
 import { useState } from "react"
+import { randomUUID } from "expo-crypto"
 import { getApiClient } from "./api"
 import {
   createGuard,
   createStockActions,
   type ActionMessage,
+  type PendingOpRef,
   type StockActionDeps,
 } from "./stock-detail-controller"
 
@@ -15,11 +17,14 @@ type Options = Pick<
 // busy / message の state と、二重実行を弾く guard を持つ薄い hook。判定は stock-detail-controller 側。
 export function useStockActions(options: Options) {
   const [guard] = useState(createGuard)
+  const [pending] = useState<PendingOpRef>(() => ({ current: null }))
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<ActionMessage | null>(null)
   const actions = createStockActions({
     client: getApiClient(),
     guard,
+    pending,
+    newEventId: randomUUID,
     setBusy,
     setMessage,
     ...options,

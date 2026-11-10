@@ -331,6 +331,7 @@ export const stockQuantityDeltaBodyDtoSchema = z
   .object({
     quantityDelta: z.number().positive(),
     reason: z.string().max(500).nullable().optional(),
+    eventId: z.string().uuid().optional(),
   })
   .openapi("StockQuantityDeltaBody")
 
