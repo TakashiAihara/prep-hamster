@@ -1,0 +1,78 @@
+name: Expo SDK patch check
+
+# CI checks the Expo dependency versions against the locked SDK (EXPO_OFFLINE), so a new Expo SDK
+# patch release no longer fails main, and dependabot ignores the expo packages. This weekly job
+# runs the same check online against api.expo.dev and opens an issue when newer patch versions
+# are expected, so they are still noticed.
+on:
+  schedule:
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A manual run overlapping the scheduled one could otherwise open the same issue twice.
+concurrency:
+  group: ${{ github.workflow }}
+
+jobs:
+  check:
+    name: Check against the latest Expo SDK patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - name: Check against the latest Expo SDK patch
+        id: check
+        working-directory: apps/user/client/mobile
+        run: |
+          set +e
+          bunx expo install --check > "$RUNNER_TEMP/check.log" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/check.log"
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          # Any other failure (the endpoint unreachable, a CLI error) fails the run instead of
+          # being reported as an update.
+          if ! grep -q "Found outdated dependencies" "$RUNNER_TEMP/check.log"; then
+            echo "::error::expo install --check failed for a reason other than outdated dependencies"
+            exit 1
+          fi
+          echo "outdated=true" >> "$GITHUB_OUTPUT"
+      # The token is given only to this step, not to the third-party CLI run by the check.
+      - name: Open an issue for the update
+        if: steps.check.outputs.outdated == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "chore(mobile): update to the latest Expo SDK patch versions"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # Listing open issues instead of --search keeps the search index lag out of the dedup.
+          open="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 500 --json title --jq "map(select(.title == env.TITLE)) | length")"
+          if [ "$open" -gt 0 ]; then
+            echo "An open issue already tracks this update"
+            exit 0
+          fi
+          {
+            echo "The weekly online \`expo install --check\` expects newer versions than bun.lock pins."
+            echo "Run \`bunx expo install --fix\` in \`apps/user/client/mobile\` and open a PR that closes this issue."
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/check.log"
+            echo '```'
+            echo
+            echo "Run: $RUN_URL"
+          } > "$RUNNER_TEMP/body.md"
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md" --label "type/chore,priority/medium,scope/mobile,dependencies"
