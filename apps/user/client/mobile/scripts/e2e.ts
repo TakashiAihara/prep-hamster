@@ -454,11 +454,15 @@ async function e2e() {
         60_000,
       )
     run(adb, ["-s", serial, "root"])
-    await adbdAs("0")
-    run(adb, ["-s", serial, "shell", "setprop", "metro.host", hostFromEmulator])
-    // Back to the usual non-root adbd: the flows were measured under it (#200)
-    run(adb, ["-s", serial, "unroot"])
-    await adbdAs("2000")
+    try {
+      await adbdAs("0")
+      run(adb, ["-s", serial, "shell", "setprop", "metro.host", hostFromEmulator])
+    } finally {
+      // Back to the usual non-root adbd even when the above failed: E2E_DEVICE may be someone's
+      // everyday emulator, and the flows were measured under a non-root adbd (#200)
+      run(adb, ["-s", serial, "unroot"])
+      await adbdAs("2000")
+    }
     const metroHost = capture(adb, ["-s", serial, "shell", "getprop", "metro.host"])
     if (metroHost !== hostFromEmulator) throw new Error(`metro.host is "${metroHost}"`)
   }
