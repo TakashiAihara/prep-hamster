@@ -1,5 +1,5 @@
 import { Redirect, useFocusEffect } from "expo-router"
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native"
 import { getApiClient } from "@/api"
+import { apiErrorMessage } from "@/api-error"
 import { useCurrentGroup } from "@/current-group"
 import { KeyboardScrollView } from "@/keyboard-scroll-view"
 import { parseLocationName } from "@/location-create"
@@ -48,18 +49,25 @@ function LocationsBody({ groupId }: { groupId: string }) {
   const [draftName, setDraftName] = useState("")
   const [pending, setPending] = useState<Pending | null>(null)
   const [message, setMessage] = useState<ActionMessage | null>(null)
+  // Pressable の disabled は再描画まで効かないので、キーボード送信のような別経路の 2 連打は同期フラグで止める
+  // (add/details.tsx の addingRef と同じ形)
+  const pendingRef = useRef<Pending | null>(null)
 
-  // focus のたびに取り直す (他のメンバーが変えた場所を古いまま操作しない)。再試行は reloadKey で再実行する
+  // focus のたびに取り直す (他のメンバーが変えた場所を古いまま操作しない)。再試行は reloadKey で再実行する。
+  // 既に一覧が出ているときの再取得 (mutation 後の追従) では loading に倒さず、今の一覧を出したまま差し替える
   useFocusEffect(
     useCallback(() => {
       let cancelled = false
-      setLoad({ status: "loading" })
+      setLoad((prev) => (prev.status === "ok" ? prev : { status: "loading" }))
       void (async () => {
         try {
           const res = await getApiClient().v1.locations.$get({ query: { groupId } })
           if (cancelled) return
           if (!res.ok) {
-            setLoad({ status: "error", message: `locations HTTP ${res.status}` })
+            setLoad({
+              status: "error",
+              message: await apiErrorMessage(res, `locations HTTP ${res.status}`),
+            })
             return
           }
           const { locations } = await res.json()
@@ -83,6 +91,8 @@ function LocationsBody({ groupId }: { groupId: string }) {
   }
 
   async function onRename(loc: LocationDto) {
+    // TextInput の onSubmitEditing は disabled を通らないので、state ではなく ref で弾く
+    if (pendingRef.current !== null) return
     const parsed = parseLocationName(draftName)
     if (!parsed.ok) {
       setMessage({ kind: "error", text: parsed.message })
@@ -95,7 +105,8 @@ function LocationsBody({ groupId }: { groupId: string }) {
       setMessage(null)
       return
     }
-    setPending({ kind: "rename", id: loc.id })
+    pendingRef.current = { kind: "rename", id: loc.id }
+    setPending(pendingRef.current)
     setMessage(null)
     try {
       const res = await renameLocation(getApiClient(), loc.id, parsed.value)
@@ -111,7 +122,11 @@ function LocationsBody({ groupId }: { groupId: string }) {
       setEditingId(null)
       setMessage({ kind: "ok", text: "場所の名前を変更しました" })
     } finally {
+      pendingRef.current = null
       setPending(null)
+      // rename は API の (sortOrder, name) 順を変えうるので、応答の並びに追従するため取り直す。
+      // 失敗時も他メンバーが先に消した行を残さないよう同じく取り直す
+      setReloadKey((n) => n + 1)
     }
   }
 
@@ -123,7 +138,9 @@ function LocationsBody({ groupId }: { groupId: string }) {
   }
 
   async function onDelete(loc: LocationDto) {
-    setPending({ kind: "delete", id: loc.id })
+    if (pendingRef.current !== null) return
+    pendingRef.current = { kind: "delete", id: loc.id }
+    setPending(pendingRef.current)
     setMessage(null)
     try {
       const res = await deleteLocation(getApiClient(), loc.id)
@@ -139,7 +156,10 @@ function LocationsBody({ groupId }: { groupId: string }) {
       if (editingId === loc.id) setEditingId(null)
       setMessage({ kind: "ok", text: "場所を削除しました" })
     } finally {
+      pendingRef.current = null
       setPending(null)
+      // 失敗時も他メンバーが先に消した行を残さないよう取り直す (rename と同じ)
+      setReloadKey((n) => n + 1)
     }
   }
 
@@ -181,6 +201,7 @@ function LocationsBody({ groupId }: { groupId: string }) {
                   testID="location-edit-input"
                   value={draftName}
                   onChangeText={setDraftName}
+                  editable={pending === null}
                   autoFocus
                   maxLength={100}
                   returnKeyType="done"
