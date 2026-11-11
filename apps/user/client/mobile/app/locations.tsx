@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -64,10 +65,9 @@ function LocationsBody({ groupId }: { groupId: string }) {
           const res = await getApiClient().v1.locations.$get({ query: { groupId } })
           if (cancelled) return
           if (!res.ok) {
-            setLoad({
-              status: "error",
-              message: await apiErrorMessage(res, `locations HTTP ${res.status}`),
-            })
+            const errorMessage = await apiErrorMessage(res, `locations HTTP ${res.status}`)
+            if (cancelled) return
+            setLoad({ status: "error", message: errorMessage })
             return
           }
           const { locations } = await res.json()
@@ -135,9 +135,17 @@ function LocationsBody({ groupId }: { groupId: string }) {
     // キャンセル・削除どちらのボタンでも解除するので、外側タップで閉じられる Android 既定は切る
     if (pendingRef.current !== null) return
     pendingRef.current = { kind: "delete", id: loc.id }
+    const title = `「${loc.name}」を削除しますか？`
+    const detail = "在庫がこの場所を参照していると削除できません"
+    // react-native-web の Alert.alert は何もせず解決しないので、web は window.confirm を使う
+    if (Platform.OS === "web") {
+      if (window.confirm(`${title}\n${detail}`)) void onDelete(loc)
+      else pendingRef.current = null
+      return
+    }
     Alert.alert(
-      `「${loc.name}」を削除しますか？`,
-      "在庫がこの場所を参照していると削除できません",
+      title,
+      detail,
       [
         {
           text: "キャンセル",
