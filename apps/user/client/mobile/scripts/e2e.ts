@@ -414,25 +414,53 @@ async function e2e() {
   log("Metro bundled the app")
 
   const serial = process.env["E2E_DEVICE"] || (await bootEmulator())
-  // A busy emulator shows "Pixel Launcher isn't responding" over the app, and every flow then
-  // fails to find its screen (seen on CI, also with hide_error_dialogs set). The flows start the
-  // app with `am start` and need no launcher; without it the home is Settings' blank FallbackHome.
-  // E2E_DEVICE may be someone's everyday emulator: put the launcher back unless it was already off
-  const launcher = "com.google.android.apps.nexuslauncher"
+  // A busy emulator shows "<launcher> isn't responding" over the app, and every flow then fails
+  // to find its screen (seen on CI with Pixel Launcher on google_apis and Quickstep on the AOSP
+  // image, also with hide_error_dialogs set). The flows start the app with `am start` and need no
+  // launcher; without it the home is Settings' blank FallbackHome. E2E_DEVICE may be someone's
+  // everyday emulator: put back only the launchers this run turned off
   const pm = (...args: string[]) =>
     spawnSync(adb, ["-s", serial, "shell", "pm", ...args], { encoding: "utf-8", timeout: 30_000 })
-  const before = pm("list", "packages", "-d")
-  // Unknown state (the list failed): leave the launcher alone rather than "restore" it wrongly
-  if (before.status !== 0) {
-    warnIfFailed("listing disabled packages (Pixel Launcher left as is)", before)
-  } else if (!before.stdout.includes(`package:${launcher}`)) {
-    const disabled = pm("disable-user", "--user", "0", launcher)
-    warnIfFailed("disabling Pixel Launcher", disabled)
-    if (disabled.status === 0) {
-      cleanups.push(() =>
-        warnIfFailed("re-enabling Pixel Launcher", pm("enable", "--user", "0", launcher)),
-      )
+  const enabled = pm("list", "packages", "-e")
+  // Unknown state (the list failed): leave the launchers alone rather than "restore" them wrongly
+  if (enabled.status !== 0) {
+    warnIfFailed("listing enabled packages (launchers left as is)", enabled)
+  } else {
+    const packages = new Set(enabled.stdout.split("\n").map((line) => line.trim()))
+    for (const launcher of ["com.google.android.apps.nexuslauncher", "com.android.launcher3"]) {
+      if (!packages.has(`package:${launcher}`)) continue
+      const disabled = pm("disable-user", "--user", "0", launcher)
+      warnIfFailed(`disabling ${launcher}`, disabled)
+      if (disabled.status === 0) {
+        cleanups.push(() =>
+          warnIfFailed(`re-enabling ${launcher}`, pm("enable", "--user", "0", launcher)),
+        )
+      }
     }
+  }
+
+  // React Native fetches JS from 10.0.2.2 only when the fingerprint looks like a stock emulator
+  // ("generic" or "google/sdk_gphone…", AndroidInfoHelpers.kt); the AOSP image's
+  // ("Android/sdk_phone64_x86_64/…") does not, and the app would try localhost. It reads the
+  // metro.host property before that check. shell may not set it; the userdebug image lets root.
+  // The property is not persistent: an everyday emulator drops it on its next boot
+  const buildFingerprint = capture(adb, ["-s", serial, "shell", "getprop", "ro.build.fingerprint"])
+  if (!buildFingerprint.includes("generic") && !buildFingerprint.startsWith("google/sdk_gphone")) {
+    const adbdAs = (uid: string) =>
+      // wait-for-device can return before adbd has restarted; wait for its uid instead
+      waitFor(
+        `adbd as uid ${uid}`,
+        async () => capture(adb, ["-s", serial, "shell", "id", "-u"]) === uid,
+        60_000,
+      )
+    run(adb, ["-s", serial, "root"])
+    await adbdAs("0")
+    run(adb, ["-s", serial, "shell", "setprop", "metro.host", hostFromEmulator])
+    // Back to the usual non-root adbd: the flows were measured under it (#200)
+    run(adb, ["-s", serial, "unroot"])
+    await adbdAs("2000")
+    const metroHost = capture(adb, ["-s", serial, "shell", "getprop", "metro.host"])
+    if (metroHost !== hostFromEmulator) throw new Error(`metro.host is "${metroHost}"`)
   }
   run(adb, ["-s", serial, "install", "-r", apk])
 
