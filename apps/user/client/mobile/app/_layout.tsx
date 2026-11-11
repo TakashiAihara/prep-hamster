@@ -18,6 +18,10 @@ export default function RootLayout() {
             name="groups"
             options={{ presentation: "modal", headerShown: true, title: "グループ" }}
           />
+          <Stack.Screen
+            name="locations"
+            options={{ presentation: "modal", headerShown: true, title: "保管場所" }}
+          />
         </Stack>
       </CurrentGroupProvider>
     </AuthStatusProvider>
