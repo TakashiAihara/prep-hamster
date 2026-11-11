@@ -131,15 +131,30 @@ function LocationsBody({ groupId }: { groupId: string }) {
   }
 
   function confirmDelete(loc: LocationDto) {
-    Alert.alert(`「${loc.name}」を削除しますか？`, "在庫がこの場所を参照していると削除できません", [
-      { text: "キャンセル", style: "cancel" },
-      { text: "削除", style: "destructive", onPress: () => void onDelete(loc) },
-    ])
+    // Alert が出るまでの隙間に二度押しされても 2 枚目を積まないよう、確認時点で pendingRef を立てる。
+    // キャンセル・削除どちらのボタンでも解除するので、外側タップで閉じられる Android 既定は切る
+    if (pendingRef.current !== null) return
+    pendingRef.current = { kind: "delete", id: loc.id }
+    Alert.alert(
+      `「${loc.name}」を削除しますか？`,
+      "在庫がこの場所を参照していると削除できません",
+      [
+        {
+          text: "キャンセル",
+          style: "cancel",
+          onPress: () => {
+            pendingRef.current = null
+          },
+        },
+        { text: "削除", style: "destructive", onPress: () => void onDelete(loc) },
+      ],
+      { cancelable: false },
+    )
   }
 
   async function onDelete(loc: LocationDto) {
-    if (pendingRef.current !== null) return
-    pendingRef.current = { kind: "delete", id: loc.id }
+    // confirmDelete が積んだ pending がこの削除のものだけ通す
+    if (pendingRef.current?.kind !== "delete" || pendingRef.current.id !== loc.id) return
     setPending(pendingRef.current)
     setMessage(null)
     try {
