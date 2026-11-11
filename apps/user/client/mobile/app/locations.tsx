@@ -88,9 +88,11 @@ function LocationsBody({ groupId }: { groupId: string }) {
       setMessage({ kind: "error", text: parsed.message })
       return
     }
-    // 名前が変わっていなければ API を呼ばずに編集を閉じる (updatedAt だけが動く書き込みを避ける)
+    // 名前が変わっていなければ API を呼ばずに編集を閉じる (updatedAt だけが動く書き込みを避ける)。
+    // 直前の検証エラーが残らないよう message も消す
     if (parsed.value === loc.name) {
       setEditingId(null)
+      setMessage(null)
       return
     }
     setPending({ kind: "rename", id: loc.id })
