@@ -69,7 +69,10 @@ jobs:
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 35
-          target: google_apis
+          # AOSP, not google_apis: right after the `pm clear` of `launchApp: clearState`, the
+          # google_apis emulator dropped adb (device offline) in 2 of ~195 tries, AOSP in 0 of 300.
+          # Google Play services waking up on PACKAGE_DATA_CLEARED is the suspected load (#200)
+          target: default
           arch: x86_64
           profile: pixel_5
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
