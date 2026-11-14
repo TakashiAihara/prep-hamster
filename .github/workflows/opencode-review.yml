@@ -1,7 +1,8 @@
 name: opencode-review
 
-# Reviews each PR with opencode on a free Zen model. The workflow, its model and its
-# permissions live in TakashiAihara/opencode-review; @main follows changes made there.
+# Reviews each PR with opencode on two free Zen models, one comment each. The workflow, the
+# first job's model and the permissions live in TakashiAihara/opencode-review; @main follows
+# changes made there. The second job names its model here.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -16,5 +17,18 @@ jobs:
       pull-requests: write
       issues: write
     uses: TakashiAihara/opencode-review/.github/workflows/review.yml@main
+    secrets:
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+
+  # A second free Zen model: in two replays of a PR with two known bugs it found 3 of 4,
+  # glm-5.3-flash-free (the default above) 1 of 4, and the two together all 4 (2026-11-10).
+  opencode-inkling:
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    uses: TakashiAihara/opencode-review/.github/workflows/review.yml@main
+    with:
+      model: opencode/inkling-2-small-free
     secrets:
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
