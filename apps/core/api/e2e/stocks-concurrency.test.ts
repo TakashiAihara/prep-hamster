@@ -31,6 +31,12 @@ async function setup(quantity: number) {
       headers: { "content-type": "application/json", authorization: auth },
       body: JSON.stringify({ toLocationId }),
     })
+  const patch = (body: Record<string, unknown>) =>
+    app.request(`/v1/stocks/${stockId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", authorization: auth },
+      body: JSON.stringify(body),
+    })
   const addLocation = (name: string) => seedLocation(groupId, name)
   const post = (action: "consume" | "discard", quantityDelta: number, eventId?: string) =>
     app.request(`/v1/stocks/${stockId}/${action}`, {
@@ -38,7 +44,7 @@ async function setup(quantity: number) {
       headers: { "content-type": "application/json", authorization: auth },
       body: JSON.stringify(eventId ? { quantityDelta, eventId } : { quantityDelta }),
     })
-  return { stockId, locationId, post, remove, move, addLocation }
+  return { stockId, locationId, post, remove, move, patch, addLocation }
 }
 
 async function quantityOf(stockId: string) {
@@ -139,6 +145,32 @@ async function raceAgainstDelete(stockId: string, send: () => Response | Promise
   const pending = send()
   try {
     await waitForLockWaiters(1)
+  } finally {
+    held.resolve()
+    await deleter
+  }
+  return pending
+}
+
+// 移動先 / PATCH の変更先の location を消す側が行を押さえたまま削除を済ませ、
+// 要求は早期チェック (まだ削除前に見える) を通ってから transaction 内の確認で待たされる。
+// 確認が transaction の外にあると、消えたはずの location を有効と見なしてしまう。
+async function raceAgainstLocationDelete(
+  locationId: string,
+  send: () => Response | Promise<Response>,
+) {
+  const held = Promise.withResolvers<void>()
+  const taken = Promise.withResolvers<void>()
+  const deleter = testDb.transaction(async (tx) => {
+    await tx.execute(sql`select id from locations where id = ${locationId} for update`)
+    await tx.execute(sql`update locations set deleted_at = now() where id = ${locationId}`)
+    taken.resolve()
+    await held.promise
+  })
+  await Promise.race([taken.promise, deleter])
+  const pending = send()
+  try {
+    await waitForLockWaiters(1, "locations")
   } finally {
     held.resolve()
     await deleter
@@ -325,3 +357,38 @@ test.each(["move-first", "consume-first"] as const)(
     ])
   },
 )
+
+test("a patch that loses the race to a delete returns 404 without updating the stock", async () => {
+  const { stockId, patch } = await setup(10)
+
+  const res = await raceAgainstDelete(stockId, () => patch({ unit: "箱" }))
+
+  expect(res.status).toBe(404)
+  const [row] = await testDb.select().from(stocks).where(eq(stocks.id, stockId))
+  expect(row?.unit).toBe("個")
+})
+
+test("a patch that changes location loses the race to a location delete", async () => {
+  const { stockId, locationId, patch, addLocation } = await setup(10)
+  const fridge = await addLocation("Fridge")
+
+  const res = await raceAgainstLocationDelete(fridge, () => patch({ locationId: fridge }))
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("LOCATION_GROUP_MISMATCH")
+  expect(await locationOf(stockId)).toBe(locationId)
+})
+
+test("a move to a location deleted mid-flight returns 422 without recording an event", async () => {
+  const { stockId, locationId, move, addLocation } = await setup(10)
+  const fridge = await addLocation("Fridge")
+
+  const res = await raceAgainstLocationDelete(fridge, () => move(fridge))
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("LOCATION_GROUP_MISMATCH")
+  expect(await locationOf(stockId)).toBe(locationId)
+  expect(await eventsOf(stockId)).toHaveLength(0)
+})
