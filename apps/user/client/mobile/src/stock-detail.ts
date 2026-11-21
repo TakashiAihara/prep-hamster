@@ -16,6 +16,8 @@ export type StockDto = {
   useByDate: string | null
   bestBeforeDate: string | null
   note: string | null
+  // API は更新のたびに updatedAt を進めるので、取り直しと操作の結果が前後して届いたときの新旧比較に使う
+  updatedAt: string
 }
 
 export type LocationDto = { id: string; name: string }

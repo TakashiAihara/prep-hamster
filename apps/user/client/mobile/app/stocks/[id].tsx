@@ -1,5 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router"
-import { useCallback, useReducer, useRef, useState } from "react"
+import { useCallback, useReducer, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
@@ -48,25 +48,19 @@ function StockDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const [load, dispatch] = useReducer(loadReducer, { status: "loading" })
   const [reloadKey, setReloadKey] = useState(0)
-  const actionCount = useRef(0)
 
-  // focus のたびに取り直す (他のメンバーが変えた在庫を古いまま操作しない)。再試行は reloadKey で再実行する
+  // focus のたびに取り直す (他のメンバーが変えた在庫を古いまま操作しない)。再試行は reloadKey で再実行する。
+  // 取り直しと操作の前後関係は loadReducer が updatedAt で裁くので、ここでは結果をそのまま渡す
   useFocusEffect(
     useCallback(() => {
       if (!id) return
       let cancelled = false
       dispatch({ type: "start", id })
-      const startedAt = actionCount.current
       void (async () => {
         const r = await loadStockDetail(getApiClient(), id)
         if (cancelled) return
-        // 読み込み中に操作が完了していたら、届く detail は操作前の在庫を持ちうるので stock を残させる。
-        // 操作後の行や他のメンバーの変更を読んでいても捨てるが、次の focus で取り直す
-        const keepStock = actionCount.current !== startedAt
         dispatch(
-          r.ok
-            ? { type: "loaded", detail: r.detail, keepStock }
-            : { type: "failed", message: r.message },
+          r.ok ? { type: "loaded", detail: r.detail } : { type: "failed", message: r.message },
         )
       })()
       return () => {
@@ -76,7 +70,6 @@ function StockDetailScreen() {
   )
 
   const onStockChanged = useCallback((stock: StockDto) => {
-    actionCount.current += 1
     dispatch({ type: "stock-changed", stock })
   }, [])
 

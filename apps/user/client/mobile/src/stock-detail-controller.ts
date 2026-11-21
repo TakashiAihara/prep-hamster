@@ -18,39 +18,69 @@ import {
 // 在庫詳細 (M-05) の画面ロジック: 読み込み状態の遷移と、消費 / 廃棄 / 移動 / 編集の実行。
 // React に依存させず、描画なしの unit test で固定する。
 
+// loading / error の stock は、詳細を表示していない間に届いた操作結果など、
+// 表示中より新しいかもしれない在庫。次の loaded で取り直し結果と新旧を比べるために持つ
 export type LoadState =
-  | { status: "loading" }
+  | { status: "loading"; stock?: StockDto }
   | { status: "ok"; detail: StockDetail }
-  | { status: "error"; message: string }
+  | { status: "error"; message: string; stock?: StockDto }
 
 export type LoadEvent =
   | { type: "start"; id: string }
-  | { type: "loaded"; detail: StockDetail; keepStock?: boolean }
+  | { type: "loaded"; detail: StockDetail }
   | { type: "failed"; message: string }
   | { type: "stock-changed"; stock: StockDto }
 
+// candidate が current より新しい版なら true。同じ在庫のときだけ比べる
+function isNewerStock(candidate: StockDto, current: StockDto): boolean {
+  return (
+    candidate.id === current.id && Date.parse(candidate.updatedAt) > Date.parse(current.updatedAt)
+  )
+}
+
+// current と candidate の新しい方を返す。別の在庫なら candidate を採る (新しい操作の文脈)
+function latestStock(current: StockDto | undefined, candidate: StockDto): StockDto {
+  if (current === undefined || current.id !== candidate.id) return candidate
+  return isNewerStock(candidate, current) ? candidate : current
+}
+
+// 表示中または保持している stock のうち id のものを返す
+function shownStock(prev: LoadState, id: string): StockDto | undefined {
+  const stock = prev.status === "ok" ? prev.detail.stock : prev.stock
+  return stock !== undefined && stock.id === id ? stock : undefined
+}
+
 export function loadReducer(prev: LoadState, event: LoadEvent): LoadState {
   switch (event.type) {
-    case "start":
+    case "start": {
       // 同じ在庫を開いたまま再取得する (focus / 再試行) 間は表示を残し、別の id なら読み込み中に戻す
-      return prev.status === "ok" && prev.detail.stock.id === event.id
-        ? prev
-        : { status: "loading" }
-    case "loaded":
-      // keepStock は「読み込み中に操作結果が届いた」の印。detail は操作前の在庫を
-      // 持ちうるので、同じ在庫を表示中なら stock だけ表示中のものを残す
-      return event.keepStock === true &&
-        prev.status === "ok" &&
-        prev.detail.stock.id === event.detail.stock.id
-        ? { status: "ok", detail: { ...event.detail, stock: prev.detail.stock } }
-        : { status: "ok", detail: event.detail }
-    case "failed":
-      return { status: "error", message: event.message }
+      if (prev.status === "ok" && prev.detail.stock.id === event.id) return prev
+      const stock = shownStock(prev, event.id)
+      return stock === undefined ? { status: "loading" } : { status: "loading", stock }
+    }
+    case "loaded": {
+      // 取り直しが操作結果より古い版を読んでいたら stock は新しい方を残し、
+      // itemName / locations は取り直した方を使う
+      const known = shownStock(prev, event.detail.stock.id)
+      const stock =
+        known !== undefined && isNewerStock(known, event.detail.stock) ? known : event.detail.stock
+      return { status: "ok", detail: { ...event.detail, stock } }
+    }
+    case "failed": {
+      const stock = prev.status === "ok" ? prev.detail.stock : prev.stock
+      return stock === undefined
+        ? { status: "error", message: event.message }
+        : { status: "error", message: event.message, stock }
+    }
     case "stock-changed":
-      // 前の在庫の操作結果が遅れて届いても、表示中の別の在庫を上書きしない
-      return prev.status === "ok" && prev.detail.stock.id === event.stock.id
-        ? { status: "ok", detail: { ...prev.detail, stock: event.stock } }
-        : prev
+      if (prev.status === "ok") {
+        // 取り直しが先に新しい版を表示していたら、遅れて届いた操作結果では戻さない
+        return isNewerStock(event.stock, prev.detail.stock)
+          ? { status: "ok", detail: { ...prev.detail, stock: event.stock } }
+          : prev
+      }
+      // 詳細を表示していない間に届いた操作結果は保持し、次の loaded で取り直し結果と比べる
+      return { ...prev, stock: latestStock(prev.stock, event.stock) }
   }
 }
 
