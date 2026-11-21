@@ -68,9 +68,9 @@ export const groupDtoSchema = z
     id: z.string().guid(),
     name: z.string(),
     createdBy: z.string().guid(),
-    createdAt: z.string().datetime({ offset: true }),
-    updatedAt: z.string().datetime({ offset: true }),
-    deletedAt: z.string().datetime({ offset: true }).nullable(),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+    deletedAt: z.iso.datetime({ offset: true }).nullable(),
   })
   .openapi("Group")
 
@@ -80,10 +80,10 @@ export const membershipDtoSchema = z
     userId: z.string().guid(),
     groupId: z.string().guid(),
     role: roleSchema,
-    joinedAt: z.string().datetime({ offset: true }),
-    createdAt: z.string().datetime({ offset: true }),
-    updatedAt: z.string().datetime({ offset: true }),
-    deletedAt: z.string().datetime({ offset: true }).nullable(),
+    joinedAt: z.iso.datetime({ offset: true }),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+    deletedAt: z.iso.datetime({ offset: true }).nullable(),
   })
   .openapi("Membership")
 
@@ -97,12 +97,12 @@ export const invitationDtoSchema = z
     inviterId: z.string().guid(),
     role: roleSchema,
     token: z.string(),
-    expiresAt: z.string().datetime({ offset: true }),
-    usedAt: z.string().datetime({ offset: true }).nullable(),
+    expiresAt: z.iso.datetime({ offset: true }),
+    usedAt: z.iso.datetime({ offset: true }).nullable(),
     usedBy: z.string().guid().nullable(),
-    createdAt: z.string().datetime({ offset: true }),
-    updatedAt: z.string().datetime({ offset: true }),
-    deletedAt: z.string().datetime({ offset: true }).nullable(),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+    deletedAt: z.iso.datetime({ offset: true }).nullable(),
   })
   .openapi("Invitation")
 
@@ -138,9 +138,9 @@ export const locationDtoSchema = z
     groupId: z.string().guid(),
     name: z.string(),
     sortOrder: z.number().int().nullable(),
-    createdAt: z.string().datetime({ offset: true }),
-    updatedAt: z.string().datetime({ offset: true }),
-    deletedAt: z.string().datetime({ offset: true }).nullable(),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+    deletedAt: z.iso.datetime({ offset: true }).nullable(),
   })
   .openapi("Location")
 
@@ -165,9 +165,9 @@ export const categoryDtoSchema = z
     groupId: z.string().guid(),
     name: z.string(),
     sortOrder: z.number().int().nullable(),
-    createdAt: z.string().datetime({ offset: true }),
-    updatedAt: z.string().datetime({ offset: true }),
-    deletedAt: z.string().datetime({ offset: true }).nullable(),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+    deletedAt: z.iso.datetime({ offset: true }).nullable(),
   })
   .openapi("Category")
 
@@ -197,9 +197,9 @@ export const itemDtoSchema = z
     defaultUnit: z.string().nullable(),
     manufacturer: z.string().nullable(),
     memo: z.string().nullable(),
-    createdAt: z.string().datetime({ offset: true }),
-    updatedAt: z.string().datetime({ offset: true }),
-    deletedAt: z.string().datetime({ offset: true }).nullable(),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+    deletedAt: z.iso.datetime({ offset: true }).nullable(),
   })
   .openapi("Item")
 
@@ -216,10 +216,10 @@ export const productMasterDtoSchema = z
     imageUrl: z.string().nullable(),
     source: z.enum(["YAHOO_SHOPPING", "RAKUTEN_ICHIBA", "JANCODE_LOOKUP", "GS1_JICFS", "OTHER"]),
     confidence: z.enum(["HIGH", "MEDIUM", "LOW"]).nullable(),
-    fetchedAt: z.string().datetime({ offset: true }),
-    createdAt: z.string().datetime({ offset: true }),
-    updatedAt: z.string().datetime({ offset: true }),
-    deletedAt: z.string().datetime({ offset: true }).nullable(),
+    fetchedAt: z.iso.datetime({ offset: true }),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+    deletedAt: z.iso.datetime({ offset: true }).nullable(),
   })
   .openapi("ProductMaster")
 
@@ -270,13 +270,13 @@ export const stockDtoSchema = z
     locationId: z.string().guid(),
     quantity: z.number().nonnegative(),
     unit: z.string(),
-    useByDate: z.string().date().nullable(),
-    bestBeforeDate: z.string().date().nullable(),
-    openedAt: z.string().date().nullable(),
+    useByDate: z.iso.date().nullable(),
+    bestBeforeDate: z.iso.date().nullable(),
+    openedAt: z.iso.date().nullable(),
     note: z.string().nullable(),
-    createdAt: z.string().datetime({ offset: true }),
-    updatedAt: z.string().datetime({ offset: true }),
-    deletedAt: z.string().datetime({ offset: true }).nullable(),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+    deletedAt: z.iso.datetime({ offset: true }).nullable(),
   })
   .openapi("Stock")
 
@@ -287,26 +287,24 @@ export const createStockBodyDtoSchema = z
     locationId: z.string().guid(),
     quantity: z.number().nonnegative(),
     unit: z.string().min(1),
-    useByDate: z.string().date().nullable(),
-    bestBeforeDate: z.string().date().nullable(),
-    openedAt: z.string().date().nullable(),
+    useByDate: z.iso.date().nullable(),
+    bestBeforeDate: z.iso.date().nullable(),
+    openedAt: z.iso.date().nullable(),
     note: z.string().nullable(),
   })
   .openapi("CreateStockBody")
 
 // quantity は consume / move / discard / soft-delete 経由で履歴を残しつつ更新する方針のため、
-// PATCH では受け付けない。.strict() で未知キー (quantity を含む) を 422 で reject する。
+// PATCH では受け付けない。z.strictObject で未知キー (quantity を含む) を 422 で reject する。
 export const updateStockBodyDtoSchema = requireUpdatableField(
-  z
-    .object({
-      locationId: z.string().guid().optional(),
-      unit: z.string().min(1).optional(),
-      useByDate: z.string().date().nullable().optional(),
-      bestBeforeDate: z.string().date().nullable().optional(),
-      openedAt: z.string().date().nullable().optional(),
-      note: z.string().nullable().optional(),
-    })
-    .strict(),
+  z.strictObject({
+    locationId: z.string().guid().optional(),
+    unit: z.string().min(1).optional(),
+    useByDate: z.iso.date().nullable().optional(),
+    bestBeforeDate: z.iso.date().nullable().optional(),
+    openedAt: z.iso.date().nullable().optional(),
+    note: z.string().nullable().optional(),
+  }),
 ).openapi("UpdateStockBody")
 
 export const stockEventDtoSchema = z
@@ -318,10 +316,10 @@ export const stockEventDtoSchema = z
     quantityDelta: z.number(),
     fromLocationId: z.string().guid().nullable(),
     toLocationId: z.string().guid().nullable(),
-    occurredAt: z.string().datetime({ offset: true }),
+    occurredAt: z.iso.datetime({ offset: true }),
     actorUserId: z.string().guid().nullable(),
     reason: z.string().nullable(),
-    createdAt: z.string().datetime({ offset: true }),
+    createdAt: z.iso.datetime({ offset: true }),
   })
   .openapi("StockEvent")
 

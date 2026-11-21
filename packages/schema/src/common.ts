@@ -52,10 +52,10 @@ export type NotificationSettingId = z.infer<typeof NotificationSettingId>
 export const Id = z.string().guid()
 export type Id = z.infer<typeof Id>
 
-export const TimestampString = z.string().datetime({ offset: true })
+export const TimestampString = z.iso.datetime({ offset: true })
 export type TimestampString = z.infer<typeof TimestampString>
 
-export const DateOnly = z.string().date()
+export const DateOnly = z.iso.date()
 export type DateOnly = z.infer<typeof DateOnly>
 
 export const RoleSchema = z.enum(["OWNER", "EDITOR", "VIEWER"])
