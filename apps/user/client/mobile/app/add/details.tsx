@@ -14,6 +14,13 @@ import { getApiClient } from "@/api"
 import { useCurrentGroup } from "@/current-group"
 import { KeyboardScrollView } from "@/keyboard-scroll-view"
 import { appendCreatedLocation, createLocation, parseLocationName } from "@/location-create"
+import {
+  applyLocationFetch,
+  emptyLocationPicker,
+  noteCreatedLocation,
+  pickLocation,
+  type LocationPickerState,
+} from "@/location-picker"
 import { parsePositive } from "@/stock-detail"
 
 // 詳細入力 + 保存画面。
@@ -57,10 +64,11 @@ export default function AddDetailsScreen() {
   const currentGroupRef = useRef<string | null>(null)
   // Pressable の disabled は再描画まで効かないので、同じフレームの 2 回目を同期フラグで止める
   const addingRef = useRef(false)
-  // GET が作成を追い越して一覧に無いまま返ることがあるので、作成した場所をグループごとに覚えておく
-  const createdLocationsRef = useRef<Record<string, { id: string; name: string }[]>>({})
-  // 読み直し後に選択を戻すため、直近に作成した場所を覚えておく
-  const lastCreatedRef = useRef<{ groupId: string; id: string } | null>(null)
+  // 場所の作成とグループごとの選択の記憶。GET が作成を追い越して一覧に無いまま返ることがあるので
+  // 作成した場所を覚えて読み直しに足し、手で選んだ場所も覚えて読み直しで選択を戻す
+  const pickerRef = useRef<LocationPickerState>(emptyLocationPicker)
+  // locations GET の発行順。作成より前に発行された GET は作成を追い越した一覧を返しうる
+  const fetchSeqRef = useRef(0)
   const [locationId, setLocationId] = useState<string | null>(null)
   const [locationName, setLocationName] = useState("")
   const [locationError, setLocationError] = useState<string | null>(null)
@@ -91,6 +99,7 @@ export default function AddDetailsScreen() {
     let cancelled = false
     // グループが変わったら前のグループの場所を出したままにしない
     setLoad({ status: "loading" })
+    const fetchSeq = ++fetchSeqRef.current
     void (async () => {
       try {
         const client = getApiClient()
@@ -115,22 +124,12 @@ export default function AddDetailsScreen() {
           nameSetFor.current = itemId
           setName(itemBody.name)
         }
-        // GET が作成を追い越して一覧に無いまま返ることがあるので、作成済みの場所を足してから出す
-        const merged = (createdLocationsRef.current[groupId] ?? []).reduce(
-          (acc, loc) => appendCreatedLocation(acc, groupId, loc) ?? acc,
-          { groupId, locations: locsBody },
-        )
-        // 場所が 0 件のグループでは、前のグループの場所を残さない。
-        // 直前に作った場所が一覧にあればそれを選ぶ
-        const lastCreated = lastCreatedRef.current
-        setLocationId(
-          lastCreated !== null &&
-            lastCreated.groupId === groupId &&
-            merged.locations.some((l) => l.id === lastCreated.id)
-            ? lastCreated.id
-            : (merged.locations[0]?.id ?? null),
-        )
-        setLoad({ status: "ok", item: itemBody, locations: merged.locations, groupId })
+        // GET が作成を追い越して一覧に無いまま返ることがあるので、作成済みの場所を足してから出す。
+        // 場所が 0 件のグループでは、前のグループの場所を残さない
+        const applied = applyLocationFetch(pickerRef.current, fetchSeq, groupId, locsBody)
+        pickerRef.current = applied.state
+        setLocationId(applied.selectedId)
+        setLoad({ status: "ok", item: itemBody, locations: applied.locations, groupId })
       } catch (err) {
         if (cancelled) return
         const message = err instanceof Error ? err.message : "unknown"
@@ -244,9 +243,12 @@ export default function AddDetailsScreen() {
       const result = await createLocation(getApiClient(), submittedGroupId, parsed.value)
       // 作った場所は、別グループへ切り替えてから戻ったときの読み直しにも足すので、照合より先に覚える
       if (result.ok) {
-        const createdList = (createdLocationsRef.current[submittedGroupId] ??= [])
-        createdList.push(result.location)
-        lastCreatedRef.current = { groupId: submittedGroupId, id: result.location.id }
+        pickerRef.current = noteCreatedLocation(
+          pickerRef.current,
+          fetchSeqRef.current,
+          submittedGroupId,
+          result.location,
+        )
       }
       // 追加中に別グループへ切り替わっていたら、成功・失敗どちらの結果も今の画面には出さない
       if (currentGroupRef.current !== submittedGroupId) return
@@ -294,7 +296,10 @@ export default function AddDetailsScreen() {
             {load.locations.map((loc) => (
               <Pressable
                 key={loc.id}
-                onPress={() => setLocationId(loc.id)}
+                onPress={() => {
+                  pickerRef.current = pickLocation(pickerRef.current, load.groupId, loc.id)
+                  setLocationId(loc.id)
+                }}
                 style={[styles.choice, locationId === loc.id && styles.choiceSelected]}
               >
                 <Text
