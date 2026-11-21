@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons"
 import { Redirect, router } from "expo-router"
 import { useState } from "react"
 import { Pressable, Share, StyleSheet, Text, View } from "react-native"
@@ -70,6 +71,11 @@ export default function GroupsScreen() {
             <Text style={styles.secondaryLabel}>このグループに招待する</Text>
           </Pressable>
           {inviteError ? <Text style={styles.error}>{inviteError}</Text> : null}
+          {/* .expo/types の型付きルートは expo start が作り直すまで古いので as never で通す ((tabs)/_layout.tsx と同じ) */}
+          <Pressable style={styles.row} onPress={() => router.push("/locations" as never)}>
+            <Text style={styles.name}>保管場所を管理</Text>
+            <Ionicons name="chevron-forward" size={14} color="#888" />
+          </Pressable>
         </View>
       ) : null}
 
