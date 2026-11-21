@@ -56,6 +56,63 @@ test("PATCH /v1/stocks/:id with empty body returns 422 and updates nothing", asy
   expect(events).toHaveLength(0)
 })
 
+test("PATCH /v1/stocks/:id updates attributes and locationId without recording an event", async () => {
+  const { userId, groupId, stockId } = await setupGroupWithStock(5)
+  const fridge = await seedLocation(groupId, "Fridge")
+
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const res = await app.request(`/v1/stocks/${stockId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
+    body: JSON.stringify({ unit: "箱", note: "top shelf", locationId: fridge }),
+  })
+
+  expect(res.status).toBe(200)
+  const body = (await res.json()) as {
+    stock: { unit: string; note: string | null; locationId: string; quantity: number }
+  }
+  expect(body.stock.unit).toBe("箱")
+  expect(body.stock.note).toBe("top shelf")
+  expect(body.stock.locationId).toBe(fridge)
+  expect(body.stock.quantity).toBe(5)
+
+  // PATCH は属性訂正なので MOVE イベントは残さない
+  const events = await testDb.select().from(stockEvents).where(eq(stockEvents.stockId, stockId))
+  expect(events).toHaveLength(0)
+})
+
+test("PATCH /v1/stocks/:id to another group's location returns 422 LOCATION_GROUP_MISMATCH", async () => {
+  const { userId, stockId } = await setupGroupWithStock(5)
+  const otherOwner = await seedUser("Other")
+  const otherGroupId = await seedGroupWithMembership(otherOwner, "Other")
+  const otherLocationId = await seedLocation(otherGroupId, "Foreign")
+
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const res = await app.request(`/v1/stocks/${stockId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
+    body: JSON.stringify({ locationId: otherLocationId }),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("LOCATION_GROUP_MISMATCH")
+})
+
+test("PATCH /v1/stocks/:id on soft-deleted stock returns 404", async () => {
+  const { userId, stockId } = await setupGroupWithStock(5)
+  await testDb.update(stocks).set({ deletedAt: new Date() }).where(eq(stocks.id, stockId))
+
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const res = await app.request(`/v1/stocks/${stockId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
+    body: JSON.stringify({ note: "x" }),
+  })
+
+  expect(res.status).toBe(404)
+})
+
 test("POST /v1/stocks/:id/consume reduces quantity + records CONSUME event", async () => {
   const { userId, stockId, groupId } = await setupGroupWithStock(10)
 
