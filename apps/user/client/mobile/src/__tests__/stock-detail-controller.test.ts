@@ -18,6 +18,9 @@ const STOCK_ID = "11111111-1111-4111-8111-111111111111"
 const OTHER_ID = "66666666-6666-4666-8666-666666666666"
 const LOC_A = "22222222-2222-4222-8222-222222222222"
 const LOC_B = "33333333-3333-4333-8333-333333333333"
+const T1 = "2026-10-01T00:00:00.000Z"
+const T2 = "2026-10-02T00:00:00.000Z"
+const T3 = "2026-10-03T00:00:00.000Z"
 
 const stock = (over: Partial<StockDto> = {}): StockDto => ({
   id: STOCK_ID,
@@ -29,6 +32,7 @@ const stock = (over: Partial<StockDto> = {}): StockDto => ({
   useByDate: null,
   bestBeforeDate: null,
   note: null,
+  updatedAt: T1,
   ...over,
 })
 
@@ -329,15 +333,33 @@ test("loadReducer keeps the shown stock for a refetch of the same id and resets 
   })
 })
 
-test("loadReducer replaces the stock on change only while loaded", () => {
-  const next = stock({ quantity: 1 })
-  const ok: LoadState = { status: "ok", detail: detail(stock()) }
+test("loadReducer applies a newer operation result and ignores an older one", () => {
+  const shown = stock({ updatedAt: T1 })
+  const ok: LoadState = { status: "ok", detail: detail(shown) }
+  const next = stock({ quantity: 1, updatedAt: T2 })
   expect(loadReducer(ok, { type: "stock-changed", stock: next })).toEqual({
     status: "ok",
     detail: detail(next),
   })
+  // 取り直しが操作の commit 後を読んで先に表示されていたら、遅れて届いた操作結果で戻さない
+  const newerShown = stock({ quantity: 3, updatedAt: T2 })
+  const newerOk: LoadState = { status: "ok", detail: detail(newerShown) }
+  const staleOp = stock({ quantity: 4, updatedAt: T1 })
+  expect(loadReducer(newerOk, { type: "stock-changed", stock: staleOp })).toBe(newerOk)
+})
+
+test("loadReducer ignores an operation result for another stock", () => {
+  const ok: LoadState = { status: "ok", detail: detail(stock()) }
+  expect(loadReducer(ok, { type: "stock-changed", stock: stock({ id: OTHER_ID }) })).toBe(ok)
+})
+
+test("loadReducer keeps an operation result that arrives while loading for the next load", () => {
   const loading: LoadState = { status: "loading" }
-  expect(loadReducer(loading, { type: "stock-changed", stock: next })).toBe(loading)
+  const op = stock({ quantity: 3, updatedAt: T2 })
+  expect(loadReducer(loading, { type: "stock-changed", stock: op })).toEqual({
+    status: "loading",
+    stock: op,
+  })
 })
 
 test("loadReducer maps loaded and failed events", () => {
@@ -351,46 +373,109 @@ test("loadReducer maps loaded and failed events", () => {
   })
 })
 
-test("loadReducer keeps the shown stock when an action finished after the refetch started", () => {
-  const shown = stock({ quantity: 2 })
+test("loadReducer keeps the shown stock when the refetch returns an older version", () => {
+  // 操作が先に commit され、取り直しは操作前の版を読んでいた。stock は新しい方を残し、
+  // itemName / locations は取り直した方を使う
+  const shown = stock({ quantity: 2, updatedAt: T2 })
   const ok: LoadState = { status: "ok", detail: detail(shown) }
-  const stale = { ...detail(stock({ quantity: 5 })), itemName: "Tomato (renamed)" }
-  expect(loadReducer(ok, { type: "loaded", detail: stale, keepStock: true })).toEqual({
+  const stale = { ...detail(stock({ quantity: 5, updatedAt: T1 })), itemName: "Tomato (renamed)" }
+  expect(loadReducer(ok, { type: "loaded", detail: stale })).toEqual({
     status: "ok",
     detail: { ...stale, stock: shown },
   })
 })
 
-test("loadReducer takes the refetched stock when no action finished during the refetch", () => {
-  const ok: LoadState = { status: "ok", detail: detail(stock({ quantity: 2 })) }
-  const fresh = detail(stock({ quantity: 4 }))
-  expect(loadReducer(ok, { type: "loaded", detail: fresh, keepStock: false })).toEqual({
-    status: "ok",
-    detail: fresh,
-  })
+test("loadReducer takes the refetched stock when it is newer than the shown one", () => {
+  const ok: LoadState = { status: "ok", detail: detail(stock({ quantity: 2, updatedAt: T1 })) }
+  const fresh = detail(stock({ quantity: 4, updatedAt: T2 }))
   expect(loadReducer(ok, { type: "loaded", detail: fresh })).toEqual({
     status: "ok",
     detail: fresh,
   })
 })
 
-test("loadReducer takes the loaded detail of another stock even when keepStock is set", () => {
-  const ok: LoadState = { status: "ok", detail: detail(stock()) }
-  const other = detail(stock({ id: OTHER_ID, quantity: 9 }))
-  expect(loadReducer(ok, { type: "loaded", detail: other, keepStock: true })).toEqual({
-    status: "ok",
-    detail: other,
-  })
-  const loading: LoadState = { status: "loading" }
-  expect(loadReducer(loading, { type: "loaded", detail: other, keepStock: true })).toEqual({
+test("loadReducer takes the loaded detail of another stock even when its version is older", () => {
+  const ok: LoadState = { status: "ok", detail: detail(stock({ updatedAt: T3 })) }
+  const other = detail(stock({ id: OTHER_ID, quantity: 9, updatedAt: T1 }))
+  expect(loadReducer(ok, { type: "loaded", detail: other })).toEqual({
     status: "ok",
     detail: other,
   })
 })
 
-test("loadReducer ignores an action result for another stock", () => {
-  const ok: LoadState = { status: "ok", detail: detail(stock()) }
-  expect(loadReducer(ok, { type: "stock-changed", stock: stock({ id: OTHER_ID }) })).toBe(ok)
+test("loadReducer keeps an operation result kept while loading over an older refetch", () => {
+  // 操作の応答が読み込み中に届き、取り直しは操作前の版を読んでいた
+  const op = stock({ quantity: 3, updatedAt: T2 })
+  const loading = loadReducer({ status: "loading" }, { type: "stock-changed", stock: op })
+  const stale = detail(stock({ quantity: 5, updatedAt: T1 }))
+  expect(loadReducer(loading, { type: "loaded", detail: stale })).toEqual({
+    status: "ok",
+    detail: { ...stale, stock: op },
+  })
+})
+
+test("loadReducer prefers a newer refetch over an operation result kept while loading", () => {
+  const op = stock({ quantity: 3, updatedAt: T1 })
+  const loading = loadReducer({ status: "loading" }, { type: "stock-changed", stock: op })
+  const fresh = detail(stock({ quantity: 4, updatedAt: T2 }))
+  expect(loadReducer(loading, { type: "loaded", detail: fresh })).toEqual({
+    status: "ok",
+    detail: fresh,
+  })
+})
+
+test("loadReducer carries the shown stock through a failed refetch into the next load", () => {
+  const shown = stock({ updatedAt: T2 })
+  const ok: LoadState = { status: "ok", detail: detail(shown) }
+  const errored = loadReducer(ok, { type: "failed", message: "HTTP 500" })
+  expect(errored).toEqual({ status: "error", message: "HTTP 500", stock: shown })
+  const loading = loadReducer(errored, { type: "start", id: STOCK_ID })
+  expect(loading).toEqual({ status: "loading", stock: shown })
+  const stale = detail(stock({ quantity: 9, updatedAt: T1 }))
+  expect(loadReducer(loading, { type: "loaded", detail: stale })).toEqual({
+    status: "ok",
+    detail: { ...stale, stock: shown },
+  })
+})
+
+test("loadReducer keeps the newest operation result while the error is shown", () => {
+  const errored: LoadState = { status: "error", message: "HTTP 500" }
+  const older = stock({ quantity: 4, updatedAt: T1 })
+  const newer = stock({ quantity: 3, updatedAt: T2 })
+  const s1 = loadReducer(errored, { type: "stock-changed", stock: older })
+  expect(s1).toEqual({ status: "error", message: "HTTP 500", stock: older })
+  expect(loadReducer(s1, { type: "stock-changed", stock: newer })).toEqual({
+    status: "error",
+    message: "HTTP 500",
+    stock: newer,
+  })
+  expect(loadReducer(s1, { type: "stock-changed", stock: stock({ updatedAt: T1 }) })).toEqual({
+    status: "error",
+    message: "HTTP 500",
+    stock: older,
+  })
+})
+
+test("loadReducer carries the kept stock into loading only for the same stock", () => {
+  const kept = stock({ updatedAt: T2 })
+  const loading: LoadState = { status: "loading", stock: kept }
+  expect(loadReducer(loading, { type: "start", id: STOCK_ID })).toEqual({
+    status: "loading",
+    stock: kept,
+  })
+  expect(loadReducer(loading, { type: "start", id: OTHER_ID })).toEqual({ status: "loading" })
+})
+
+test("loadReducer treats an equal updatedAt as no newer version on either path", () => {
+  const shown = stock({ quantity: 2, updatedAt: T1 })
+  const ok: LoadState = { status: "ok", detail: detail(shown) }
+  const same = stock({ quantity: 9, updatedAt: T1 })
+  expect(loadReducer(ok, { type: "stock-changed", stock: same })).toBe(ok)
+  const fetched = detail(stock({ quantity: 7, updatedAt: T1 }))
+  expect(loadReducer(ok, { type: "loaded", detail: fetched })).toEqual({
+    status: "ok",
+    detail: fetched,
+  })
 })
 
 test("nextEditValue follows the server value only while the field is unedited", () => {
