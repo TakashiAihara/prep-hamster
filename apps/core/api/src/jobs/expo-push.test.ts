@@ -162,6 +162,19 @@ test("retries a network error", async () => {
   expect(result.sent).toBe(1)
 })
 
+test("sends Authorization: Bearer only when accessToken is set", async () => {
+  const authorizations: (string | undefined)[] = []
+  const fakeFetch = (async (_url: string, init: RequestInit) => {
+    authorizations.push((init.headers as Record<string, string>)["authorization"])
+    return json(okTickets(1))
+  }) as unknown as typeof fetch
+
+  await createExpoPushSender({ fetch: fakeFetch }).send([msg(1)])
+  await createExpoPushSender({ fetch: fakeFetch, accessToken: "expo-token-1" }).send([msg(1)])
+
+  expect(authorizations).toEqual([undefined, "Bearer expo-token-1"])
+})
+
 test("aborts a request that does not answer and retries it", async () => {
   let calls = 0
   const fakeFetch = (async (_url: string, init: RequestInit) => {

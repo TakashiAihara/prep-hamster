@@ -44,6 +44,12 @@ export const exitCodeFor = (r: { messages: number; sent: number }) =>
 const todayInJst = () =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date())
 
+// 期限は YYYY-MM-DD。送信日と同じ年なら MM/DD、年をまたぐなら YYYY/MM/DD にして年またぎの曖昧さを消す。
+export const formatDeadline = (deadline: string, today: string) =>
+  deadline.slice(0, 4) === today.slice(0, 4)
+    ? deadline.slice(5).replace("-", "/")
+    : deadline.replaceAll("-", "/")
+
 export type RunExpiryNotifyOptions = {
   db: Db
   sender: PushSender
@@ -136,7 +142,7 @@ export async function runExpiryNotify(
     attemptedTokens.set(userId, tokens)
     const shown = due
       .slice(0, BODY_ITEM_LIMIT)
-      .map((r) => `${r.itemName} ${r.deadline.slice(5).replace("-", "/")}`)
+      .map((r) => `${r.itemName} ${formatDeadline(r.deadline, today)}`)
       .join("、")
     const rest = due.length - BODY_ITEM_LIMIT
     const stockIds = due.slice(0, PAYLOAD_STOCK_ID_LIMIT).map((r) => r.stockId)
@@ -195,7 +201,7 @@ if (import.meta.main) {
   try {
     const result = await runExpiryNotify({
       db: createDb(databaseUrl),
-      sender: createExpoPushSender(),
+      sender: createExpoPushSender({ accessToken: process.env["EXPO_ACCESS_TOKEN"] }),
     })
     console.log(
       `[expiry-notify] ${result.sent} sent, ${result.failed} failed of ${result.messages} messages to ${result.users} users, removed ${result.removedTokens} dead tokens`,
