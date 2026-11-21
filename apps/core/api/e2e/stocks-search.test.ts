@@ -80,7 +80,7 @@ test("PATCH /v1/stocks/:id rejects quantity in body", async () => {
     headers: { "content-type": "application/json", authorization: await bearer(userId) },
     body: JSON.stringify({ quantity: 99, note: "memo" }),
   })
-  // .strict() で unrecognized_keys を投げ、422 で reject される
+  // z.strictObject で unrecognized_keys を投げ、422 で reject される
   expect(res.status).toBe(422)
 })
 

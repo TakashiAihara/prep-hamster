@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
 import { eq } from "drizzle-orm"
-import { groups, memberships, users } from "@prep-hamster/db"
+import { memberships } from "@prep-hamster/db"
 import { createApp } from "../src/app"
 import { seedGroupWithMembership, seedMembership, seedUser } from "./seed"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
@@ -105,13 +105,8 @@ test("PATCH /v1/groups/:id by VIEWER returns 403 INSUFFICIENT_ROLE", async () =>
 test("stub ids without a UUID version are accepted on path and query", async () => {
   const userId = "00000000-0000-0000-0000-000000000001"
   const groupId = "00000000-0000-0000-0000-000000000010"
-  await testDb
-    .insert(users)
-    .values({ id: userId, email: "stub@example.test", displayName: "Stub", locale: "ja-JP" })
-  await testDb.insert(groups).values({ id: groupId, name: "Stub Home", createdBy: userId })
-  await testDb
-    .insert(memberships)
-    .values({ id: crypto.randomUUID(), userId, groupId, role: "OWNER", joinedAt: new Date() })
+  await seedUser("Stub", userId)
+  await seedGroupWithMembership(userId, "Stub Home", groupId)
 
   const app = createApp({ db: testDb, auth: e2eAuth })
   const byPath = await app.request(`/v1/groups/${groupId}`, {

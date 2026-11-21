@@ -94,3 +94,18 @@ test("invalid_type の受信型は null と配列を区別する", () => {
     "文字列を指定してください (受信: オブジェクト)",
   )
 })
+
+test("invalid_type の受信型は NaN を非数と表示する", () => {
+  const r = z.number().safeParse(NaN, { error: jaErrorMap })
+  expect(r.success || r.error.issues[0]?.message).toBe("数値を指定してください (受信: 非数)")
+})
+
+test("invalid_type の受信型は Invalid Date を不正な日付と表示する", () => {
+  const r = z.date().safeParse(new Date(NaN), { error: jaErrorMap })
+  expect(r.success || r.error.issues[0]?.message).toBe("日付を指定してください (受信: 不正な日付)")
+})
+
+test("invalid_type の受信型は Date インスタンスを日付と表示する", () => {
+  const r = z.string().safeParse(new Date("2026-01-01T00:00:00Z"), { error: jaErrorMap })
+  expect(r.success || r.error.issues[0]?.message).toBe("文字列を指定してください (受信: 日付)")
+})
