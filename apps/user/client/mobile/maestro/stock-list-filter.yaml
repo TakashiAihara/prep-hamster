@@ -1,0 +1,88 @@
+# 在庫一覧 (M-04) の保管場所での絞り込みと品名検索 (#126)。
+#
+# 前提 (stock-detail-* と同じ):
+#   - Android 専用
+#   - API がローカルで起動 (PORT 3000) し、EXPO_PUBLIC_API_BASE_URL が emulator から到達できる
+#   - scripts/dev-session.ts のテストユーザーが、開いているグループの EDITOR 以上
+#   - 場所が 2 件以上 (シードの「冷蔵庫」「パントリー」を使う)
+#   - DB の状態に依存しない: 在庫ごとに実行時刻入りの barcode / 商品名 (scripts/unique-stock.js)
+#     を使い、その名前でだけ行を識別する。他の flow が残した在庫があってもよい
+#   - カテゴリの絞り込みはここでは試せない: mobile にカテゴリを付ける導線が無く、
+#     e2e の在庫はすべて categoryId=null なので選択肢が出ない (unit test で固定)
+appId: com.example.prephamster
+---
+- launchApp:
+    clearState: true
+- runFlow: subflows/dev-sign-in.yaml
+# タブはサインイン済みでグループがあるときだけ出る。session の設定が終わる前に進まない
+- extendedWaitUntil:
+    visible:
+      text: "追加"
+    timeout: 15000
+- waitForAnimationToEnd
+# 「冷蔵庫」と「パントリー」に 1 件ずつ置く。名前は output.nameA / output.nameB に取っておく
+- runScript:
+    file: scripts/unique-stock.js
+    env:
+      PREFIX: filter-a
+- runFlow:
+    file: subflows/add-unique-stock-in-location.yaml
+    env:
+      BARCODE: ${output.barcode}
+      NAME: ${output.name}
+      QUANTITY: "1"
+      LOCATION: "冷蔵庫"
+- evalScript: ${output.nameA = output.name}
+- runScript:
+    file: scripts/unique-stock.js
+    env:
+      PREFIX: filter-b
+- runFlow:
+    file: subflows/add-unique-stock-in-location.yaml
+    env:
+      BARCODE: ${output.barcode}
+      NAME: ${output.name}
+      QUANTITY: "1"
+      LOCATION: "パントリー"
+- evalScript: ${output.nameB = output.name}
+# 2 件目の保存で一覧に戻っている。絞り込みの行が出るまで待つ
+- extendedWaitUntil:
+    visible:
+      id: "stock-search-input"
+    timeout: 15000
+# 場所「冷蔵庫」で絞る。チップの testID は場所の UUID 入りなので、絞り込み行の中の
+# 「冷蔵庫」という文字を id の prefix と一緒に指定して行だけに当てる
+# (一覧の行にも「冷蔵庫 ・ …」の文字はあるが testID が stock-row-* なので外れる)
+- tapOn:
+    id: "stock-filter-location-.*"
+    text: "冷蔵庫"
+# A は期限なしの newest なので絞り込み後の末尾側にいる。下へ送って見つける
+- scrollUntilVisible:
+    element:
+      text: ${output.nameA}
+    direction: DOWN
+    timeout: 60000
+# 絞り込み後の一覧を末尾まで送り、B が残っていないことを見る
+# (notVisible だけでは行が画面外でも通るので、末尾の目印まで送ってから確かめる)
+- scrollUntilVisible:
+    element:
+      id: "stock-list-end"
+    direction: DOWN
+    timeout: 60000
+- assertNotVisible:
+    text: ${output.nameB}
+- takeScreenshot: stock-list-filtered-by-location
+# 場所の絞り込みを戻し、品名で検索すると B の 1 件に絞れる
+- tapOn:
+    id: "stock-filter-location-all"
+- tapOn:
+    id: "stock-search-input"
+- inputText: ${output.nameB}
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      text: ${output.nameB}
+    timeout: 5000
+- assertNotVisible:
+    text: ${output.nameA}
+- takeScreenshot: stock-list-search-result

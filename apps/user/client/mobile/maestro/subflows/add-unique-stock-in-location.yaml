@@ -1,0 +1,41 @@
+# 追加タブから在庫を 1 件、指定した保管場所で作り、一覧に戻るところまで進める。
+# env: BARCODE / NAME (scripts/unique-stock.js の出力) / QUANTITY / LOCATION (場所名)。
+# BARCODE が外部 lookup に当たると商品名を編集できず NAME が付かないので、add-name-input が
+# 見つからずここで失敗する (名前が一意にならない状態で先へ進めない)。
+# 場所のチップには testID が無いので場所名の text で選ぶ (add/details の画面では場所名は一意)。
+appId: com.example.prephamster
+---
+- tapOn:
+    text: "追加"
+- waitForAnimationToEnd
+- tapOn:
+    text: "手動で barcode を入力 (debug)"
+- waitForAnimationToEnd
+- tapOn:
+    id: "input"
+- inputText: ${BARCODE}
+- tapOn:
+    text: "送信"
+- waitForAnimationToEnd:
+    timeout: 5000
+# 詳細フォームは上から 商品 → 保管場所 → 数量 の順。先頭側の要素はスクロールなしで見えている前提
+# (add-unique-stock.yaml が名前・数量・保存をスクロールなしで tap しているのと同じ)
+- tapOn:
+    text: ${LOCATION}
+- tapOn:
+    id: "add-name-input"
+- eraseText
+- inputText: ${NAME}
+- hideKeyboard
+- tapOn:
+    id: "add-quantity-input"
+- eraseText
+- inputText: ${QUANTITY}
+- hideKeyboard
+- tapOn:
+    id: "add-save"
+- waitForAnimationToEnd:
+    timeout: 5000
+- scrollUntilVisible:
+    element:
+      text: ${NAME}
