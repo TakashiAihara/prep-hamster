@@ -87,9 +87,22 @@ export async function signInWithGoogle(): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
+  // push token の削除は認証が要るのでセッションを消す前に行う。失敗しても
+  // サインアウト自体は進め、あとで投げて呼び出し側の Alert に載せる。
+  const { unregisterDevicePushToken } = await import("./push")
+  let pushError: unknown = null
+  try {
+    await unregisterDevicePushToken()
+  } catch (err) {
+    pushError = err
+  }
   const { supabase } = await import("./supabase")
   const { error } = await supabase.auth.signOut()
   if (error) throw error
+  if (pushError) {
+    const detail = pushError instanceof Error ? pushError.message : String(pushError)
+    throw new Error(`通知の解除に失敗しました (サインアウトは完了しています): ${detail}`)
+  }
 }
 
 export type AuthStatus = "loading" | "signed-in" | "signed-out"

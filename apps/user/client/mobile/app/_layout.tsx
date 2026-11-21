@@ -2,6 +2,7 @@ import { Stack } from "expo-router"
 import { StatusBar } from "expo-status-bar"
 import { AuthStatusProvider } from "@/auth-status"
 import { CurrentGroupProvider } from "@/current-group"
+import { PushNotifications } from "@/push-notifications"
 
 // サインインの有無での出し分けは各グループの layout (タブ / サインイン画面) が持つ。
 // ここは navigator を常に描く (描かないうちに遷移すると expo-router が落ちる)。
@@ -23,6 +24,7 @@ export default function RootLayout() {
             options={{ presentation: "modal", headerShown: true, title: "保管場所" }}
           />
         </Stack>
+        <PushNotifications />
       </CurrentGroupProvider>
     </AuthStatusProvider>
   )

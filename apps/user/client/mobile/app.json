@@ -26,6 +26,12 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "default"
+        }
+      ],
       "@react-native-community/datetimepicker",
       "expo-web-browser",
       "expo-status-bar"
