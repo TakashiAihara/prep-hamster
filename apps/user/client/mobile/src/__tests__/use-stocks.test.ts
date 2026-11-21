@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { joinStocksWithMasters, todayUtc } from "../stock-join"
 
-test("joinStocksWithMasters joins by id with item / location names", () => {
+test("joinStocksWithMasters joins by id with item / location / category names", () => {
   const stocks = [
     {
       id: "s1",
@@ -13,13 +13,17 @@ test("joinStocksWithMasters joins by id with item / location names", () => {
       bestBeforeDate: null,
     },
   ]
-  const items = [{ id: "i1", name: "Tomato" }]
+  const items = [{ id: "i1", name: "Tomato", categoryId: "c1" }]
   const locations = [{ id: "l1", name: "Pantry" }]
-  expect(joinStocksWithMasters(stocks, items, locations)).toEqual([
+  const categories = [{ id: "c1", name: "野菜" }]
+  expect(joinStocksWithMasters(stocks, items, locations, categories)).toEqual([
     {
       id: "s1",
       itemName: "Tomato",
+      locationId: "l1",
       locationName: "Pantry",
+      categoryId: "c1",
+      categoryName: "野菜",
       quantity: 3,
       unit: "個",
       useByDate: "2026-06-01",
@@ -40,9 +44,48 @@ test("joinStocksWithMasters falls back to '(unknown ...)' when masters are missi
       bestBeforeDate: null,
     },
   ]
-  const rows = joinStocksWithMasters(stocks, [], [])
+  const rows = joinStocksWithMasters(stocks, [], [], [])
   expect(rows[0]?.itemName).toBe("不明な商品")
   expect(rows[0]?.locationName).toBe("不明な場所")
+  expect(rows[0]?.categoryId).toBeNull()
+  expect(rows[0]?.categoryName).toBeNull()
+})
+
+test("joinStocksWithMasters leaves category null when the item has none or the master is missing", () => {
+  const stocks = [
+    {
+      id: "no-cat",
+      itemId: "i1",
+      locationId: "l1",
+      quantity: 1,
+      unit: "個",
+      useByDate: null,
+      bestBeforeDate: null,
+    },
+    {
+      id: "lost-cat",
+      itemId: "i2",
+      locationId: "l1",
+      quantity: 1,
+      unit: "個",
+      useByDate: null,
+      bestBeforeDate: null,
+    },
+  ]
+  const items = [
+    { id: "i1", name: "A", categoryId: null },
+    { id: "i2", name: "B", categoryId: "c-gone" },
+  ]
+  const rows = joinStocksWithMasters(
+    stocks,
+    items,
+    [{ id: "l1", name: "Pantry" }],
+    [{ id: "c1", name: "野菜" }],
+  )
+  expect(rows[0]?.categoryId).toBeNull()
+  expect(rows[0]?.categoryName).toBeNull()
+  expect(rows[1]?.categoryId).toBe("c-gone")
+  expect(rows[1]?.categoryName).toBeNull()
 })
 
 test("joinStocksWithMasters preserves the input order of stocks", () => {
@@ -75,7 +118,12 @@ test("joinStocksWithMasters preserves the input order of stocks", () => {
       bestBeforeDate: null,
     },
   ]
-  const rows = joinStocksWithMasters(stocks, [{ id: "i", name: "X" }], [{ id: "l", name: "Y" }])
+  const rows = joinStocksWithMasters(
+    stocks,
+    [{ id: "i", name: "X", categoryId: null }],
+    [{ id: "l", name: "Y" }],
+    [],
+  )
   expect(rows.map((r) => r.id)).toEqual(["a", "b", "c"])
 })
 
