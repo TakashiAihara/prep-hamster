@@ -1,5 +1,5 @@
 {
-  "id": "90631528-763c-406d-97a8-2f93bce61e13",
+  "id": "6b0aa78a-1908-41fa-8118-2701289b4226",
   "prevId": "b10a02db-8c7e-4820-97a7-dcb7ed80a15a",
   "version": "7",
   "dialect": "postgresql",
@@ -367,7 +367,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"items\".\"product_master_id\" IS NOT NULL",
+          "where": "\"items\".\"product_master_id\" IS NOT NULL AND \"items\".\"deleted_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -389,7 +389,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"items\".\"product_master_id\" IS NULL AND \"items\".\"barcode\" IS NOT NULL",
+          "where": "\"items\".\"product_master_id\" IS NULL AND \"items\".\"barcode\" IS NOT NULL AND \"items\".\"deleted_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -695,6 +695,12 @@
           "notNull": true,
           "default": true
         },
+        "push_token": {
+          "name": "push_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "expiry_notified_on": {
           "name": "expiry_notified_on",
           "type": "date",
@@ -954,7 +960,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },

@@ -110,6 +110,46 @@ test("POST /v1/items with duplicate (groupId, barcode) returns 422 ITEM_BARCODE_
   expect(body.error.code).toBe("ITEM_BARCODE_DUPLICATE")
 })
 
+test("POST /v1/items reuses the barcode of a soft-deleted manual item and keeps the old row", async () => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const headers = { "content-type": "application/json", authorization: await bearer(userId) }
+
+  const first = await app.request("/v1/items", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ groupId, name: "First", barcode: "4901234567890" }),
+  })
+  expect(first.status).toBe(201)
+  const { item: firstItem } = (await first.json()) as { item: { id: string } }
+
+  const del = await app.request(`/v1/items/${firstItem.id}`, { method: "DELETE", headers })
+  expect(del.status).toBe(204)
+
+  const second = await app.request("/v1/items", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ groupId, name: "Second", barcode: "4901234567890" }),
+  })
+  expect(second.status).toBe(201)
+  const { item: secondItem } = (await second.json()) as { item: { id: string } }
+  expect(secondItem.id).not.toBe(firstItem.id)
+
+  const [oldRow] = await testDb.select().from(items).where(eq(items.id, firstItem.id))
+  expect(oldRow).toBeDefined()
+  expect(oldRow?.deletedAt).toBeInstanceOf(Date)
+
+  const third = await app.request("/v1/items", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ groupId, name: "Third", barcode: "4901234567890" }),
+  })
+  expect(third.status).toBe(422)
+  const thirdBody = (await third.json()) as { error: { code: string } }
+  expect(thirdBody.error.code).toBe("ITEM_BARCODE_DUPLICATE")
+})
+
 test("GET /v1/items?groupId=X returns active items only", async () => {
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Home")
@@ -174,6 +214,65 @@ test("PATCH /v1/items/:id by EDITOR updates barcode", async () => {
   expect(res.status).toBe(200)
   const body = (await res.json()) as { item: { barcode: string | null } }
   expect(body.item.barcode).toBe("4900000000000")
+})
+
+const createItemVia = async (
+  app: ReturnType<typeof createApp>,
+  headers: Record<string, string>,
+  groupId: string,
+  name: string,
+  barcode: string,
+) => {
+  const res = await app.request("/v1/items", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ groupId, name, barcode }),
+  })
+  expect(res.status).toBe(201)
+  return ((await res.json()) as { item: { id: string } }).item.id
+}
+
+test("PATCH /v1/items/:id can take the barcode of a soft-deleted item", async () => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const headers = { "content-type": "application/json", authorization: await bearer(userId) }
+
+  const aId = await createItemVia(app, headers, groupId, "A", "4901234567890")
+  const del = await app.request(`/v1/items/${aId}`, { method: "DELETE", headers })
+  expect(del.status).toBe(204)
+  const bId = await createItemVia(app, headers, groupId, "B", "4900000000001")
+
+  const res = await app.request(`/v1/items/${bId}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ barcode: "4901234567890" }),
+  })
+
+  expect(res.status).toBe(200)
+  const body = (await res.json()) as { item: { id: string; barcode: string | null } }
+  expect(body.item.id).toBe(bId)
+  expect(body.item.barcode).toBe("4901234567890")
+})
+
+test("PATCH /v1/items/:id to the barcode of a live item returns 422 ITEM_BARCODE_DUPLICATE", async () => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const headers = { "content-type": "application/json", authorization: await bearer(userId) }
+
+  await createItemVia(app, headers, groupId, "A", "4901234567890")
+  const bId = await createItemVia(app, headers, groupId, "B", "4900000000001")
+
+  const res = await app.request(`/v1/items/${bId}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ barcode: "4901234567890" }),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("ITEM_BARCODE_DUPLICATE")
 })
 
 test("PATCH /v1/items/:id with empty body returns 422 and updates nothing", async () => {
