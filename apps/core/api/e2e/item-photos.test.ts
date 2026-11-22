@@ -276,6 +276,17 @@ test("replay at the cap: the recorded photo answers 200, not PHOTO_LIMIT_EXCEEDE
   expect(again.status).toBe(200)
 })
 
+test("an upper-case item id in the path still replays a recorded photo with 200", async () => {
+  const { upload, itemId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  const first = await upload(itemId.toUpperCase(), { photoId, bytes: jpeg(300) })
+
+  const again = await upload(itemId.toUpperCase(), { photoId, bytes: jpeg(300) })
+
+  expect(first.status).toBe(201)
+  expect(again.status).toBe(200)
+})
+
 test("an upper-case photoId is the same photo as its lower-case form", async () => {
   const { upload, itemId } = await setupPhotos()
   const photoId = crypto.randomUUID()
@@ -324,7 +335,7 @@ test("a photoId from another group answers the same 422 body as an unrelated tak
   expect(await json(foreign)).toEqual(await json(taken))
 })
 
-test("a failed Storage upload leaves no row and answers 502", async () => {
+test("a failed Storage upload answers 502 and leaves only a pending row", async () => {
   const { fake, upload, itemId } = await setupPhotos()
   fake.control.failUpload = true
 
@@ -332,7 +343,8 @@ test("a failed Storage upload leaves no row and answers 502", async () => {
 
   expect(res.status).toBe(502)
   expect((await json(res)).error.code).toBe("STORAGE_UNAVAILABLE")
-  expect(await testDb.select().from(itemPhotos)).toEqual([])
+  const rows = await testDb.select().from(itemPhotos)
+  expect(rows.map((r) => r.status)).toEqual(["pending"])
 })
 
 test("without a Storage secret key every photo route answers 503 and other routes still work", async () => {
@@ -661,6 +673,18 @@ test("deleting an item with a failing Storage leaves a pending-removal row", asy
   const [row] = await testDb.select().from(itemPhotos).where(eq(itemPhotos.id, photoId))
   expect(row?.deletedAt).not.toBeNull()
   expect(row?.storageDeletedAt).toBeNull()
+})
+
+test("a non-member uploading to a deleted item gets 404, the same as for a missing one", async () => {
+  const { owner, as, itemId } = await setupPhotos()
+  await owner.req("DELETE", `/v1/items/${itemId}`)
+  const outsider = await as(await seedUser())
+
+  const deleted = await outsider.req("POST", `/v1/items/${itemId}/photos`, photoForm())
+  const missing = await outsider.req("POST", `/v1/items/${crypto.randomUUID()}/photos`, photoForm())
+
+  expect(deleted.status).toBe(404)
+  expect(await json(deleted)).toEqual(await json(missing))
 })
 
 test("upload to a deleted item is 404 and uploads nothing", async () => {

@@ -1,5 +1,5 @@
 {
-  "id": "87c8b750-9bae-4c0a-a30f-f46cbcfd0352",
+  "id": "d87f743c-af97-4977-a819-6a251c2c279d",
   "prevId": "2dbc4bc8-be60-464b-ad5e-2dd4c29e5043",
   "version": "7",
   "dialect": "postgresql",
@@ -310,6 +310,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "width": {
           "name": "width",
           "type": "integer",
@@ -383,17 +389,52 @@
           "method": "btree",
           "with": {}
         },
-        "item_photos_group_idx": {
-          "name": "item_photos_group_idx",
+        "item_photos_ready_cover_idx": {
+          "name": "item_photos_ready_cover_idx",
           "columns": [
             {
               "expression": "group_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
+            },
+            {
+              "expression": "item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
           "isUnique": false,
+          "where": "\"item_photos\".\"deleted_at\" IS NULL AND \"item_photos\".\"status\" = 'ready'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "item_photos_stale_pending_idx": {
+          "name": "item_photos_stale_pending_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"item_photos\".\"status\" = 'pending' AND \"item_photos\".\"deleted_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -463,6 +504,10 @@
         "item_photos_byte_size_positive": {
           "name": "item_photos_byte_size_positive",
           "value": "\"item_photos\".\"byte_size\" > 0"
+        },
+        "item_photos_status_check": {
+          "name": "item_photos_status_check",
+          "value": "\"item_photos\".\"status\" IN ('pending', 'ready')"
         }
       },
       "isRLSEnabled": false

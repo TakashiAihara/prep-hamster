@@ -3,7 +3,31 @@ import { bearer, e2eAuth } from "./auth-helper"
 import { createFakePhotoStorage } from "./fake-photo-storage"
 import { seedGroupWithMembership, seedItem, seedMembership, seedUser } from "./seed"
 import { testDb } from "./setup"
-import type { Db } from "@prep-hamster/db"
+import { itemPhotos, type Db } from "@prep-hamster/db"
+import { photoPath } from "../src/photos/config"
+
+// 行を直接入れる (status は既定で ready)。object は入れない
+export const insertPhotoRow = (
+  tx: Pick<Db, "insert">,
+  v: {
+    id: string
+    groupId: string
+    itemId: string
+    userId: string
+    size: number
+    status?: "pending" | "ready"
+  },
+) =>
+  tx.insert(itemPhotos).values({
+    id: v.id,
+    groupId: v.groupId,
+    itemId: v.itemId,
+    storagePath: photoPath(v.groupId, v.id),
+    contentType: "image/jpeg",
+    byteSize: v.size,
+    status: v.status ?? "ready",
+    createdBy: v.userId,
+  })
 
 // 先頭が JPEG の署名で、fill で中身を区別できる偽の JPEG
 export const jpeg = (size = 1000, fill = 1): Uint8Array => {
@@ -36,7 +60,7 @@ export const photoForm = (f: Form = {}): FormData => {
 
 export async function setupPhotos(opts: { db?: Db; now?: () => number } = {}) {
   const fake = createFakePhotoStorage()
-  if (opts.now) fake.control.now = opts.now
+
   const ownerId = await seedUser()
   const groupId = await seedGroupWithMembership(ownerId, "Home")
   const itemId = await seedItem(groupId, "Tomato")

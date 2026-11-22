@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { provisionPhotoBucket } from "../../scripts/provision-photo-bucket"
 import { PHOTOS_PER_ITEM_MAX } from "@prep-hamster/schema"
-import { ADOPT_MAX_AGE_MS, PHOTO_BUCKET, REGISTER_DEADLINE_MS, SWEEP_MIN_AGE_MS } from "./config"
+import {
+  PENDING_STALE_AFTER_MS,
+  PHOTO_BUCKET,
+  REMOVAL_RETRY_AFTER_MS,
+  STORAGE_TIMEOUT_MS,
+} from "./config"
 
 type Buckets = Record<
   string,
@@ -24,14 +29,13 @@ test("supabase/config.toml defines the photo bucket as private, 2 MiB, image/jpe
   expect(bucket?.allowed_mime_types).toEqual(["image/jpeg"])
 })
 
-test("the time limits keep their order: a registration is refused before the sweep may remove its object", () => {
+test("a pending row is called stale only long after any single request could still be running", () => {
   const minute = 60 * 1000
 
-  expect(REGISTER_DEADLINE_MS).toBe(20 * minute)
-  expect(ADOPT_MAX_AGE_MS).toBe(20 * minute)
-  expect(SWEEP_MIN_AGE_MS).toBe(60 * minute)
-  expect(REGISTER_DEADLINE_MS).toBeLessThan(SWEEP_MIN_AGE_MS)
-  expect(ADOPT_MAX_AGE_MS).toBeLessThanOrEqual(REGISTER_DEADLINE_MS)
+  expect(PENDING_STALE_AFTER_MS).toBe(20 * minute)
+  expect(REMOVAL_RETRY_AFTER_MS).toBe(5 * minute)
+  expect(STORAGE_TIMEOUT_MS).toBe(30 * 1000)
+  expect(PENDING_STALE_AFTER_MS).toBeGreaterThanOrEqual(10 * STORAGE_TIMEOUT_MS)
 })
 
 test("the per-item photo limit is five", () => {

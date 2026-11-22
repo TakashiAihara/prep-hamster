@@ -1,17 +1,17 @@
-import { and, asc, count, eq, isNull, lt, sql } from "drizzle-orm"
+import { and, asc, count, eq, inArray, isNull, lt } from "drizzle-orm"
 import { itemPhotos, items, type Db } from "@prep-hamster/db"
 import { PHOTO_CONTENT_TYPE, PHOTOS_PER_ITEM_MAX } from "@prep-hamster/schema"
 import {
-  ADOPT_MAX_AGE_MS,
-  REGISTER_DEADLINE_MS,
-  REGISTER_LOCK_TIMEOUT,
+  PENDING_STALE_AFTER_MS,
   REMOVAL_RETRY_AFTER_MS,
   SIGN_CHUNK,
   SIGNED_URL_TTL_SECONDS,
   SWEEP_BATCH,
-  SWEEP_MIN_AGE_MS,
 } from "./config"
 import type { PhotoStorage } from "./storage"
+
+// 行を先に作り (pending)、object を置き、行を ready にする。見えるのは ready の行だけ。
+// DB の transaction の中では Storage を呼ばない。
 
 export type PhotoRow = typeof itemPhotos.$inferSelect
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0]
@@ -19,48 +19,24 @@ type Reader = Pick<Db, "select" | "selectDistinctOn">
 
 export type Clock = () => number
 
-// 同じ photoId の判定は 1 か所に寄せる。none = 行が無い / match = 同じ item・group・大きさの active な行 /
-// reused = 行はあるが別物 (別 item・別 group・別の大きさ・削除済み)。別 group の行も reused に倒すので、
-// 他 group の photoId の有無は応答から分からない。
-export type Probe = { kind: "none" } | { kind: "match"; row: PhotoRow } | { kind: "reused" }
-
 export type Expect = { groupId: string; itemId: string; byteSize: number }
 
-export async function probePhoto(db: Reader, photoId: string, expect: Expect): Promise<Probe> {
-  const [row] = await db.select().from(itemPhotos).where(eq(itemPhotos.id, photoId)).limit(1)
-  if (!row) return { kind: "none" }
-  const same =
-    row.groupId === expect.groupId &&
-    row.itemId === expect.itemId &&
-    row.byteSize === expect.byteSize &&
-    row.deletedAt === null
-  return same ? { kind: "match", row } : { kind: "reused" }
+export type ClaimInput = Expect & {
+  photoId: string
+  userId: string
+  storagePath: string
+  width: number | null
+  height: number | null
 }
 
-// 登録 (行の insert) と object の削除を photoId ごとに直列にする lock。
-// 取るのはこの lock だけで item の行は押さえないので、待たされるのは同じ photoId の操作だけ。
-// item 行 lock を取る側 (登録) は item → この lock の順。sweep と補償の削除はこの lock だけを取る。
-// photoId は大文字小文字を区別しない uuid なので、lock の鍵は小文字にそろえる (hashtextextended は文字列を区別する)
-const lockPhoto = (tx: Tx, photoId: string) =>
-  tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${photoId.toLowerCase()}::text, 0))`)
-
-async function underPhotoLock<T>(
-  db: Db,
-  photoId: string,
-  fn: (tx: Tx) => Promise<T>,
-  lockTimeout = "5s",
-): Promise<T> {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql.raw(`set local lock_timeout = '${lockTimeout}'`))
-    await lockPhoto(tx, photoId)
-    return fn(tx)
-  })
-}
-
-export type CapCheck =
-  | { kind: "ok" }
-  | { kind: "replay"; row: PhotoRow }
+export type ClaimResult =
+  // 新しい pending の行を作った
+  | { kind: "created"; row: PhotoRow }
+  // 同じ photoId・group・item・大きさの行が既にある (pending なら upload を続け、ready なら 200 で返す)
+  | { kind: "existing"; row: PhotoRow }
+  // photoId は別の group・item・大きさ、または削除済みの行で使われている
   | { kind: "reused" }
+  | { kind: "gone" }
   | { kind: "limit" }
 
 const countActive = async (db: Reader, itemId: string): Promise<number> => {
@@ -71,53 +47,16 @@ const countActive = async (db: Reader, itemId: string): Promise<number> => {
   return r?.n ?? 0
 }
 
-// upload の前の速い失敗 (ロックなし)。上限なら、数えている間に元の upload の行が commit したかを
-// もう一度見る。見つかった行が別物なら IDEMPOTENCY_KEY_REUSED で、上限超過とは答えない。
-export async function checkCapEarly(
+// 検査 (item が active / photoId の冪等 / 枚数の上限) と pending の行の insert を 1 つの短い transaction で行う。
+// item の行を押さえるので、同じ item の upload・削除・merge と、枚数の判定が直列になる。
+// 枚数は pending も数える (upload 中の写真も 1 枚)。
+export async function claimPhoto(
   db: Db,
-  photoId: string,
-  expect: Expect,
-  max = PHOTOS_PER_ITEM_MAX,
-): Promise<CapCheck> {
-  if ((await countActive(db, expect.itemId)) < max) return { kind: "ok" }
-  const again = await probePhoto(db, photoId, expect)
-  if (again.kind === "match") return { kind: "replay", row: again.row }
-  if (again.kind === "reused") return { kind: "reused" }
-  return { kind: "limit" }
-}
-
-export type RegisterInput = Expect & {
-  // 引き取った object の登録でだけ渡す。lock の下で object がまだあるかを確かめ、無ければ "missing" で返す
-  // (引き取りと、元の要求の補償の削除が重なった場合。行が無い object を指す行を作らない)
-  verifyObject?: () => Promise<boolean>
-  photoId: string
-  userId: string
-  storagePath: string
-  width: number | null
-  height: number | null
-  uploadStartedAt: number
-}
-
-export type RegisterResult =
-  | { kind: "created"; row: PhotoRow }
-  | { kind: "replay"; row: PhotoRow }
-  | { kind: "reused" }
-  | { kind: "gone" }
-  | { kind: "limit" }
-  | { kind: "too_late" }
-  | { kind: "missing" }
-
-// 行の登録。item 行を FOR NO KEY UPDATE で押さえ (上限と item の削除・merge と直列)、そのうえで photoId の lock を取る。
-// どの結果も transaction は終わっている (戻り値で返し、途中で throw しない) ので、呼び出し側は
-// 「行が無いと確かめた」状態から object を片付けられる。
-export async function registerPhoto(
-  db: Db,
-  input: RegisterInput,
+  input: ClaimInput,
   now: Clock,
   max = PHOTOS_PER_ITEM_MAX,
-  lockTimeout = REGISTER_LOCK_TIMEOUT,
-): Promise<RegisterResult> {
-  return db.transaction(async (tx): Promise<RegisterResult> => {
+): Promise<ClaimResult> {
+  return db.transaction(async (tx): Promise<ClaimResult> => {
     const [item] = await tx
       .select({ id: items.id })
       .from(items)
@@ -125,92 +64,102 @@ export async function registerPhoto(
       .for("no key update")
     if (!item) return { kind: "gone" }
 
-    // 待つのは同じ photoId の操作 (止まった削除など) の後ろだけ。上限を超えたら失敗にして、route の確定の経路に回す
-    await tx.execute(sql.raw(`set local lock_timeout = '${lockTimeout}'`))
-    await lockPhoto(tx, input.photoId)
-
-    const probe = await probePhoto(tx, input.photoId, input)
-    if (probe.kind === "match") return { kind: "replay", row: probe.row }
-    if (probe.kind === "reused") return { kind: "reused" }
-
-    // sweep が object を消せる歳になる前に登録を断る。sweep は同じ lock の下で行を確かめてから消すので、
-    // ここを通れた登録は消されない (lock を取れた時点で sweep は待つ)。取る前に止まっていた登録はここで断られる
-    if (now() - input.uploadStartedAt > REGISTER_DEADLINE_MS) return { kind: "too_late" }
+    const [row] = await tx
+      .select()
+      .from(itemPhotos)
+      .where(eq(itemPhotos.id, input.photoId))
+      .limit(1)
+    if (row) {
+      const same =
+        row.groupId === input.groupId &&
+        row.itemId === input.itemId &&
+        row.byteSize === input.byteSize &&
+        row.deletedAt === null
+      if (!same) return { kind: "reused" }
+      if (row.status === "ready") return { kind: "existing", row }
+      // 送り直しは pending の行の最後の動きとして数える (sweep が、いま続けている upload の行を止まった行と取り違えない)
+      const [touched] = await tx
+        .update(itemPhotos)
+        .set({ updatedAt: new Date(now()) })
+        .where(eq(itemPhotos.id, row.id))
+        .returning()
+      return { kind: "existing", row: touched ?? row }
+    }
 
     if ((await countActive(tx, input.itemId)) >= max) return { kind: "limit" }
 
-    if (input.verifyObject && !(await input.verifyObject())) return { kind: "missing" }
-
-    const [row] = await tx
+    // 時刻は sweep が読む時計 (now) で入れる。DB の既定の now() と混ぜると、止まった行の判定が 2 つの時計に分かれる
+    const at = new Date(now())
+    const [created] = await tx
       .insert(itemPhotos)
       .values({
+        createdAt: at,
+        updatedAt: at,
         id: input.photoId,
         groupId: input.groupId,
         itemId: input.itemId,
         storagePath: input.storagePath,
         contentType: PHOTO_CONTENT_TYPE,
         byteSize: input.byteSize,
+        status: "pending",
         width: input.width,
         height: input.height,
         createdBy: input.userId,
       })
       .returning()
-    if (!row) throw new Error("item_photos insert returned no row")
-    return { kind: "created", row }
+    if (!created) throw new Error("item_photos insert returned no row")
+    return { kind: "created", row: created }
   })
 }
 
-export type Settled = { kind: "none" } | { kind: "match"; row: PhotoRow } | { kind: "reused" }
-
-// 結果が分からなかった (commit の失敗など) あとの確定。photoId の lock を取れた時点で、元の登録 transaction は
-// commit か abort で終わっている (lock を持ったまま止まることはない) ので、この時点の probe は確定した答え。
-// 行が無ければ、自分が upload した object をこの lock の下で消す (行の確認と削除の間に登録は入れない)。
-export async function settlePhoto(
+// object を置いた後に行を ready にする。pending で削除されていないときだけ動く 1 文の UPDATE なので、
+// 同じ写真への送り直しと、sweep・削除との競合は、どちらかが先に行を取る。
+// 取れなかったときは、同じ写真の別の要求が先に ready にしたなら "ready"、削除されたなら "gone"
+export async function markReady(
   db: Db,
-  storage: PhotoStorage,
-  p: Expect & { photoId: string; storagePath: string; removeIfAbsent: boolean },
-): Promise<Settled> {
-  return underPhotoLock(db, p.photoId, async (tx) => {
-    const probe = await probePhoto(tx, p.photoId, p)
-    if (probe.kind !== "none") return probe
-    if (p.removeIfAbsent) await storage.remove(p.storagePath)
-    return { kind: "none" }
-  })
-}
-
-// 既存の object (同じ path の upload が "exists") を扱う。
-//   young = 他の要求が upload したばかりで、その登録が来る (または登録済み)。大きさが同じなら上書きも削除もせず、
-//     自分も登録する (createdAtMs は期限の起点。行が既にあるかどうかは登録の transaction が見る)
-//   stale = 行の無い古い object。元の登録はもう来ないので、行が無いと確かめて消し、upload し直す
-//   replay / reused = 古い object の行が、確かめる間に現れた。young でも大きさが違えば、別の内容に使われた photoId として reused
-export type ExistingObject =
-  | { kind: "young"; createdAtMs: number }
-  | { kind: "stale-removed" }
-  | { kind: "replay"; row: PhotoRow }
-  | { kind: "reused" }
-
-export async function inspectExisting(
-  db: Db,
-  storage: PhotoStorage,
-  p: Expect & { photoId: string; storagePath: string },
+  photoId: string,
   now: Clock,
-): Promise<ExistingObject> {
-  const stat = await storage.stat(p.storagePath)
-  // 見つからないのは、確認の間に誰かが消した (sweep など)。もう一度 upload する
-  if (stat === null) return { kind: "stale-removed" }
-  if (now() - stat.createdAt.getTime() <= ADOPT_MAX_AGE_MS) {
-    return stat.size === p.byteSize
-      ? { kind: "young", createdAtMs: stat.createdAt.getTime() }
-      : { kind: "reused" }
+): Promise<{ kind: "ready"; row: PhotoRow } | { kind: "gone" }> {
+  const [row] = await db
+    .update(itemPhotos)
+    .set({ status: "ready", updatedAt: new Date(now()) })
+    .where(
+      and(
+        eq(itemPhotos.id, photoId),
+        eq(itemPhotos.status, "pending"),
+        isNull(itemPhotos.deletedAt),
+      ),
+    )
+    .returning()
+  if (row) return { kind: "ready", row }
+  const [current] = await db.select().from(itemPhotos).where(eq(itemPhotos.id, photoId)).limit(1)
+  if (current && current.status === "ready" && current.deletedAt === null) {
+    return { kind: "ready", row: current }
   }
-  const settled = await settlePhoto(db, storage, { ...p, removeIfAbsent: true })
-  if (settled.kind === "match") return { kind: "replay", row: settled.row }
-  if (settled.kind === "reused") return { kind: "reused" }
-  return { kind: "stale-removed" }
+  return { kind: "gone" }
 }
 
-// photo の soft delete。1 文の UPDATE が photo の行を押さえるので、同じ写真への並行する削除は片方だけが行を得る。
-// 別 item の photo と削除済みの photo は null (404)。
+// 自分が置いた object の行が、upload の間に削除されていた (item・写真の削除 / sweep)。object を消す。
+// 消せなければ、行を削除待ちに戻して sweep に任せる (行の側の削除が先に済んで storage_deleted_at が立っていても、
+// その後に置いた object は残っている)
+export async function discardUploaded(
+  db: Db,
+  storage: PhotoStorage,
+  row: Pick<PhotoRow, "id" | "storagePath">,
+): Promise<void> {
+  try {
+    await storage.remove(row.storagePath)
+  } catch {
+    try {
+      await db.update(itemPhotos).set({ storageDeletedAt: null }).where(eq(itemPhotos.id, row.id))
+    } catch {
+      // sweep が拾えない場合は、object が残る
+    }
+  }
+}
+
+// photo の soft delete。1 文の UPDATE が行を押さえるので、同じ写真への並行する削除は片方だけが行を得る。
+// 見えているのは ready の行だけなので、pending の行・別 item の photo・削除済みの photo は null (404)。
 export async function softDeletePhoto(
   db: Db,
   itemId: string,
@@ -222,13 +171,18 @@ export async function softDeletePhoto(
     .update(itemPhotos)
     .set({ deletedAt: at, updatedAt: at })
     .where(
-      and(eq(itemPhotos.id, photoId), eq(itemPhotos.itemId, itemId), isNull(itemPhotos.deletedAt)),
+      and(
+        eq(itemPhotos.id, photoId),
+        eq(itemPhotos.itemId, itemId),
+        eq(itemPhotos.status, "ready"),
+        isNull(itemPhotos.deletedAt),
+      ),
     )
     .returning()
   return row ?? null
 }
 
-// item の削除と同じ transaction で呼ぶ。object の削除は commit の後 (removeObjectsOf)。
+// item の削除と同じ transaction で呼ぶ (pending の行も含める)。object の削除は commit の後 (removeObjectOf)。
 export async function softDeletePhotosOfItem(
   tx: Tx,
   itemId: string,
@@ -249,7 +203,7 @@ export async function removeObjectOf(
   row: Pick<PhotoRow, "id" | "storagePath">,
   now: Clock,
 ): Promise<"removed" | "failed"> {
-  // object を消した後の行の更新が失敗しても、消した行は削除待ちのまま残るだけ (sweep が object の削除をやり直す。冪等)
+  // object を消した後の行の更新が失敗しても、行は削除待ちのまま残るだけ (sweep が object の削除をやり直す。冪等)
   try {
     await storage.remove(row.storagePath)
     await db
@@ -263,46 +217,49 @@ export async function removeObjectOf(
 }
 
 export type SweepResult = {
-  pendingRemoved: number
-  pendingFailed: number
-  orphansRemoved: number
-  orphansKept: number
-  // photoId の lock を時間内に取れなかった object (次の回に回す。失敗には数えない)
-  orphansBusy: number
-  // lock の待ち以外の失敗 (Storage / DB)。job は非 0 で終わる
-  orphansFailed: number
+  // 止まった pending の行を削除済みにした数
+  staleClaimed: number
+  // object を消して storage_deleted_at を立てた行
+  removed: number
+  // object の削除か行の更新に失敗した行 (job は非 0 で終わり、次の回で再試行する)
+  failed: number
 }
 
-// object の名前は小文字で作るが、大文字の名前も photoId として読む (lock の鍵は小文字にそろえる)
-const PHOTO_OBJECT = /^[^/]+\/([0-9a-fA-F-]{36})\.jpg$/
-
-// lock_timeout (55P03)。driver のエラーは drizzle の wrap の cause に入ることがある
-const isLockTimeout = (err: unknown): boolean => {
-  for (let cur = err, depth = 0; cur && depth < 5; depth++) {
-    if ((cur as { code?: unknown }).code === "55P03") return true
-    cur = (cur as { cause?: unknown }).cause
-  }
-  return false
-}
-
-// 削除待ちの object を消し、行の無い古い object を消す。
-// orphan は一覧の時点ではなく、photoId の lock の下で行を確かめ直してから消す
-// (一覧と削除の間に登録が commit しても、登録済みの object は消えない)。
+// 1. 止まった pending の行 (最後の動きから PENDING_STALE_AFTER_MS 経過) を、1 文の UPDATE で削除済みにする。
+//    ready にする UPDATE と同じ行を取り合うので、ready になった行は取られず、取られた行は ready にならない
+//    (遅れて来た要求は markReady が "gone" で、自分の object を消す)。object は取った後に消す
+// 2. 削除済みで storage_deleted_at が null の行 (1 で取った行を含む) の object を、Storage の外の transaction なしで消す
 export async function sweepPhotos(
   db: Db,
   storage: PhotoStorage,
   now: Clock = Date.now,
 ): Promise<SweepResult> {
-  const result: SweepResult = {
-    pendingRemoved: 0,
-    pendingFailed: 0,
-    orphansRemoved: 0,
-    orphansKept: 0,
-    orphansBusy: 0,
-    orphansFailed: 0,
-  }
+  const at = new Date(now())
+  const stale = db
+    .select({ id: itemPhotos.id })
+    .from(itemPhotos)
+    .where(
+      and(
+        eq(itemPhotos.status, "pending"),
+        isNull(itemPhotos.deletedAt),
+        lt(itemPhotos.updatedAt, new Date(now() - PENDING_STALE_AFTER_MS)),
+      ),
+    )
+    .orderBy(asc(itemPhotos.updatedAt))
+    .limit(SWEEP_BATCH)
+  const claimed = await db
+    .update(itemPhotos)
+    .set({ deletedAt: at, updatedAt: at })
+    .where(
+      and(
+        inArray(itemPhotos.id, stale),
+        eq(itemPhotos.status, "pending"),
+        isNull(itemPhotos.deletedAt),
+      ),
+    )
+    .returning()
 
-  const pending = await db
+  const waiting = await db
     .select()
     .from(itemPhotos)
     .where(
@@ -313,54 +270,20 @@ export async function sweepPhotos(
     )
     .orderBy(asc(itemPhotos.deletedAt))
     .limit(SWEEP_BATCH)
-  for (const row of pending) {
+
+  const result: SweepResult = { staleClaimed: claimed.length, removed: 0, failed: 0 }
+  for (const row of [...claimed, ...waiting]) {
     // oxlint-disable-next-line no-await-in-loop
     const r = await removeObjectOf(db, storage, row, now)
-    if (r === "removed") result.pendingRemoved++
-    else result.pendingFailed++
-  }
-
-  const objects = await storage.listObjects(new Date(now() - SWEEP_MIN_AGE_MS), SWEEP_BATCH)
-  for (const object of objects) {
-    const photoId = PHOTO_OBJECT.exec(object.path)?.[1]
-    // 写真の名前ではない object は触らない
-    if (!photoId) continue
-    try {
-      // oxlint-disable-next-line no-await-in-loop
-      const removed = await underPhotoLock(
-        db,
-        photoId,
-        async (tx) => {
-          const [row] = await tx
-            .select({
-              storagePath: itemPhotos.storagePath,
-              storageDeletedAt: itemPhotos.storageDeletedAt,
-            })
-            .from(itemPhotos)
-            .where(eq(itemPhotos.id, photoId))
-            .limit(1)
-          // object を持つ行は、この path を指す行で、object の削除がまだ済んでいないもの (生きている行も削除待ちの行も
-          // storage_deleted_at は null)。別の group の path を指す行 (photoId の使い回しで負けた upload の object) や、
-          // object の削除が済んだ行の path に残った object は、持ち主のいない orphan
-          if (row && row.storagePath === object.path && row.storageDeletedAt === null) return false
-          await storage.remove(object.path)
-          return true
-        },
-        "1s",
-      )
-      if (removed) result.orphansRemoved++
-      else result.orphansKept++
-    } catch (err) {
-      if (isLockTimeout(err)) result.orphansBusy++
-      else result.orphansFailed++
-    }
+    if (r === "removed") result.removed++
+    else result.failed++
   }
   return result
 }
 
 export type CoverRow = { itemId: string; photoId: string; path: string }
 
-// item ごとの先頭 1 枚 (created_at、同時刻は id の小さい方)。item も photo も active なものだけ。
+// item ごとの先頭 1 枚 (created_at、同時刻は id の小さい方)。ready の写真で、item も photo も active なものだけ。
 export async function listCovers(db: Reader, groupId: string): Promise<CoverRow[]> {
   return db
     .selectDistinctOn([itemPhotos.itemId], {
@@ -373,7 +296,13 @@ export async function listCovers(db: Reader, groupId: string): Promise<CoverRow[
       items,
       and(eq(items.id, itemPhotos.itemId), eq(items.groupId, groupId), isNull(items.deletedAt)),
     )
-    .where(and(eq(itemPhotos.groupId, groupId), isNull(itemPhotos.deletedAt)))
+    .where(
+      and(
+        eq(itemPhotos.groupId, groupId),
+        eq(itemPhotos.status, "ready"),
+        isNull(itemPhotos.deletedAt),
+      ),
+    )
     .orderBy(itemPhotos.itemId, itemPhotos.createdAt, itemPhotos.id)
 }
 
@@ -381,7 +310,13 @@ export async function listItemPhotos(db: Reader, itemId: string): Promise<PhotoR
   return db
     .select()
     .from(itemPhotos)
-    .where(and(eq(itemPhotos.itemId, itemId), isNull(itemPhotos.deletedAt)))
+    .where(
+      and(
+        eq(itemPhotos.itemId, itemId),
+        eq(itemPhotos.status, "ready"),
+        isNull(itemPhotos.deletedAt),
+      ),
+    )
     .orderBy(asc(itemPhotos.createdAt), asc(itemPhotos.id))
 }
 

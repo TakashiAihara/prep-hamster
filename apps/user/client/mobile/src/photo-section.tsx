@@ -132,12 +132,17 @@ export function PhotoSection({ itemId }: { itemId: string }) {
 
   const add = (source: "camera" | "library") =>
     run(async () => {
-      if (source === "camera") {
-        const permission = await ImagePicker.requestCameraPermissionsAsync()
-        if (!permission.granted) {
-          setError("カメラの権限がありません。端末の設定から許可してください")
-          return
-        }
+      const permission =
+        source === "camera"
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync()
+      if (!permission.granted) {
+        setError(
+          source === "camera"
+            ? "カメラの権限がありません。端末の設定から許可してください"
+            : "写真ライブラリの権限がありません。端末の設定から許可してください",
+        )
+        return
       }
       const options: ImagePicker.ImagePickerOptions = {
         mediaTypes: ["images"],

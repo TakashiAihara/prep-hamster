@@ -241,6 +241,8 @@ export const itemPhotos = pgTable(
     storagePath: text("storage_path").notNull(),
     contentType: text("content_type").notNull(),
     byteSize: integer("byte_size").notNull(),
+    // pending = 行だけで object はまだ (または途中)、ready = object が置かれて見えるようになった。名前は提案で、変更は schema とこの 1 列だけ
+    status: text("status").notNull(),
     width: integer("width"),
     height: integer("height"),
     createdBy: uuid("created_by")
@@ -252,8 +254,16 @@ export const itemPhotos = pgTable(
   },
   (t) => [
     check("item_photos_byte_size_positive", sql`${t.byteSize} > 0`),
+    check("item_photos_status_check", sql`${t.status} IN ('pending', 'ready')`),
     index("item_photos_item_idx").on(t.itemId, t.createdAt, t.id),
-    index("item_photos_group_idx").on(t.groupId),
+    // 一覧の先頭の写真 (group 内で item ごとの先頭 1 枚) を引く
+    index("item_photos_ready_cover_idx")
+      .on(t.groupId, t.itemId, t.createdAt, t.id)
+      .where(sql`${t.deletedAt} IS NULL AND ${t.status} = 'ready'`),
+    // 途中で止まった pending の行 (updated_at が古いもの) を sweep が引く
+    index("item_photos_stale_pending_idx")
+      .on(t.updatedAt)
+      .where(sql`${t.status} = 'pending' AND ${t.deletedAt} IS NULL`),
     index("item_photos_pending_removal_idx")
       .on(t.deletedAt)
       .where(sql`${t.deletedAt} IS NOT NULL AND ${t.storageDeletedAt} IS NULL`),

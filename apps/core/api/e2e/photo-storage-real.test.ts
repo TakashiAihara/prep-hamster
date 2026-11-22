@@ -5,7 +5,7 @@ import { createApp } from "../src/app"
 import { PHOTO_BUCKET, photoPath } from "../src/photos/config"
 import { createSupabasePhotoStorage, StorageFailure } from "../src/photos/storage"
 import { bearer, e2eAuth } from "./auth-helper"
-import { jpeg, photoForm, setupPhotos } from "./photo-helper"
+import { insertPhotoRow, jpeg, photoForm, setupPhotos } from "./photo-helper"
 import { ensureMigrated, testDb, truncateAll } from "./setup"
 
 // 本物の Supabase Storage に対する確認 (opt-in)。偽物 (fake-photo-storage.ts) が応答の形で分岐を押さえているので、
@@ -19,8 +19,9 @@ const anonKey = process.env["PHOTO_STORAGE_TEST_ANON_KEY"]
 const enabled = Boolean(url && secretKey)
 
 const suite = enabled ? describe : describe.skip
-if (!enabled)
+if (!enabled) {
   console.warn("skipped: PHOTO_STORAGE_TEST_URL / PHOTO_STORAGE_TEST_SECRET_KEY are not set")
+}
 
 const base = (url ?? "").replace(/\/+$/, "")
 const admin = createClient(base || "http://unset.invalid", secretKey ?? "unset", {
@@ -35,6 +36,7 @@ const newPath = () => {
   created.push(p)
   return p
 }
+const infoOf = (path: string) => admin.storage.from(PHOTO_BUCKET.name).info(path)
 
 suite("real Supabase Storage", () => {
   beforeAll(async () => {
@@ -54,33 +56,20 @@ suite("real Supabase Storage", () => {
     expect(data?.allowed_mime_types).toEqual(["image/jpeg"])
   })
 
-  test("upload answers ok once and 'exists' for the same path (HTTP 400 with statusCode 409)", async () => {
+  test("upload works for a new path and again for the same path without overwriting", async () => {
     const path = newPath()
 
-    expect(await storage.upload(path, jpeg(300), "image/jpeg")).toBe("ok")
-    expect(await storage.upload(path, jpeg(300, 2), "image/jpeg")).toBe("exists")
-    // 上書きされていない
-    expect((await storage.stat(path))?.size).toBe(300)
+    await storage.upload(path, jpeg(300), "image/jpeg")
+    await storage.upload(path, jpeg(400, 2), "image/jpeg")
+
+    expect((await infoOf(path)).data?.size).toBe(300)
+    // 本物の応答の形: 同じ path の upload は HTTP 400 + statusCode 409。adapter の isAlreadyExists がこれを成功に読む
     const raw = await admin.storage.from(PHOTO_BUCKET.name).upload(path, jpeg(300), {
       contentType: "image/jpeg",
       upsert: false,
     })
     expect(String((raw.error as { statusCode?: unknown }).statusCode)).toBe("409")
     expect(raw.error?.message).toBe("The resource already exists")
-  })
-
-  test("stat reads createdAt (camelCase from info()) and size; a missing object is null", async () => {
-    const path = newPath()
-    await storage.upload(path, jpeg(321), "image/jpeg")
-
-    const stat = await storage.stat(path)
-
-    expect(stat?.size).toBe(321)
-    expect(Math.abs((stat?.createdAt.getTime() ?? 0) - Date.now())).toBeLessThan(5 * 60 * 1000)
-    const info = await admin.storage.from(PHOTO_BUCKET.name).info(path)
-    expect(Object.keys(info.data ?? {})).toContain("createdAt")
-    expect(Object.keys(info.data ?? {})).not.toContain("created_at")
-    expect(await storage.stat(photoPath(group, crypto.randomUUID()))).toBeNull()
   })
 
   test("signUrls returns fetchable URLs for existing objects and leaves a missing path out", async () => {
@@ -97,22 +86,6 @@ suite("real Supabase Storage", () => {
     expect((await res.arrayBuffer()).byteLength).toBe(400)
   })
 
-  test("listObjects walks the group folders: folders have a null id, files carry created_at", async () => {
-    const path = newPath()
-    await storage.upload(path, jpeg(100), "image/jpeg")
-    const future = new Date(Date.now() + 60 * 1000)
-
-    const all = await storage.listObjects(future, 10000)
-    const none = await storage.listObjects(new Date(Date.now() - 60 * 60 * 1000), 10000)
-    const one = await storage.listObjects(future, 1)
-
-    expect(all.map((o) => o.path)).toContain(path)
-    expect(none.map((o) => o.path)).not.toContain(path)
-    expect(one).toHaveLength(1)
-    const root = await admin.storage.from(PHOTO_BUCKET.name).list("", { limit: 100 })
-    expect(root.data?.find((f) => f.name === group)?.id).toBeNull()
-  })
-
   test("remove deletes the object and also succeeds for a path that is not there", async () => {
     const path = newPath()
     await storage.upload(path, jpeg(100), "image/jpeg")
@@ -120,7 +93,9 @@ suite("real Supabase Storage", () => {
     await storage.remove(path)
     await storage.remove(path)
 
-    expect(await storage.stat(path)).toBeNull()
+    const info = await infoOf(path)
+    expect(info.data).toBeNull()
+    expect(String((info.error as { statusCode?: unknown } | null)?.statusCode)).toBe("404")
   })
 
   test("a refused request (wrong key) is a StorageFailure for remove, not a silent success", async () => {
@@ -129,7 +104,7 @@ suite("real Supabase Storage", () => {
     await expect(wrong.remove(newPath())).rejects.toBeInstanceOf(StorageFailure)
   })
 
-  test("upload of another content type or over 2 MiB is a failure, not 'exists'", async () => {
+  test("upload of another content type or over 2 MiB is a failure, not a success", async () => {
     const png = storage.upload(newPath(), jpeg(100), "image/png")
     const big = storage.upload(newPath(), jpeg(2 * 1024 * 1024 + 1), "image/jpeg")
 
@@ -196,9 +171,7 @@ suite("real Supabase Storage", () => {
       const bytes = await fetch(list.photos[0]?.url ?? "")
       const covers = (await (
         await call("GET", `/v1/items/photos?groupId=${ctx.groupId}`)
-      ).json()) as {
-        covers: { photoId: string }[]
-      }
+      ).json()) as { covers: { photoId: string }[] }
       const del = await call("DELETE", `/v1/items/${ctx.itemId}/photos/${photoId}`)
 
       expect(up.status).toBe(201)
@@ -207,7 +180,37 @@ suite("real Supabase Storage", () => {
       expect((await bytes.arrayBuffer()).byteLength).toBe(1500)
       expect(covers.covers.map((c) => c.photoId)).toEqual([photoId])
       expect(del.status).toBe(204)
-      expect(await storage.stat(objectPath)).toBeNull()
+      expect((await infoOf(objectPath)).data).toBeNull()
+    })
+
+    test("a retry after the object was already stored (a lost response) marks the row ready", async () => {
+      const ctx = await setupPhotos()
+      const app = createApp({ db: testDb, auth: e2eAuth, photoStorage: storage })
+      const token = await bearer(ctx.ownerId)
+      const photoId = crypto.randomUUID()
+      const objectPath = photoPath(ctx.groupId, photoId)
+      created.push(objectPath)
+      // 前の試行が object を置いたところで止まった状態: 行は pending、object はある
+      await storage.upload(objectPath, jpeg(700), "image/jpeg")
+      await insertPhotoRow(testDb, {
+        id: photoId,
+        groupId: ctx.groupId,
+        itemId: ctx.itemId,
+        userId: ctx.ownerId,
+        size: 700,
+        status: "pending",
+      })
+
+      const res = await Promise.resolve(
+        app.request(`/v1/items/${ctx.itemId}/photos`, {
+          method: "POST",
+          headers: { authorization: token },
+          body: photoForm({ photoId, bytes: jpeg(700) }),
+        }),
+      )
+
+      expect(res.status).toBe(200)
+      expect(((await res.json()) as { photo: { id: string } }).photo.id).toBe(photoId)
     })
   })
 })

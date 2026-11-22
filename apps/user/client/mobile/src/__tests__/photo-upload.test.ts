@@ -77,12 +77,12 @@ test("buildUploadForm hands a native { uri, name, type } file over as it is, as 
 })
 
 test("uploadPhoto posts multipart to the item's photos route without a content-type header", async () => {
-  let seen: { url: string; init: RequestInit | undefined } | null = null
+  const seen: { url: string; init: RequestInit | undefined }[] = []
   const result = await uploadPhoto(
     {
       baseUrl: "http://api.test",
       fetch: async (url, init) => {
-        seen = { url: String(url), init }
+        seen.push({ url: String(url), init })
         return json({ photo: PHOTO }, 201)
       },
     },
@@ -93,12 +93,13 @@ test("uploadPhoto posts multipart to the item's photos route without a content-t
   )
 
   expect(result).toEqual({ ok: true, photo: PHOTO, replay: false })
-  const sent = seen!
-  const init = sent.init!
-  expect(sent.url).toBe(`http://api.test/v1/items/${PHOTO.itemId}/photos`)
-  expect(init.method).toBe("POST")
-  expect(init.headers).toBeUndefined()
-  expect((init.body as FormData).get("photoId")).toBe(PHOTO.id)
+  expect(seen).toHaveLength(1)
+  const sent = seen[0]
+  expect(sent?.url).toBe(`http://api.test/v1/items/${PHOTO.itemId}/photos`)
+  expect(sent?.init?.method).toBe("POST")
+  expect(sent?.init?.headers).toBeUndefined()
+  const sentBody = sent?.init?.body as FormData | undefined
+  expect(sentBody?.get("photoId")).toBe(PHOTO.id)
 })
 
 test("uploadPhoto reports a 200 as a replay of the same photo", async () => {
@@ -161,7 +162,7 @@ test("uploadPhoto: a server-decided rejection asks for a new photoId, a transien
     ok: false,
     retrySamePhotoId: false,
   })
-  expect(await rejectedWith(503, "TEMPORARILY_UNAVAILABLE")).toMatchObject({
+  expect(await rejectedWith(503, "PHOTO_STORAGE_NOT_CONFIGURED")).toMatchObject({
     ok: false,
     retrySamePhotoId: true,
   })
@@ -194,11 +195,7 @@ test("uploadErrorMessage maps each reason to Japanese text the user can act on",
     "この写真は送れませんでした。もう一度写真を選んでください",
   )
   const storage = "写真の保存先に接続できませんでした。しばらくしてからもう一度試してください"
-  for (const code of [
-    "STORAGE_UNAVAILABLE",
-    "TEMPORARILY_UNAVAILABLE",
-    "PHOTO_STORAGE_NOT_CONFIGURED",
-  ]) {
+  for (const code of ["STORAGE_UNAVAILABLE", "PHOTO_STORAGE_NOT_CONFIGURED"]) {
     expect(uploadErrorMessage(503, { code, message: null })).toBe(storage)
   }
   expect(uploadErrorMessage(500, none)).toBe(storage)

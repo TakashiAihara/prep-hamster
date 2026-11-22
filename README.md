@@ -140,4 +140,4 @@ inf-run --only SUPABASE_SECRET_KEY -- env SUPABASE_URL="https://YOUR_PROJECT_REF
 
 - `YOUR_PROJECT_REF` は本番の Supabase project の ref に置き換える (手元の URL ではない)
 - 本物の Storage に対する確認は opt-in の e2e (`apps/core/api/e2e/photo-storage-real.test.ts`)。偽物の Storage が応答の形で分岐を押さえているので、その形が本物と同じことを見る。Storage を持つ Supabase (`bunx supabase start`。auth などは `-x` で外してよい) を立て、`PHOTO_STORAGE_TEST_URL` / `PHOTO_STORAGE_TEST_SECRET_KEY` (公開鍵での拒否も見るなら `PHOTO_STORAGE_TEST_ANON_KEY`) を渡して `bun run --filter @prep-hamster/api test:e2e` を流す。env が無ければ skip する
-- 削除待ちの object と、行の無い古い object は定期ジョブが片付ける (冪等)。`DATABASE_URL` / `SUPABASE_URL` / `SUPABASE_SECRET_KEY` を渡して `bun run --filter @prep-hamster/api job:photo-sweep`。1 日 1 回以上
+- 止まった upload の行 (pending のまま 20 分動きが無いもの) と、削除待ちの写真の object は定期ジョブが片付ける (冪等)。`DATABASE_URL` / `SUPABASE_URL` / `SUPABASE_SECRET_KEY` を渡して `bun run --filter @prep-hamster/api job:photo-sweep`。1 日 1 回以上

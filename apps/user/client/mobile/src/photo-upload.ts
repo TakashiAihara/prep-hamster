@@ -82,7 +82,6 @@ export function uploadErrorMessage(status: number, error: ApiError): string {
     case "IDEMPOTENCY_KEY_REUSED":
       return "この写真は送れませんでした。もう一度写真を選んでください"
     case "STORAGE_UNAVAILABLE":
-    case "TEMPORARILY_UNAVAILABLE":
     case "PHOTO_STORAGE_NOT_CONFIGURED":
       return STORAGE_MESSAGE
   }
