@@ -31,6 +31,7 @@ Status: proposal. Names of routes, request keys, columns, enum values and error 
 - Asymmetry, stated on purpose: only split-created stocks have an ADD event today, so for them the event sum equals the quantity while for stocks created by POST it does not. Using ADD (not a split-specific type) for the new stock keeps the meaning of ADD ("this stock got this quantity at creation") and means a later change that writes ADD on every creation makes the two kinds of stock consistent. Reports must not assume the event sum equals the quantity for all stocks until that change exists
 - Reusing DISCARD for the source side is rejected: DISCARD is waste, and any "discarded quantity" aggregation would count split quantities as waste
 - New enum values need `ALTER TYPE ... ADD VALUE`; in the drizzle migration this runs as its own statement before anything uses the value (Postgres does not let a value added in a transaction be used in the same transaction)
+- The new event type has to be added in three places, with the same value: the database enum (`stockEventTypeEnum` in `packages/db/src/schema.ts`), the zod enum of `stockEventDtoSchema.eventType` in `apps/core/api/src/routes/schemas.ts` (today `ADD`, `CONSUME`, `DISCARD`, `MOVE`, `EDIT`), and the response type that follows from it. `toStockEventDto` is declared to return `z.infer` of that schema, so a database value missing from the zod enum is a type error at that conversion, and the typed client built from the route schemas (`hc` in `packages/api-client`) would not know the value. The link column is added to the event DTO as well. The value name is a proposal (`SPLIT`, see the decisions); the mobile app does not read `eventType` today (searched `apps/user/client/mobile`)
 
 ## API changes
 
@@ -59,15 +60,15 @@ Replay: a request whose `newStockId` already exists as a stock created by a spli
 
 Errors (existing codes are reused wherever the meaning is the same):
 
-| Status | Code                        | When                                                                                 |
-| ------ | --------------------------- | ------------------------------------------------------------------------------------ |
-| 404    | NOT_FOUND                   | source missing, soft deleted, or deleted during the request                          |
-| 403    | existing group-access codes | not a member or VIEWER                                                               |
-| 422    | VALIDATION_ERROR            | body fails schema (quantity not positive, bad date)                                  |
-| 422    | INSUFFICIENT_QUANTITY       | quantity is not strictly less than the remaining quantity (message states both)      |
-| 422    | LOCATION_GROUP_MISMATCH     | `locationId` is not an active location of the same group                             |
-| 422    | IDEMPOTENCY_KEY_REUSED      | `newStockId` exists but was not created by a split of this source with this quantity |
-| 409    | new code (see decisions)    | the source's item was merged away on each of 3 attempts                              |
+| Status | Code                        | When                                                                                                                                                                 |
+| ------ | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 404    | NOT_FOUND                   | source missing, soft deleted, or deleted during the request                                                                                                          |
+| 403    | existing group-access codes | not a member or VIEWER                                                                                                                                               |
+| 422    | VALIDATION_ERROR            | body fails schema (quantity not positive, bad date)                                                                                                                  |
+| 422    | INSUFFICIENT_QUANTITY       | quantity is not strictly less than the remaining quantity (message states both)                                                                                      |
+| 422    | LOCATION_GROUP_MISMATCH     | `locationId` is not an active location of the same group                                                                                                             |
+| 422    | IDEMPOTENCY_KEY_REUSED      | `newStockId` exists but was not created by a split of this source with this quantity                                                                                 |
+| 409    | new code (see decisions)    | the source's item was merged away on each of 3 attempts; a 422 with another new code (see D-split-precision) is returned when the remainder cannot be stored exactly |
 
 Whether a distinct code is wanted for "split off everything" is a decision below; the proposal reuses INSUFFICIENT_QUANTITY.
 
@@ -135,12 +136,20 @@ sequenceDiagram
   alt not valid
     A-->>C: 422 LOCATION_GROUP_MISMATCH
   end
+  A->>D: replay probe again, under the locks, before any state check
+  alt exists
+    A-->>C: 200 recorded result, or 422 IDEMPOTENCY_KEY_REUSED
+  end
   A->>D: locked quantity strictly greater than split quantity?
   alt not enough
     A-->>C: 422 INSUFFICIENT_QUANTITY
   end
+  A->>D: remainder plus split quantity equals the locked quantity exactly (double precision)?
+  alt not representable
+    A-->>C: 422 new code (see decisions)
+  end
   A->>D: UPDATE source quantity, INSERT new stock (id = newStockId), INSERT two events
-  alt unique violation on newStockId (concurrent identical retry)
+  alt unique violation on newStockId (only if the probe under the locks missed it)
     A->>D: ROLLBACK, run the replay probe again
   end
   A->>D: COMMIT
@@ -149,7 +158,7 @@ sequenceDiagram
 
 - The quantity check uses the locked row's value, not the value read before the transaction (consume and discard use a conditional UPDATE for the same effect; split needs the value to build the response and the new row, so it locks first, like move)
 - The location check applies to the effective location: the requested `locationId`, or the source's own location when the request omits it (`stocks.location_id` is `not null`, so there is always one). If the source's location was soft deleted, an omitted `locationId` fails with 422 LOCATION_GROUP_MISMATCH and the client asks the user to pick a place, rather than copying a deleted location onto a new stock
-- Idempotency: `newStockId` is the new stock's primary key. The replay probe runs before any state-dependent check, so a retry of a completed split answers 200 even though the source now holds less than the split quantity, was consumed or soft deleted, or the target location was deleted. To avoid a cross-group existence oracle, the probe is scoped to the source's group, which is read (including a soft-deleted source) and access-checked first. A `newStockId` that exists in another group, or exists in this group but was not created by a split of this source with this quantity, gets the same answer, 422 IDEMPOTENCY_KEY_REUSED, from the probe or from the primary key violation at insert. That reveals that the id is taken but neither where nor by what, which is inherent in a client-chosen primary key and not exploitable for random UUIDs. The probe compares the source id and the quantity recorded on the new stock's creation event, in the database (same reason as `findRecordedDeltaEvent`: `real` columns do not round-trip through JS). If the new stock was soft deleted afterwards, the replay still answers 200 with the stock as it is (its `deletedAt` set). The primary key violation inside the transaction (recognized by the existing `isUniqueViolation`) is only the backstop for two identical requests running at once: it rolls back and runs the probe again. No second `eventId` is needed because the events are created together with the stock
+- Idempotency: `newStockId` is the new stock's primary key. The replay probe runs before any state-dependent check, so a retry of a completed split answers 200 even though the source now holds less than the split quantity, was consumed or soft deleted, or the target location was deleted. To avoid a cross-group existence oracle, the probe is scoped to the source's group, which is read (including a soft-deleted source) and access-checked first. A `newStockId` that exists in another group, or exists in this group but was not created by a split of this source with this quantity, gets the same answer, 422 IDEMPOTENCY_KEY_REUSED, from the probe or from the primary key violation at insert. That reveals that the id is taken but neither where nor by what, which is inherent in a client-chosen primary key and not exploitable for random UUIDs. The probe compares the source id and the quantity recorded on the new stock's creation event, in the database (same reason as `findRecordedDeltaEvent`: `real` columns do not round-trip through JS). If the new stock was soft deleted afterwards, the replay still answers 200 with the stock as it is (its `deletedAt` set). Two identical requests can both pass that first probe. The second one then waits at the stock lock until the first commits, and would read the reduced quantity and answer 422 INSUFFICIENT_QUANTITY before it ever reached an insert. So the probe runs a second time after the item, stock and location locks are held and before any quantity or location check, and answers 200 from there. The primary key violation inside the transaction (recognized by the existing `isUniqueViolation`) is then only a backstop that should not be reached: it rolls back and runs the probe again. No second `eventId` is needed because the events are created together with the stock
 - What identifies "the same request": the source id and the quantity. The location, dates and note are not compared, because the new stock may have been edited since. So the client must generate a new `newStockId` whenever the user changes any field and presses the button again; it reuses the id only for automatic retries of one button press (that is what "attempt" means in the mobile section). Photos compare a different, stricter-or-looser set (item id, group, byte size) because the identity of an upload is its item and size; each design compares what defines the operation
 - Concurrent consume or discard on the source: it either commits before the split's lock (the split sees the smaller quantity) or waits for it. The split never reads a stale quantity
 - Concurrent location delete: the target lock `FOR NO KEY UPDATE` is the same lock PR #219 takes for move. #220 (location delete checks references outside the transaction) is a related open race on the delete side; split does not make it worse and does not depend on it, but the fix for #220 should cover split as another writer of `stocks.location_id`
@@ -160,10 +169,10 @@ sequenceDiagram
 - API e2e (`stocks-split.test.ts`, `stocks-concurrency.test.ts` additions with `lock-helper.ts`):
   1. 6 split by 2 to another location (an unequal split, so swapped or overwritten quantities fail): source 4, new 2 at the chosen location, the new stock's ADD event is +2 and the source's event is -2, the two events point at each other
   2. omitted `locationId` and dates copy the source; null date clears the date on the new stock only; `note` is null on the new stock when omitted even if the source has a note
-  3. quantity equal to or above remaining: 422, nothing written (no new row, no event); a remainder that rounds to 0 at 6 decimals is rejected the same way
+  3. quantity equal to or above remaining: 422, nothing written (no new row, no event); a remainder that rounds to 0 at 6 decimals is rejected the same way; a source of 100000000 split by 1 is rejected by the representability guard with nothing written, and 6 split by 2 passes it
   4. wrong-group location 422; VIEWER 403; deleted source 404
   5. replay: split 3 of 5 (remaining 2, below the split quantity), then the identical request again: 200 with one new stock and no second event. Repeat after the source is consumed to 0, after the source is soft deleted, and after the target location is soft deleted: each answers 200. The same `newStockId` with quantity 1: 422 IDEMPOTENCY_KEY_REUSED. A `newStockId` that belongs to a stock created by POST: 422
-  6. races: split against delete of the source (404, no orphan new stock); two splits of 3 against a stock of 5 (exactly one succeeds); split against a consume that leaves too little; two identical requests at once (one 201, one 200, one new stock)
+  6. races: split against delete of the source (404, no orphan new stock); two splits of 3 against a stock of 5 (exactly one succeeds); split against a consume that leaves too little; two identical requests at once against a stock of 5 split by 3, forced to both pass the first probe (one 201, one 200, one new stock; the 200 must not become INSUFFICIENT_QUANTITY, which is what a probe only before the locks would give)
   7. split against merge (with `item-merge.md`): hold the merge's item locks in an open transaction, start the split against a stock of the source item, release the merge; the split must answer 201 with the new stock on the destination item (a 404 here fails the test, because the stock was not deleted), and no active stock references a soft-deleted item. Run both orders of arrival (merge first, split first: then the new stock is repointed by the merge). A second case with the stock soft deleted answers 404, and a third with the item soft deleted and the stock left on it answers 422 ITEM_GROUP_MISMATCH without retrying
   8. replay across groups: a `newStockId` that belongs to a stock of another group gets 422 IDEMPOTENCY_KEY_REUSED with the same body as an id used by an unrelated stock of this group, never 403 or 404
   9. omitted `locationId` with a soft-deleted source location: 422 LOCATION_GROUP_MISMATCH
@@ -173,7 +182,7 @@ sequenceDiagram
 
 ## Dependencies
 
-- #186 (quantities stored as `real`, pending decision numeric versus real): the remainder `quantity - q` is computed in the database in float4. Example risk: 0.3 minus 0.1 may leave a value the list treats as empty (list uses `round(quantity::numeric, 6) > 0`) or 0.2000001. This doc does not decide #186. Until #186 is decided, the strictly-less check is applied in the database with the same rounding as the list filter, so a remainder that rounds to 0 is rejected as "split off everything" (a stock whose whole content is invisible to the list, for example 0.0000004, therefore cannot be split, and it is not shown in the list anyway). If #186 moves the column to numeric, the check and the schema refine (`Math.fround`) change with it
+- #186 (quantities stored as `real`, pending decision numeric versus real): the remainder `quantity - q` is stored in float4. This doc does not decide #186. Two things are guarded in the meantime. First, the strictly-less check is applied in the database with the same rounding as the list filter, so a remainder that rounds to 0 is rejected as "split off everything" (a stock whose whole content is invisible to the list, for example 0.0000004, therefore cannot be split, and it is not shown in the list anyway). Second, a remainder that float4 cannot hold exactly would make the total grow: with a source of 100000000 and a split of 1, float4 stores the remainder as 100000000 (the spacing of float4 values near 1e8 is 8), and the new stock records 1, so the sum is 100000001. The guard: inside the transaction, on the locked row, compute the remainder in double precision, convert it to float4 as it will be stored, convert the split quantity to float4 as the new stock will store it, and accept only if remainder plus split quantity, added back in double precision, equals the locked quantity exactly. Floats are exactly representable in double precision, so the check is exact; if the two do not add up the request is rejected with a 422 (code name in the decisions) and nothing is written. The ordinary cases (6 split by 2) pass. If #186 moves the column to numeric, the guard is always true and the schema refine (`Math.fround`) changes with it
 - #192 / PR #219: locking pattern (PR #219 is open; the doc assumes its approach for the target location lock)
 - #212 (merge): split inserts a stock for an item, so it takes part in the item lock protocol described in Concurrency and in `item-merge.md`. Both docs carry the same lock order and a merge-versus-split race test
 - #213: independent of split
@@ -211,11 +220,21 @@ sequenceDiagram
 - Recommendation: option 1
 - Reason: one key covers both rows; mobile already generates ids for retries. The replay is recognized by a probe that runs before the state-dependent checks, with the unique violation only as the backstop for simultaneous retries (the first revision relied on the violation alone, which a retry never reached once the quantity check failed)
 
+### D-split-precision. Split quantities that float4 cannot hold exactly (new)
+
+- Question: how does split behave while quantities are stored as float4 (#186 undecided), where subtracting a small quantity from a large one can leave the stored remainder unchanged and make the total grow?
+- Options:
+  1. An exact-sum guard in the database: reject with a 422 unless remainder plus split quantity (both as stored float4 values) equals the locked quantity exactly, until #186 makes it unnecessary (proposed code name `QUANTITY_NOT_REPRESENTABLE`)
+  2. Do nothing and wait for #186
+  3. Reject every split of a source quantity above 16,777,216 (the largest range where float4 holds every integer)
+- Recommendation: option 1 (new in the third revision)
+- Reason: option 2 leaves a way to create quantity out of nothing in the meantime; option 3 is simpler but blocks nothing for fractional quantities, where the same loss happens at smaller sizes, while the exact guard covers both cases with one comparison
+
 ### D-split-retry-code. Response when the item lock keeps moving (new)
 
 - Question: which status and code does a split return if it restarted 3 times because the source stock's item was merged away each time?
 - Options: 409 with a new code; 503 with a new code; reuse NOT_FOUND
-- Recommendation: 409 with a new code (proposed name `CONFLICT_RETRY`; the only new error code of this doc, and the same code is proposed for the photo upload's "object exists, row not committed yet" answer in `item-photos.md`)
+- Recommendation: 409 with a new code (proposed name `CONFLICT_RETRY`; one of the two new error codes of this doc, the other being the representability code of D-split-precision, and the same code is proposed for the photo upload's "object exists, row not committed yet" answer in `item-photos.md`)
 - Reason: the request is valid and can be retried by the client; NOT_FOUND would tell the user the stock is gone, which is false. The restart applies only when the stock's item changed; an item that is deleted while the stock still points at it is a terminal 422 ITEM_GROUP_MISMATCH, not a retry (changed in the third revision)
 
 ### D-split-route. Route and request key names

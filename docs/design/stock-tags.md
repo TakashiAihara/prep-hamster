@@ -57,6 +57,7 @@ Proposed routes (names pending). All under `/v1`, group access checked with `che
 | GET `/items?tagId=`    | same for items                                                           | 200                   |
 
 - PUT with a full set (not add and remove endpoints) keeps the mobile call to one request and makes retries idempotent
+- PUT replaces the whole set and does not detect that the client's set is stale. Two members who both read an empty set and PUT `[a]` and `[b]` leave `[b]`; a PUT retried after a lost response overwrites changes made in between. The item row lock serializes the writes but does not merge them. The proposal is last write wins, recorded as an accepted trade-off in the decision D-tag-put-conflict (a versioned set, or add and remove routes, are the alternatives)
 - `tagIds` is a set: the API removes duplicate ids before anything else, so `[a, a]` is the same request as `[a]` (inserting both would violate the primary key of `item_tags`). The zod schema bounds the array only by a sanity limit (proposal: 100 ids) and does not carry the per-item cap, because a cap in the schema would turn every over-cap request into VALIDATION_ERROR and leave TAG_LIMIT_EXCEEDED unreachable. The cap is checked after deduplication, inside the transaction
 - `itemDtoSchema` gains `tagIds: string[]` so that the list screens do not need one request per item. `GET /items` already returns every item of a group, so the join is one extra query
 - Errors, following the 422 convention (validation and business-rule failures are 422, see `project_v1_1_0_decisions`):
@@ -69,7 +70,7 @@ Proposed routes (names pending). All under `/v1`, group access checked with `che
 | 422    | TAG_GROUP_MISMATCH | a tag id in the request body is missing, deleted, or belongs to another group: one code and one message for all three, so the answer does not reveal whether a UUID exists in another group (mirrors `CATEGORY_GROUP_MISMATCH`). A tag deleted concurrently with the PUT gets the same answer |
 | 422    | TAG_LIMIT_EXCEEDED | the resulting set would exceed the per-item cap                                                                                                                                                                                                                                               |
 
-- POST `/tags` is find-or-create from the user's point of view in the mobile flow: the client first matches the typed name against the loaded tag list, and only calls POST when there is no match. A race that creates the same name twice is resolved by the unique index (the loser gets 422 TAG_NAME_DUPLICATE and re-reads the list)
+- POST `/tags` is find-or-create from the user's point of view in the mobile flow: the client first matches the typed name against the loaded tag list, and only calls POST when there is no match. A race that creates the same name twice is resolved by the unique index (the loser gets 422 TAG_NAME_DUPLICATE). The client then finishes what the user asked for: it re-reads the tag list, picks the tag whose normalized name equals the typed name (the winner's tag), and continues with the PUT that applies it to the item. Re-reading alone would leave the tag created but not applied
 
 ## Mobile screens touched
 
@@ -150,6 +151,16 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: `/tags` with `PUT /items/{id}/tags` and `tagIds`; `/tags` with add and remove sub-routes (`POST` and `DELETE /items/{id}/tags/{tagId}`)
 - Recommendation: the first (full-set replace, key `tagIds`)
 - Reason: idempotent retries and one request from mobile
+
+### D-tag-put-conflict. Stale tag sets in a full-set PUT (new)
+
+- Question: how does `PUT /items/{id}/tags` treat a client whose set is out of date?
+- Options:
+  1. Last write wins: the last PUT replaces the set, and other members' changes made in between can be lost; accepted and documented
+  2. A version of the item's tag set (a new column) sent with the PUT; a mismatch is a conflict error, the client re-reads and re-applies the user's change
+  3. Add and remove sub-routes instead of a full-set PUT (the second option of D-tag-route-names), so concurrent changes to different tags both survive
+- Recommendation: option 1
+- Reason: two members editing the tags of the same product at the same moment is rare in a household, and option 2 adds a column and a client retry path for it. If that case matters, option 3 is the cleaner change and also removes the lost-update on a retried PUT, at the price of two requests when the user changes several tags in one edit. The alternative stays open in D-tag-route-names
 
 ### D-tag-error-codes. Error code names
 

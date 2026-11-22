@@ -110,7 +110,13 @@ sequenceDiagram
   end
   A->>D: read target in the source's group, active (no lock)
   alt missing, deleted or other group
-    A-->>C: 404 (same body in all three cases)
+    A->>D: read the source row again (no lock)
+    alt source now has a merge pointer
+      A->>D: walk the chain
+      A-->>C: 200 replay, or 422 ITEM_ALREADY_MERGED
+    else source unchanged
+      A-->>C: 404 (same body in all three cases)
+    end
   end
   A->>D: BEGIN, lock the two items one statement each, ascending id
   A->>D: re-evaluate on the locked rows
@@ -143,7 +149,8 @@ sequenceDiagram
 - Concurrent consume, discard, move on a source stock: the repoint waits for their row locks and rewrites only `item_id`; they take no item lock and do not read the item
 - Tag writers: PUT of an item's tags locks the item row first, so it serializes with the merge on the same item. Tag delete and tag rename lock the tag row `FOR NO KEY UPDATE`; the merge locks every tag it will write `FOR SHARE`, which conflicts with it. So a tag delete cannot leave an `item_tags` row for a deleted tag. The merge reads tag state after taking those locks and skips tags that are deleted
 - Photo upload locks the item row first, so it serializes with the merge; after the merge it finds the source soft deleted and answers 404
-- Item delete currently checks stock references outside a transaction (same shape as #220). It is not changed by this design; taking the item lock there is a follow-up (decision below)
+- A destination 404 is final only after the source row has been read again: a retry may have read the source as active, and in between A was merged into B and B into C (or B was deleted), so the lookup of B finds nothing although B is on A's chain. The re-read turns that case into the replay answer (the active item at the end of the chain) and keeps the 404 only when the source is unchanged. The re-evaluation on the locked rows covers the same case after the locks
+- Item delete takes part in the protocol (changed in the third revision; it was a follow-up). Today `deleteItemRoute` checks for referencing stocks, then soft-deletes in a separate statement, with no transaction and no lock (`apps/core/api/src/routes/items.ts`, the `ITEM_IN_USE` check followed by the update). A merge that repoints stocks onto an item between those two statements leaves active stocks on a deleted item, which drops them from the expiry notification (`jobs/expiry-notify.ts` reads stocks of active items). The new shape: `BEGIN`; lock the item row `FOR NO KEY UPDATE`; 0 rows or `deleted_at` set means 404; check for active stocks referencing the item (under the lock: stock inserters hold `FOR SHARE` on the item and the merge holds `FOR NO KEY UPDATE`, both conflict with this lock, so every stock write to this item is either committed and visible or waits); 422 `ITEM_IN_USE` if any; soft-delete the item, delete its `item_tags`, soft-delete its photos; `COMMIT`; remove photo objects after the commit. Merge into a destination that is being deleted waits for the delete and then finds the destination soft deleted (404). Race tests: delete against merge into the item, delete against stock create, delete against split
 
 ### Stock create's side of the lock
 
@@ -166,6 +173,8 @@ sequenceDiagram
   8. foreign key inventory test against `pg_constraint`; the stock-insert inventory scan (no `insert(stocks)` outside the owning function)
   9. races: merge against stock create (the stock ends on the destination or the create fails, never on the source; plus a create that starts after the merge committed returns 422); merge against split (see `stock-split.md` test 7); two opposite merges (one 200, one 404); merge against a consume on a moved stock; merge against a tag delete of a tag on the source (no `item_tags` row for the deleted tag)
   10. shopping list items of the source are repointed and keep their other columns
+  11. item delete: delete against merge into the item (no active stock remains on a soft-deleted item: the delete answers 422 `ITEM_IN_USE` or the merge answers 404), delete against stock create, delete against split; a delete of an item with tags and photos removes its `item_tags` and soft-deletes its photos
+  12. a retry whose destination was merged onward between the source read and the destination lookup (A into B, B into C, then the retry) gets the replay answer with `item` = C, not 404
 - Unit: candidate ordering by normalized name (NFKC, case-fold, whitespace removed), merge result handling
 - Maestro: `item-merge.yaml` (add two manual stocks with the same name using the existing `add-unique-stock` subflow, merge, assert one product name remains in the list)
 - Negative control per branch: manual-source check, destination lookup scoped to the group, same-item check, null-field fill precedence, barcode transfer precedence, replay-versus-error decision, the item locks, the tag locks, the limit check
@@ -246,8 +255,8 @@ sequenceDiagram
 
 - Question: which stock writers take the item lock inside their transaction as part of this feature?
 - Options: stock create and split; stock create, split and item delete; none (leave it all to #220)
-- Recommendation: stock create and split now; item delete as a follow-up issue
-- Reason: merge is not correct unless every writer that inserts a stock holds the lock (the first revision covered only create and missed split). The create side is now specified (lock, re-check `deleted_at` under it, one owning function, a source scan test for other insert paths). Item delete has the same read-then-write shape but is a separate fix
+- Recommendation: stock create, split and item delete now (changed in the third revision; the second recommended item delete as a follow-up)
+- Reason: merge is not correct unless every writer that inserts a stock holds the lock (the first revision covered only create and missed split). The create side is specified (lock, re-check `deleted_at` under it, one owning function, a source scan test for other insert paths). Item delete is part of the same invariant, not a separate fix: a merge that repoints stocks onto an item while it is being deleted leaves active stocks on a deleted item, which is the state this design exists to prevent
 
 ### D-merge-entry. Entry point in the app
 
