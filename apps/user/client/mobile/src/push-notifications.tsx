@@ -8,7 +8,10 @@ import { notificationTarget, registerDevicePushToken } from "./push"
 // push 通知の token 登録と、通知タップでの画面遷移 (issue #128)。
 // expo-notifications は web で getLastNotificationResponse が UnavailabilityError を
 // 投げるので、web ではマウントしない (import 自体は web stub で安全)。
+const ENABLE_PUSH_NOTIFICATIONS = process.env.EXPO_PUBLIC_PUSH_NOTIFICATIONS === "1"
+
 export function PushNotifications() {
+  if (!ENABLE_PUSH_NOTIFICATIONS) return null
   if (Platform.OS === "web") return null
   return <PushNotificationsNative />
 }
