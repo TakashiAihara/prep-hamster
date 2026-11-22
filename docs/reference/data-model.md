@@ -37,6 +37,11 @@ erDiagram
         timestamptz updated_at
         timestamptz deleted_at
     }
+    item_tags {
+        uuid item_id FK
+        uuid tag_id FK
+        timestamptz created_at
+    }
     items {
         uuid id PK
         uuid group_id FK
@@ -161,6 +166,15 @@ erDiagram
         timestamptz updated_at
         timestamptz deleted_at
     }
+    tags {
+        uuid id PK
+        uuid group_id FK
+        text name
+        text normalized_name
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz deleted_at
+    }
     users {
         uuid id PK
         text email UK
@@ -181,6 +195,8 @@ erDiagram
     groups ||--o{ shopping_list_items : "group_id"
     groups ||--o{ stock_events : "group_id"
     groups ||--o{ stocks : "group_id"
+    groups ||--o{ tags : "group_id"
+    items ||--o{ item_tags : "item_id"
     items |o--o{ shopping_list_items : "item_id"
     items ||--o{ stocks : "item_id"
     locations |o--o{ stock_events : "from_location_id"
@@ -188,6 +204,7 @@ erDiagram
     locations ||--o{ stocks : "location_id"
     product_masters |o--o{ items : "product_master_id"
     stocks ||--o{ stock_events : "stock_id"
+    tags ||--o{ item_tags : "tag_id"
     users ||--o{ groups : "created_by"
     users ||--o{ invitations : "inviter_id"
     users |o--o{ invitations : "used_by"
@@ -257,6 +274,18 @@ erDiagram
 - FK `group_id` → `groups`.`id`
 - FK `inviter_id` → `users`.`id`
 - FK `used_by` → `users`.`id`
+
+### `item_tags`
+
+| カラム       | 型                         | NULL     | デフォルト | キー              |
+| ------------ | -------------------------- | -------- | ---------- | ----------------- |
+| `item_id`    | `uuid`                     | NOT NULL | —          | FK → `items`.`id` |
+| `tag_id`     | `uuid`                     | NOT NULL | —          | FK → `tags`.`id`  |
+| `created_at` | `timestamp with time zone` | NOT NULL | `now()`    | —                 |
+
+- FK `item_id` → `items`.`id`
+- FK `tag_id` → `tags`.`id`
+- INDEX `item_tags_tag_idx` (`tag_id`)
 
 ### `items`
 
@@ -455,6 +484,21 @@ erDiagram
 - INDEX `stocks_group_location_idx` (`group_id`, `location_id`)
 - INDEX `stocks_group_use_by_idx` (`group_id`, `use_by_date`)
 - CHECK `stocks_quantity_nonneg`: `"stocks"."quantity" >= 0`
+
+### `tags`
+
+| カラム            | 型                         | NULL     | デフォルト | キー               |
+| ----------------- | -------------------------- | -------- | ---------- | ------------------ |
+| `id`              | `uuid`                     | NOT NULL | —          | PK                 |
+| `group_id`        | `uuid`                     | NOT NULL | —          | FK → `groups`.`id` |
+| `name`            | `text`                     | NOT NULL | —          | —                  |
+| `normalized_name` | `text`                     | NOT NULL | —          | —                  |
+| `created_at`      | `timestamp with time zone` | NOT NULL | `now()`    | —                  |
+| `updated_at`      | `timestamp with time zone` | NOT NULL | `now()`    | —                  |
+| `deleted_at`      | `timestamp with time zone` | NULL     | —          | —                  |
+
+- FK `group_id` → `groups`.`id`
+- INDEX `tags_group_normalized_name_idx` (`group_id`, `normalized_name`) UNIQUE WHERE "tags"."deleted_at" IS NULL
 
 ### `users`
 

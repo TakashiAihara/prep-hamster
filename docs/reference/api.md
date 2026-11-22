@@ -217,12 +217,13 @@ group の名前変更（OWNER のみ）
 
 ### `GET /v1/items`
 
-group 単位で item 一覧 (categoryId / barcode 絞り込み可)
+group 単位で item 一覧 (categoryId / tagId / barcode 絞り込み可)
 
 | パラメータ   | 場所    | 必須 | 型             | 説明 |
 | ------------ | ------- | ---- | -------------- | ---- |
 | `groupId`    | `query` | yes  | `string(uuid)` | —    |
 | `categoryId` | `query` | no   | `string(uuid)` | —    |
+| `tagId`      | `query` | no   | `string(uuid)` | —    |
 | `barcode`    | `query` | no   | `string`       | —    |
 
 | ステータス | 説明                                                                      | レスポンス          |
@@ -310,6 +311,29 @@ item を soft delete (EDITOR 以上)
 | `409`      | 同じメールアドレスのアカウントが別にある (新規アカウントの初回リクエスト) | `ApiError` |
 | `422`      | active stock が参照中                                                     | `ApiError` |
 | `503`      | 認証サーバ (Supabase) の署名鍵を取得できない                              | `ApiError` |
+
+### `PUT /v1/items/{id}/tags`
+
+item の tag 集合を丸ごと置き換える (EDITOR 以上。最後の PUT が勝つ)
+
+| パラメータ | 場所   | 必須 | 型             | 説明 |
+| ---------- | ------ | ---- | -------------- | ---- |
+| `id`       | `path` | yes  | `string(uuid)` | —    |
+
+**リクエストボディ**: `PutItemTagsBody`
+
+| ステータス | 説明                                                                                                    | レスポンス                    |
+| ---------- | ------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `200`      | 置き換え成功                                                                                            | `{ item: Item, tags: Tag[] }` |
+| `400`      | JSON として読めないボディ                                                                               | `ApiError`                    |
+| `401`      | 未認証                                                                                                  | `ApiError`                    |
+| `403`      | 未参加 / role 不足                                                                                      | `ApiError`                    |
+| `404`      | item が存在しない                                                                                       | `ApiError`                    |
+| `409`      | 同じメールアドレスのアカウントが別にある (新規アカウントの初回リクエスト)                               | `ApiError`                    |
+| `413`      | ボディが上限 (1 MiB) を超過                                                                             | `ApiError`                    |
+| `415`      | JSON 系 content-type (application/json / application/*+json) 以外、または content-type なしでボディあり | `ApiError`                    |
+| `422`      | ボディ不正 / tag の group 不整合 / 1 item あたりの上限超過                                              | `ApiError`                    |
+| `503`      | 認証サーバ (Supabase) の署名鍵を取得できない                                                            | `ApiError`                    |
 
 ### `POST /v1/items/by-barcode`
 
@@ -531,12 +555,13 @@ current user の push token を削除 (無ければ何もしない)
 
 ### `GET /v1/stocks`
 
-在庫一覧を取得 (categoryId / locationId / 期限で絞り込み可。使い切った在庫は includeEmpty=true のときだけ含む)
+在庫一覧を取得 (categoryId / tagId / locationId / 期限で絞り込み可。使い切った在庫は includeEmpty=true のときだけ含む)
 
 | パラメータ       | 場所    | 必須 | 型             | 説明                                                                        |
 | ---------------- | ------- | ---- | -------------- | --------------------------------------------------------------------------- |
 | `groupId`        | `query` | yes  | `string(uuid)` | —                                                                           |
 | `categoryId`     | `query` | no   | `string(uuid)` | —                                                                           |
+| `tagId`          | `query` | no   | `string(uuid)` | —                                                                           |
 | `locationId`     | `query` | no   | `string(uuid)` | —                                                                           |
 | `expiringBefore` | `query` | no   | `string(date)` | —                                                                           |
 | `includeExpired` | `query` | no   | `boolean`      | —                                                                           |
@@ -697,6 +722,84 @@ current user の push token を削除 (無ければ何もしない)
 | `422`      | toLocationId が同じ group ではない / 同 location への移動                                               | `ApiError`                            |
 | `503`      | 認証サーバ (Supabase) の署名鍵を取得できない                                                            | `ApiError`                            |
 
+## tags
+
+### `GET /v1/tags`
+
+group 単位で tag 一覧 (使われている item が多い順)
+
+| パラメータ | 場所    | 必須 | 型             | 説明 |
+| ---------- | ------- | ---- | -------------- | ---- |
+| `groupId`  | `query` | yes  | `string(uuid)` | —    |
+
+| ステータス | 説明                                                                      | レスポンス        |
+| ---------- | ------------------------------------------------------------------------- | ----------------- |
+| `200`      | 一覧                                                                      | `{ tags: Tag[] }` |
+| `401`      | 未認証                                                                    | `ApiError`        |
+| `403`      | 未参加                                                                    | `ApiError`        |
+| `409`      | 同じメールアドレスのアカウントが別にある (新規アカウントの初回リクエスト) | `ApiError`        |
+| `422`      | クエリ不正                                                                | `ApiError`        |
+| `503`      | 認証サーバ (Supabase) の署名鍵を取得できない                              | `ApiError`        |
+
+### `POST /v1/tags`
+
+tag を作成 (EDITOR 以上)
+
+**リクエストボディ**: `CreateTagBody`
+
+| ステータス | 説明                                                                                                    | レスポンス     |
+| ---------- | ------------------------------------------------------------------------------------------------------- | -------------- |
+| `201`      | 作成成功                                                                                                | `{ tag: Tag }` |
+| `400`      | JSON として読めないボディ                                                                               | `ApiError`     |
+| `401`      | 未認証                                                                                                  | `ApiError`     |
+| `403`      | 未参加 / role 不足                                                                                      | `ApiError`     |
+| `409`      | 同じメールアドレスのアカウントが別にある (新規アカウントの初回リクエスト)                               | `ApiError`     |
+| `413`      | ボディが上限 (1 MiB) を超過                                                                             | `ApiError`     |
+| `415`      | JSON 系 content-type (application/json / application/*+json) 以外、または content-type なしでボディあり | `ApiError`     |
+| `422`      | ボディ不正 / 同名の tag が存在する                                                                      | `ApiError`     |
+| `503`      | 認証サーバ (Supabase) の署名鍵を取得できない                                                            | `ApiError`     |
+
+### `PATCH /v1/tags/{id}`
+
+tag を rename (EDITOR 以上)
+
+| パラメータ | 場所   | 必須 | 型             | 説明 |
+| ---------- | ------ | ---- | -------------- | ---- |
+| `id`       | `path` | yes  | `string(uuid)` | —    |
+
+**リクエストボディ**: `UpdateTagBody`
+
+| ステータス | 説明                                                                                                    | レスポンス     |
+| ---------- | ------------------------------------------------------------------------------------------------------- | -------------- |
+| `200`      | 更新成功                                                                                                | `{ tag: Tag }` |
+| `400`      | JSON として読めないボディ                                                                               | `ApiError`     |
+| `401`      | 未認証                                                                                                  | `ApiError`     |
+| `403`      | 未参加 / role 不足                                                                                      | `ApiError`     |
+| `404`      | 存在しない                                                                                              | `ApiError`     |
+| `409`      | 同じメールアドレスのアカウントが別にある (新規アカウントの初回リクエスト)                               | `ApiError`     |
+| `413`      | ボディが上限 (1 MiB) を超過                                                                             | `ApiError`     |
+| `415`      | JSON 系 content-type (application/json / application/*+json) 以外、または content-type なしでボディあり | `ApiError`     |
+| `422`      | ボディ不正 / 同名の tag が存在する                                                                      | `ApiError`     |
+| `503`      | 認証サーバ (Supabase) の署名鍵を取得できない                                                            | `ApiError`     |
+
+### `DELETE /v1/tags/{id}`
+
+tag を soft delete し全 item から外す (EDITOR 以上)
+
+| パラメータ | 場所   | 必須 | 型             | 説明 |
+| ---------- | ------ | ---- | -------------- | ---- |
+| `id`       | `path` | yes  | `string(uuid)` | —    |
+
+| ステータス | 説明                                                                      | レスポンス |
+| ---------- | ------------------------------------------------------------------------- | ---------- |
+| `204`      | 削除成功                                                                  | `—`        |
+| `401`      | 未認証                                                                    | `ApiError` |
+| `403`      | 未参加 / role 不足                                                        | `ApiError` |
+| `404`      | 存在しない                                                                | `ApiError` |
+| `409`      | 同じメールアドレスのアカウントが別にある (新規アカウントの初回リクエスト) | `ApiError` |
+| `422`      | パラメータ不正                                                            | `ApiError` |
+| `503`      | 認証サーバ (Supabase) の署名鍵を取得できない                              | `ApiError` |
+
 ## スキーマ
 
 ### `ApiError`
@@ -772,6 +875,13 @@ current user の push token を削除 (無ければ何もしない)
 | `openedAt`       | `string(date) \| null` | yes  | —    |
 | `note`           | `string \| null`       | yes  | —    |
 
+### `CreateTagBody`
+
+| フィールド | 型             | 必須 | 説明 |
+| ---------- | -------------- | ---- | ---- |
+| `groupId`  | `string(uuid)` | yes  | —    |
+| `name`     | `string`       | yes  | —    |
+
 ### `Group`
 
 | フィールド  | 型                          | 必須 | 説明 |
@@ -813,6 +923,7 @@ current user の push token を削除 (無ければ何もしない)
 | `name`            | `string`                    | yes  | —    |
 | `barcode`         | `string \| null`            | yes  | —    |
 | `categoryId`      | `string(uuid) \| null`      | yes  | —    |
+| `tagIds`          | `Array<string(uuid)>`       | yes  | —    |
 | `defaultUnit`     | `string \| null`            | yes  | —    |
 | `manufacturer`    | `string \| null`            | yes  | —    |
 | `memo`            | `string \| null`            | yes  | —    |
@@ -880,6 +991,12 @@ current user の push token を削除 (無ければ何もしない)
 | `updatedAt`     | `string(date-time)`                                                                | yes  | —    |
 | `deletedAt`     | `string(date-time) \| null`                                                        | yes  | —    |
 
+### `PutItemTagsBody`
+
+| フィールド | 型                    | 必須 | 説明 |
+| ---------- | --------------------- | ---- | ---- |
+| `tagIds`   | `Array<string(uuid)>` | yes  | —    |
+
 ### `Role`
 
 `enum("OWNER", "EDITOR", "VIEWER")`
@@ -932,6 +1049,18 @@ current user の push token を削除 (無ければ何もしない)
 | `quantityDelta` | `number`         | yes  | —    |
 | `reason`        | `string \| null` | no   | —    |
 | `eventId`       | `string(uuid)`   | no   | —    |
+
+### `Tag`
+
+| フィールド  | 型                          | 必須 | 説明 |
+| ----------- | --------------------------- | ---- | ---- |
+| `id`        | `string(uuid)`              | yes  | —    |
+| `groupId`   | `string(uuid)`              | yes  | —    |
+| `name`      | `string`                    | yes  | —    |
+| `itemCount` | `integer`                   | yes  | —    |
+| `createdAt` | `string(date-time)`         | yes  | —    |
+| `updatedAt` | `string(date-time)`         | yes  | —    |
+| `deletedAt` | `string(date-time) \| null` | yes  | —    |
 
 ### `UpdateCategoryBody`
 
@@ -988,3 +1117,9 @@ current user の push token を削除 (無ければ何もしない)
 | `bestBeforeDate` | `string(date) \| null` | no   | —    |
 | `openedAt`       | `string(date) \| null` | no   | —    |
 | `note`           | `string \| null`       | no   | —    |
+
+### `UpdateTagBody`
+
+| フィールド | 型       | 必須 | 説明 |
+| ---------- | -------- | ---- | ---- |
+| `name`     | `string` | yes  | —    |
