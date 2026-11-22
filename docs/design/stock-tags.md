@@ -33,10 +33,12 @@ Proposed (names pending, see decisions):
 | tags | id uuid pk, group_id uuid fk groups, name text not null, created_at, updated_at, deleted_at | the common `timestamps` helper |
 | item_tags | item_id uuid fk items, tag_id uuid fk tags, created_at | primary key (item_id, tag_id); no deleted_at |
 
-- Unique index on tags `(group_id, normalized name)` where `deleted_at IS NULL`. Same shape as `items_group_barcode_idx`, which is a partial unique index
+- `tags.normalized_name` is a plain `text not null` column that the API computes (one shared helper used by POST, PATCH rename, and the client's find-or-create match). It is not a generated column: Postgres has no NFKC normalization, `lower()` is not Unicode case folding, and a generated column needs an `IMMUTABLE` expression, so the normalization has to live in application code
+- Unique index on tags `(group_id, normalized_name)` where `deleted_at IS NULL`. Same shape as `items_group_barcode_idx`, which is a partial unique index. The index enforces whatever the helper produced, so every write path must go through the helper (a test pins POST and PATCH producing the same value for the same input)
 - `item_tags` rows are physically deleted. The join row has no history value, and a soft-deleted join row would make "tag removed" and "tag never applied" indistinguishable for no benefit
 - A tag is soft-deleted (consistent with locations and categories and with the 90 day policy in `docs/stock/operational-policy.md` section 1.1), and its `item_tags` rows are deleted in the same transaction
 - No stored usage counter. Usage frequency is computed on read with a join and `count(*)`. A counter would be a second source of truth that drifts under concurrent attach and detach
+- `itemCount` and the "N items lose the tag" number in the delete dialog count only active items: the query joins `items` with `items.deleted_at IS NULL`. Item soft delete also deletes that item's `item_tags` rows in the same transaction (a change to the item delete route), so dead items do not hold tags. The `tagId` filters on `/stocks` and `/items` rely on the existing `deleted_at IS NULL` filters of those routes plus the same join; a test pins both
 - `item_tags` has no `group_id`. Group consistency (item and tag in the same group) is checked in the API like `CATEGORY_GROUP_MISMATCH` does today
 - Drizzle: add `tags`, `itemTags`, relations on `items` (`tags: many(itemTags)`) and `groups`; add zod schemas in `packages/db/src/zod-schemas.ts` following the existing refine pattern (uuid columns use `guid()` per the zod 4 pitfall memory)
 
@@ -55,13 +57,14 @@ Proposed routes (names pending). All under `/v1`, group access checked with `che
 | GET `/items?tagId=` | same for items | 200 |
 
 - PUT with a full set (not add and remove endpoints) keeps the mobile call to one request and makes retries idempotent
+- `tagIds` is a set: the API removes duplicate ids before anything else, so `[a, a]` is the same request as `[a]` (inserting both would violate the primary key of `item_tags`). The zod schema bounds the array only by a sanity limit (proposal: 100 ids) and does not carry the per-item cap, because a cap in the schema would turn every over-cap request into VALIDATION_ERROR and leave TAG_LIMIT_EXCEEDED unreachable. The cap is checked after deduplication, inside the transaction
 - `itemDtoSchema` gains `tagIds: string[]` so that the list screens do not need one request per item. `GET /items` already returns every item of a group, so the join is one extra query
 - Errors, following the 422 convention (validation and business-rule failures are 422, see `project_v1_1_0_decisions`):
 
 | Status | Code (proposed) | When |
 | --- | --- | --- |
 | 404 | NOT_FOUND | tag or item missing or soft deleted |
-| 422 | VALIDATION_ERROR | body fails the zod schema (name empty or over the length cap, more tag ids than the cap, non-guid id) |
+| 422 | VALIDATION_ERROR | body fails the zod schema (name empty or over the length cap, more tag ids than the sanity bound, non-guid id) |
 | 422 | TAG_NAME_DUPLICATE | another active tag in the group has the same normalized name (mirrors `ITEM_BARCODE_DUPLICATE`, raised from the unique violation) |
 | 422 | TAG_GROUP_MISMATCH | a tag id belongs to another group or is deleted (mirrors `CATEGORY_GROUP_MISMATCH`) |
 | 422 | TAG_LIMIT_EXCEEDED | the resulting set would exceed the per-item cap |
@@ -79,34 +82,38 @@ Proposed routes (names pending). All under `/v1`, group access checked with `che
 
 - One new drizzle migration creates both tables and runs `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` for each in the same migration. Migration 0003 enabled RLS with a loop over the tables that existed at that time, so tables added later get nothing automatically
 - No policies are created. The API connects as the table owner and is not subject to RLS; anon and authenticated stay locked out. Grants are already revoked by 0003 default privileges for the migration role
-- The existing e2e check in `apps/core/api/e2e/validation.test.ts` ("every public table has RLS") fails if either table is missed
+- The existing e2e check in `apps/core/api/e2e/validation.test.ts` ("every public table has RLS") fails if either table is missed. It proves the flag is set, not that access is denied, so a separate denial test is added (see Tests)
 - Existing data: no backfill, tags start empty
 
 ## Concurrency
 
 Follows the pattern of #192 and PR #219 (rows are locked inside the transaction and the decision is made on the locked values; lock order is fixed to avoid deadlock).
 
-- PUT `/items/{id}/tags`: one transaction. Lock the item row with `FOR NO KEY UPDATE`; 0 rows (deleted meanwhile) means 404. Lock the requested tag rows `FOR SHARE` ordered by id and re-check `deleted_at IS NULL` and group; delete the item's current `item_tags`, insert the new set. The cap is counted on the locked item, so two concurrent PUTs for one item serialize
-- DELETE `/tags/{id}`: lock the tag row `FOR NO KEY UPDATE`, soft delete, delete its `item_tags`. `FOR SHARE` from a concurrent PUT conflicts with this lock, so a PUT either finishes first (its rows are then deleted by the tag delete) or sees the tag as deleted and returns 422 TAG_GROUP_MISMATCH. No cycle: tag delete never waits for an item lock
-- Lock order: item, then tags by id. Tag rename and create take no item lock
+- Global lock order for features that touch items, stocks, locations and tags (the same text is in `stock-split.md` and `item-merge.md`): item rows (ascending id), then stock rows, then location rows, then tag rows (ascending id). A transaction takes a later kind only after the earlier kinds it needs
+- Acquiring several rows in id order is done with one `SELECT ... FOR ...` statement per row, after sorting the ids in application code. The Postgres documentation (SELECT, "The Locking Clause", Caution) says that with `ORDER BY` and a locking clause "ORDER BY is applied first" and the command "might then block trying to obtain a lock on one or more of the rows", and it does not state the order in which rows are locked. Sorting in the application and locking one row per statement does not depend on that unstated behavior, and the cost is at most tens of statements (bounded by the caps)
+- PUT `/items/{id}/tags`: one transaction. Lock the item row with `FOR NO KEY UPDATE`; 0 rows (deleted meanwhile) means 404. Lock each requested tag row `FOR SHARE` in ascending id order and re-check `deleted_at IS NULL` and group; delete the item's current `item_tags`, insert the deduplicated set. The cap is counted on the locked item, so two concurrent PUTs for one item serialize
+- DELETE `/tags/{id}`: lock the tag row `FOR NO KEY UPDATE`, soft delete, delete its `item_tags`. `FOR SHARE` from a concurrent PUT conflicts with this lock (Postgres, Explicit Locking, Table 13.3: FOR SHARE conflicts with FOR NO KEY UPDATE), so a PUT either finishes first (its rows are then deleted by the tag delete) or sees the tag as deleted and returns 422 TAG_GROUP_MISMATCH. No cycle: tag delete takes no item lock
+- Item merge (#212) also writes `item_tags`; it follows the same order (items, then tags `FOR SHARE`) and skips deleted tags, so a tag delete cannot leave an `item_tags` row for a deleted tag (see `item-merge.md`)
+- Every reader of `item_tags` joins `tags.deleted_at IS NULL` as a second line of defense, so a stray row for a deleted tag would not be counted or shown
 - Create duplicates are decided by the unique index, not by a read-then-insert (the exact race class that #220 reports for location delete)
 
 ## Tests
 
 - API e2e (`apps/core/api/e2e/tags.test.ts`, concurrency in a `tags-concurrency.test.ts` using `lock-helper.ts`):
-  1. create, list ordered by usage, rename, duplicate name 422, cross-group tag 422
-  2. PUT replaces the set; second PUT with fewer tags removes the others; over the cap 422
-  3. delete detaches from every item and the filter no longer returns them
-  4. race: PUT against tag delete (no `item_tags` row for a deleted tag remains); two PUTs against one item at the cap
-  5. stock and item list filter by `tagId`
-- RLS: the existing every-table-has-RLS check covers the new tables
+  1. create, rename, duplicate name 422, cross-group tag 422; POST and PATCH produce the same normalized name for the same input
+  2. list ordered by usage: fixtures give three tags different counts (for example 3, 1, 0) with names in the opposite alphabetical order, so a missing `ORDER BY count DESC` fails; `itemCount` excludes soft-deleted items
+  3. PUT replaces the set; a second PUT with fewer tags removes the others; `[a, a]` equals `[a]`; over the cap returns 422 with code TAG_LIMIT_EXCEEDED (the test asserts the code, not only the status, so a schema-level VALIDATION_ERROR does not satisfy it)
+  4. delete detaches from every item and the filters no longer return them; item soft delete removes its `item_tags`
+  5. race: PUT against tag delete (no `item_tags` row for a deleted tag remains); two PUTs against one item at the cap
+  6. stock and item list filter by `tagId`
+- RLS: the existing every-table-has-RLS check covers the new tables. A denial test connects as the `anon` and `authenticated` roles and expects `permission denied` on each new table. It needs a database that has those roles (the local Supabase DB does; plain Postgres does not). When the roles are missing the test reports an explicit skip, never a silent pass
 - Unit (`bun test src`): `tag-manage.ts` name matching and trimming, usage ordering of the list
 - Maestro: `tag-attach-filter.yaml` (add a tag on the stock detail, go back, filter the list by it, see the row; remove the tag)
 - Negative control on each new branch (duplicate, group mismatch, cap) before review, as for other API changes
 
 ## Dependencies
 
-- #212 (merge items): merged items must union their tags
+- #212 (merge items): merged items must union their tags; overlapping tags are deduplicated (insert with conflict ignore), and the per-item cap applies to the union (see D-merge-caps in `item-merge.md`)
 - No dependency on #186 (quantities)
 
 ## Open decisions
@@ -153,9 +160,9 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 ### D-tag-uniqueness. What counts as the same tag name
 
 - Question: how are tag names compared for uniqueness?
-- Options: exact string; trimmed and case-insensitive; trimmed, NFKC-normalized and case-folded
-- Recommendation: trimmed, NFKC-normalized, case-folded (stored in a generated or helper column, name kept as typed)
-- Reason: Japanese input mixes full-width and half-width forms, so "ＰＥＴ" and "pet" would otherwise be two tags
+- Options: exact string; trimmed and case-insensitive; trimmed, NFKC-normalized and lower-cased in application code (stored in a plain `normalized_name` column, name kept as typed)
+- Recommendation: trimmed, NFKC-normalized, lower-cased in application code
+- Reason: Japanese input mixes full-width and half-width forms, so "ＰＥＴ" and "pet" would otherwise be two tags. Full Unicode case folding is not required for a household tag list; Postgres cannot do NFKC, so the helper lives in the API (changed from the first revision, which proposed a generated column)
 
 ### D-tag-delete. Delete semantics
 
