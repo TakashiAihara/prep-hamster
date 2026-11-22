@@ -23,12 +23,11 @@ export function resizePlan(width: number, height: number): ResizePlan {
   return width >= height ? { width: PHOTO_LONG_EDGE_PX } : { height: PHOTO_LONG_EDGE_PX }
 }
 
-// 選んだ 1 枚ごとに 1 つ作り、同じ写真の再送では使い回す。API はこの photoId で再送を見分ける
+// 選んだ 1 枚ごとに 1 つ作り、同じ写真の再送では使い回す。API はこの photoId で再送を見分ける。
+// uuid の生成元は呼び出し側が渡す (RN には global の crypto.randomUUID が無いことがある。画面は expo-crypto を渡す)
 export type PhotoAttempt = { photoId: string }
 
-export const newPhotoAttempt = (uuid: () => string = () => crypto.randomUUID()): PhotoAttempt => ({
-  photoId: uuid(),
-})
+export const newPhotoAttempt = (uuid: () => string): PhotoAttempt => ({ photoId: uuid() })
 
 export type FilePart = Blob | { uri: string; name: string; type: string }
 
@@ -38,8 +37,10 @@ export function buildUploadForm(
   size: { width: number; height: number },
 ): FormData {
   const form = new FormData()
-  // RN の FormData は { uri, name, type } を file として送る。型は DOM 側の Blob に合わせて渡す
-  form.append("file", file as Blob, "photo.jpg")
+  // RN の native は { uri, name, type } を 2 引数で append すると file として送る (name は object の中)。
+  // web は Blob で、file 名を 3 つ目の引数で渡す
+  if (file instanceof Blob) form.append("file", file, "photo.jpg")
+  else form.append("file", file as never)
   form.append("photoId", attempt.photoId)
   form.append("width", String(Math.round(size.width)))
   form.append("height", String(Math.round(size.height)))

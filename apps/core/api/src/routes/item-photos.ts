@@ -270,61 +270,69 @@ export const itemPhotosRouter = new OpenAPIHono<AppEnv>()
     const bytes = new Uint8Array(await form.file.arrayBuffer())
     if (!isJpeg(bytes)) return c.json(UNSUPPORTED, 422)
 
-    // 削除済みの item も読む。replay (削除済みでも記録済みの写真は 200) を 404 より先に答えるため
-    const [item] = await db.select().from(items).where(eq(items.id, itemId)).limit(1)
+    // 削除済みの item は 404。item を消すと写真も消えるので、削除済みの item に記録済みの写真は無い。
+    // 兄弟の route と同じく group の確認より先に読み、削除済みの item の有無を 403 で見分けられないようにする
+    const item = await activeItem(db, itemId)
     if (!item) return c.json(ITEM_NOT_FOUND, 404)
     const access = await checkGroupAccess(db, c.get("userId"), item.groupId, "EDITOR")
     if (!access.ok) return c.json(access.body, access.status)
 
-    const expect = { groupId: item.groupId, itemId, byteSize: bytes.length }
+    // 比べる itemId は DB の値 (小文字の標準形)。path の大文字の itemId のままだと、同じ写真の再送が別物になる
+    const expect = { groupId: item.groupId, itemId: item.id, byteSize: bytes.length }
     const path = photoPath(item.groupId, photoId)
 
     const first = await probePhoto(db, photoId, expect)
     if (first.kind === "match") return c.json({ photo: await dtoOf(storage, first.row) }, 200)
     if (first.kind === "reused") return c.json(REUSED, 422)
-    if (item.deletedAt) return c.json(ITEM_NOT_FOUND, 404)
 
     const cap = await checkCapEarly(db, photoId, expect)
     if (cap.kind === "replay") return c.json({ photo: await dtoOf(storage, cap.row) }, 200)
     if (cap.kind === "reused") return c.json(REUSED, 422)
     if (cap.kind === "limit") return c.json(LIMIT, 422)
 
-    // 同じ path の object を他の要求が先に置いていたら、それを引き取るか (若い)、行が無いと確かめて消して
-    // 置き直す (古い)。upload は上書きしない。2 周で決まらなければ断る
-    const uploadStartedAt = now()
+    // 同じ path の object を他の要求が先に置いていたら、大きさが同じ若いものは引き取り、行が無いと確かめた古いものは
+    // 消して置き直す。upload は上書きしない。2 周で決まらなければ断る
+    let uploadStartedAt = now()
     let weUploaded = false
-    let adopted = false
-    for (let attempt = 0; attempt < 2 && !weUploaded && !adopted; attempt++) {
-      let result: "ok" | "exists"
-      try {
-        // oxlint-disable-next-line no-await-in-loop
-        result = await storage.upload(path, bytes, PHOTO_CONTENT_TYPE)
-      } catch {
-        return c.json(STORAGE_DOWN, 502)
+    // 引き取った object の作成時刻。登録の期限はここから数える (引き取った要求の開始からではない)
+    let adoptedAtMs: number | null = null
+
+    const place = async () => {
+      for (let attempt = 0; attempt < 2 && !weUploaded && adoptedAtMs === null; attempt++) {
+        let result: "ok" | "exists"
+        try {
+          // oxlint-disable-next-line no-await-in-loop
+          result = await storage.upload(path, bytes, PHOTO_CONTENT_TYPE)
+        } catch {
+          return c.json(STORAGE_DOWN, 502)
+        }
+        if (result === "ok") {
+          weUploaded = true
+          continue
+        }
+        let existing: Awaited<ReturnType<typeof inspectExisting>>
+        try {
+          // oxlint-disable-next-line no-await-in-loop
+          existing = await inspectExisting(
+            db,
+            storage,
+            { ...expect, photoId, storagePath: path },
+            now,
+          )
+        } catch {
+          return c.json(RETRY, 503)
+        }
+        if (existing.kind === "replay") {
+          // oxlint-disable-next-line no-await-in-loop
+          return c.json({ photo: await dtoOf(storage, existing.row) }, 200)
+        }
+        if (existing.kind === "reused") return c.json(REUSED, 422)
+        if (existing.kind === "young") adoptedAtMs = existing.createdAtMs
       }
-      if (result === "ok") {
-        weUploaded = true
-        continue
-      }
-      let existing: Awaited<ReturnType<typeof inspectExisting>>
-      try {
-        // oxlint-disable-next-line no-await-in-loop
-        existing = await inspectExisting(
-          db,
-          storage,
-          { ...expect, photoId, storagePath: path },
-          now,
-        )
-      } catch {
-        return c.json(RETRY, 503)
-      }
-      if (existing.kind === "replay")
-        // oxlint-disable-next-line no-await-in-loop
-        return c.json({ photo: await dtoOf(storage, existing.row) }, 200)
-      if (existing.kind === "reused") return c.json(REUSED, 422)
-      if (existing.kind === "young") adopted = true
+      return !weUploaded && adoptedAtMs === null ? c.json(RETRY, 503) : null
     }
-    if (!weUploaded && !adopted) return c.json(RETRY, 503)
+    const refused = await place()
+    if (refused) return refused
 
     // 行を書く前に失敗したときの片付け。行が無いと lock の下で確かめられたときだけ、自分が上げた object を消す
     const cleanUp = async (): Promise<Settled | null> => {
@@ -342,9 +350,8 @@ export const itemPhotosRouter = new OpenAPIHono<AppEnv>()
       }
     }
 
-    let reg: Awaited<ReturnType<typeof registerPhoto>>
-    try {
-      reg = await registerPhoto(
+    const register = () =>
+      registerPhoto(
         db,
         {
           ...expect,
@@ -353,13 +360,18 @@ export const itemPhotosRouter = new OpenAPIHono<AppEnv>()
           storagePath: path,
           width: form.width ?? null,
           height: form.height ?? null,
-          uploadStartedAt,
+          uploadStartedAt: adoptedAtMs ?? uploadStartedAt,
+          // 引き取った object は、元の要求の補償の削除と重なって消えていることがある。lock の下で確かめる
+          ...(adoptedAtMs === null
+            ? {}
+            : { verifyObject: async () => (await storage.stat(path)) !== null }),
         },
         now,
       )
-    } catch (err) {
-      // commit の結果が分からない。photoId の lock を取れれば元の transaction は終わっているので、
-      // その時点の行の有無で決める。lock を取れなければ object は触らず、同じ photoId で送り直してもらう
+
+    // commit の結果が分からない。photoId の lock を取れれば元の transaction は終わっているので、
+    // その時点の行の有無で決める。lock を取れなければ object は触らず、同じ photoId で送り直してもらう
+    const unclear = async (err: unknown) => {
       let settled: Settled
       try {
         settled = await settlePhoto(db, storage, {
@@ -374,6 +386,32 @@ export const itemPhotosRouter = new OpenAPIHono<AppEnv>()
       if (settled.kind === "match") return c.json({ photo: await dtoOf(storage, settled.row) }, 200)
       if (settled.kind === "reused") return c.json(REUSED, 422)
       throw err
+    }
+
+    let reg: Awaited<ReturnType<typeof registerPhoto>>
+    try {
+      reg = await register()
+    } catch (err) {
+      return await unclear(err)
+    }
+
+    if (reg.kind === "missing") {
+      // 引き取った object が消えていた。自分の bytes を置き直して、期限も数え直して登録する
+      try {
+        if ((await storage.upload(path, bytes, PHOTO_CONTENT_TYPE)) !== "ok") {
+          return c.json(RETRY, 503)
+        }
+      } catch {
+        return c.json(STORAGE_DOWN, 502)
+      }
+      weUploaded = true
+      adoptedAtMs = null
+      uploadStartedAt = now()
+      try {
+        reg = await register()
+      } catch (err) {
+        return await unclear(err)
+      }
     }
 
     switch (reg.kind) {
@@ -391,6 +429,8 @@ export const itemPhotosRouter = new OpenAPIHono<AppEnv>()
         return c.json(LIMIT, 422)
       case "too_late":
         await cleanUp()
+        return c.json(RETRY, 503)
+      case "missing":
         return c.json(RETRY, 503)
     }
   })

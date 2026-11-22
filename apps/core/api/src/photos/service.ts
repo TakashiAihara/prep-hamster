@@ -1,9 +1,10 @@
 import { and, asc, count, eq, isNull, lt, sql } from "drizzle-orm"
 import { itemPhotos, items, type Db } from "@prep-hamster/db"
-import { PHOTOS_PER_ITEM_MAX } from "@prep-hamster/schema"
+import { PHOTO_CONTENT_TYPE, PHOTOS_PER_ITEM_MAX } from "@prep-hamster/schema"
 import {
   ADOPT_MAX_AGE_MS,
   REGISTER_DEADLINE_MS,
+  REGISTER_LOCK_TIMEOUT,
   REMOVAL_RETRY_AFTER_MS,
   SIGN_CHUNK,
   SIGNED_URL_TTL_SECONDS,
@@ -39,8 +40,9 @@ export async function probePhoto(db: Reader, photoId: string, expect: Expect): P
 // 登録 (行の insert) と object の削除を photoId ごとに直列にする lock。
 // 取るのはこの lock だけで item の行は押さえないので、待たされるのは同じ photoId の操作だけ。
 // item 行 lock を取る側 (登録) は item → この lock の順。sweep と補償の削除はこの lock だけを取る。
+// photoId は大文字小文字を区別しない uuid なので、lock の鍵は小文字にそろえる (hashtextextended は文字列を区別する)
 const lockPhoto = (tx: Tx, photoId: string) =>
-  tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${photoId}::text, 0))`)
+  tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${photoId.toLowerCase()}::text, 0))`)
 
 async function underPhotoLock<T>(
   db: Db,
@@ -85,6 +87,9 @@ export async function checkCapEarly(
 }
 
 export type RegisterInput = Expect & {
+  // 引き取った object の登録でだけ渡す。lock の下で object がまだあるかを確かめ、無ければ "missing" で返す
+  // (引き取りと、元の要求の補償の削除が重なった場合。行が無い object を指す行を作らない)
+  verifyObject?: () => Promise<boolean>
   photoId: string
   userId: string
   storagePath: string
@@ -100,6 +105,7 @@ export type RegisterResult =
   | { kind: "gone" }
   | { kind: "limit" }
   | { kind: "too_late" }
+  | { kind: "missing" }
 
 // 行の登録。item 行を FOR NO KEY UPDATE で押さえ (上限と item の削除・merge と直列)、そのうえで photoId の lock を取る。
 // どの結果も transaction は終わっている (戻り値で返し、途中で throw しない) ので、呼び出し側は
@@ -109,6 +115,7 @@ export async function registerPhoto(
   input: RegisterInput,
   now: Clock,
   max = PHOTOS_PER_ITEM_MAX,
+  lockTimeout = REGISTER_LOCK_TIMEOUT,
 ): Promise<RegisterResult> {
   return db.transaction(async (tx): Promise<RegisterResult> => {
     const [item] = await tx
@@ -118,6 +125,8 @@ export async function registerPhoto(
       .for("no key update")
     if (!item) return { kind: "gone" }
 
+    // 待つのは同じ photoId の操作 (止まった削除など) の後ろだけ。上限を超えたら失敗にして、route の確定の経路に回す
+    await tx.execute(sql.raw(`set local lock_timeout = '${lockTimeout}'`))
     await lockPhoto(tx, input.photoId)
 
     const probe = await probePhoto(tx, input.photoId, input)
@@ -130,6 +139,8 @@ export async function registerPhoto(
 
     if ((await countActive(tx, input.itemId)) >= max) return { kind: "limit" }
 
+    if (input.verifyObject && !(await input.verifyObject())) return { kind: "missing" }
+
     const [row] = await tx
       .insert(itemPhotos)
       .values({
@@ -137,7 +148,7 @@ export async function registerPhoto(
         groupId: input.groupId,
         itemId: input.itemId,
         storagePath: input.storagePath,
-        contentType: "image/jpeg",
+        contentType: PHOTO_CONTENT_TYPE,
         byteSize: input.byteSize,
         width: input.width,
         height: input.height,
@@ -168,12 +179,12 @@ export async function settlePhoto(
 }
 
 // 既存の object (同じ path の upload が "exists") を扱う。
-//   young = 他の要求が upload したばかりで、その登録が来る (または登録済み)。上書きも削除もせず、自分も登録する
-//     (行が既にあるかどうかは登録の transaction が見る)
-//   stale = 行の無い古い object。sweep に消されるので、行が無いと確かめて消し、upload し直す
-//   replay / reused = 古い object の行が、確かめる間に現れた
+//   young = 他の要求が upload したばかりで、その登録が来る (または登録済み)。大きさが同じなら上書きも削除もせず、
+//     自分も登録する (createdAtMs は期限の起点。行が既にあるかどうかは登録の transaction が見る)
+//   stale = 行の無い古い object。元の登録はもう来ないので、行が無いと確かめて消し、upload し直す
+//   replay / reused = 古い object の行が、確かめる間に現れた。young でも大きさが違えば、別の内容に使われた photoId として reused
 export type ExistingObject =
-  | { kind: "young" }
+  | { kind: "young"; createdAtMs: number }
   | { kind: "stale-removed" }
   | { kind: "replay"; row: PhotoRow }
   | { kind: "reused" }
@@ -184,10 +195,14 @@ export async function inspectExisting(
   p: Expect & { photoId: string; storagePath: string },
   now: Clock,
 ): Promise<ExistingObject> {
-  const created = await storage.createdAt(p.storagePath)
+  const stat = await storage.stat(p.storagePath)
   // 見つからないのは、確認の間に誰かが消した (sweep など)。もう一度 upload する
-  if (created === null) return { kind: "stale-removed" }
-  if (now() - created.getTime() <= ADOPT_MAX_AGE_MS) return { kind: "young" }
+  if (stat === null) return { kind: "stale-removed" }
+  if (now() - stat.createdAt.getTime() <= ADOPT_MAX_AGE_MS) {
+    return stat.size === p.byteSize
+      ? { kind: "young", createdAtMs: stat.createdAt.getTime() }
+      : { kind: "reused" }
+  }
   const settled = await settlePhoto(db, storage, { ...p, removeIfAbsent: true })
   if (settled.kind === "match") return { kind: "replay", row: settled.row }
   if (settled.kind === "reused") return { kind: "reused" }
@@ -234,15 +249,16 @@ export async function removeObjectOf(
   row: Pick<PhotoRow, "id" | "storagePath">,
   now: Clock,
 ): Promise<"removed" | "failed"> {
+  // object を消した後の行の更新が失敗しても、消した行は削除待ちのまま残るだけ (sweep が object の削除をやり直す。冪等)
   try {
     await storage.remove(row.storagePath)
+    await db
+      .update(itemPhotos)
+      .set({ storageDeletedAt: new Date(now()) })
+      .where(eq(itemPhotos.id, row.id))
   } catch {
     return "failed"
   }
-  await db
-    .update(itemPhotos)
-    .set({ storageDeletedAt: new Date(now()) })
-    .where(eq(itemPhotos.id, row.id))
   return "removed"
 }
 
@@ -251,10 +267,23 @@ export type SweepResult = {
   pendingFailed: number
   orphansRemoved: number
   orphansKept: number
+  // photoId の lock を時間内に取れなかった object (次の回に回す。失敗には数えない)
   orphansBusy: number
+  // lock の待ち以外の失敗 (Storage / DB)。job は非 0 で終わる
+  orphansFailed: number
 }
 
-const PHOTO_OBJECT = /^[^/]+\/([0-9a-f-]{36})\.jpg$/
+// object の名前は小文字で作るが、大文字の名前も photoId として読む (lock の鍵は小文字にそろえる)
+const PHOTO_OBJECT = /^[^/]+\/([0-9a-fA-F-]{36})\.jpg$/
+
+// lock_timeout (55P03)。driver のエラーは drizzle の wrap の cause に入ることがある
+const isLockTimeout = (err: unknown): boolean => {
+  for (let cur = err, depth = 0; cur && depth < 5; depth++) {
+    if ((cur as { code?: unknown }).code === "55P03") return true
+    cur = (cur as { cause?: unknown }).cause
+  }
+  return false
+}
 
 // 削除待ちの object を消し、行の無い古い object を消す。
 // orphan は一覧の時点ではなく、photoId の lock の下で行を確かめ直してから消す
@@ -270,6 +299,7 @@ export async function sweepPhotos(
     orphansRemoved: 0,
     orphansKept: 0,
     orphansBusy: 0,
+    orphansFailed: 0,
   }
 
   const pending = await db
@@ -290,10 +320,7 @@ export async function sweepPhotos(
     else result.pendingFailed++
   }
 
-  const cutoff = now() - SWEEP_MIN_AGE_MS
-  const objects = (await storage.listObjects())
-    .filter((o) => o.createdAt.getTime() < cutoff)
-    .slice(0, SWEEP_BATCH)
+  const objects = await storage.listObjects(new Date(now() - SWEEP_MIN_AGE_MS), SWEEP_BATCH)
   for (const object of objects) {
     const photoId = PHOTO_OBJECT.exec(object.path)?.[1]
     // 写真の名前ではない object は触らない
@@ -305,12 +332,17 @@ export async function sweepPhotos(
         photoId,
         async (tx) => {
           const [row] = await tx
-            .select({ id: itemPhotos.id })
+            .select({
+              storagePath: itemPhotos.storagePath,
+              storageDeletedAt: itemPhotos.storageDeletedAt,
+            })
             .from(itemPhotos)
             .where(eq(itemPhotos.id, photoId))
             .limit(1)
-          // 削除済みの行の object は上の削除待ちの処理が持つ
-          if (row) return false
+          // object を持つ行は、この path を指す行で、object の削除がまだ済んでいないもの (生きている行も削除待ちの行も
+          // storage_deleted_at は null)。別の group の path を指す行 (photoId の使い回しで負けた upload の object) や、
+          // object の削除が済んだ行の path に残った object は、持ち主のいない orphan
+          if (row && row.storagePath === object.path && row.storageDeletedAt === null) return false
           await storage.remove(object.path)
           return true
         },
@@ -318,8 +350,9 @@ export async function sweepPhotos(
       )
       if (removed) result.orphansRemoved++
       else result.orphansKept++
-    } catch {
-      result.orphansBusy++
+    } catch (err) {
+      if (isLockTimeout(err)) result.orphansBusy++
+      else result.orphansFailed++
     }
   }
   return result
@@ -336,7 +369,10 @@ export async function listCovers(db: Reader, groupId: string): Promise<CoverRow[
       path: itemPhotos.storagePath,
     })
     .from(itemPhotos)
-    .innerJoin(items, and(eq(items.id, itemPhotos.itemId), isNull(items.deletedAt)))
+    .innerJoin(
+      items,
+      and(eq(items.id, itemPhotos.itemId), eq(items.groupId, groupId), isNull(items.deletedAt)),
+    )
     .where(and(eq(itemPhotos.groupId, groupId), isNull(itemPhotos.deletedAt)))
     .orderBy(itemPhotos.itemId, itemPhotos.createdAt, itemPhotos.id)
 }

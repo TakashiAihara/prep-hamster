@@ -50,6 +50,30 @@ test("buildUploadForm sends file, photoId and whole-number dimensions", () => {
   expect(form.get("width")).toBe("1280")
   expect(form.get("height")).toBe("960")
   expect(form.get("file")).toBeInstanceOf(Blob)
+  expect((form.get("file") as File).name).toBe("photo.jpg")
+})
+
+test("buildUploadForm hands a native { uri, name, type } file over as it is, as the second argument", () => {
+  const calls: unknown[][] = []
+  const Real = globalThis.FormData
+  globalThis.FormData = class {
+    append(...args: unknown[]) {
+      calls.push(args)
+    }
+  } as never
+  const native = { uri: "file:///p.jpg", name: "photo.jpg", type: "image/jpeg" }
+  try {
+    buildUploadForm(native, { photoId: "pid" }, { width: 1, height: 2 })
+  } finally {
+    globalThis.FormData = Real
+  }
+
+  expect(calls[0]).toEqual(["file", native])
+  expect(calls.slice(1)).toEqual([
+    ["photoId", "pid"],
+    ["width", "1"],
+    ["height", "2"],
+  ])
 })
 
 test("uploadPhoto posts multipart to the item's photos route without a content-type header", async () => {

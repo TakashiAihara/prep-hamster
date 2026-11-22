@@ -1,14 +1,21 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
 import { eq, sql } from "drizzle-orm"
-import { itemPhotos, type Db } from "@prep-hamster/db"
+import { createDb, itemPhotos, items as itemsTable, type Db } from "@prep-hamster/db"
 import { PHOTOS_PER_ITEM_MAX } from "@prep-hamster/schema"
 import { photoPath } from "../src/photos/config"
-import { checkCapEarly, signPaths, sweepPhotos } from "../src/photos/service"
+import { exitCodeFor } from "../src/jobs/photo-sweep"
+import {
+  checkCapEarly,
+  registerPhoto,
+  removeObjectOf,
+  signPaths,
+  sweepPhotos,
+} from "../src/photos/service"
 import type { FakePhotoStorage } from "./fake-photo-storage"
 import { bearer } from "./auth-helper"
 import { jpeg, photoForm, setupPhotos } from "./photo-helper"
 import { seedGroupWithMembership, seedItem, seedUser } from "./seed"
-import { ensureMigrated, testDb, truncateAll } from "./setup"
+import { ensureMigrated, TEST_DB_URL, testDb, truncateAll } from "./setup"
 
 beforeAll(async () => {
   await ensureMigrated()
@@ -64,6 +71,21 @@ const insertPhotoRow = (
     byteSize: v.size,
     createdBy: v.userId,
   })
+
+// photoId の lock を待っている接続が現れるまで見に行く。固定時間の待ちでは、待ちに入ったことを確かめられない
+async function waitForAdvisoryWaiter() {
+  for (let i = 0; i < 60; i++) {
+    // oxlint-disable-next-line no-await-in-loop
+    const rows = (await testDb.execute(
+      sql`select count(*)::int as n from pg_stat_activity
+          where wait_event_type = 'Lock' and wait_event = 'advisory' and datname = current_database()`,
+    )) as unknown as Array<{ n: number }>
+    if ((rows[0]?.n ?? 0) >= 1) return
+    // oxlint-disable-next-line no-await-in-loop
+    await sleep(25)
+  }
+  throw new Error("no advisory lock waiter appeared")
+}
 
 const rowsOf = (photoId: string) =>
   testDb.select().from(itemPhotos).where(eq(itemPhotos.id, photoId))
@@ -315,7 +337,7 @@ test("a registration inside the 20 minute deadline succeeds", async () => {
 test("an orphan object of the same photoId that is young is adopted: no second upload, no delete", async () => {
   const { fake, upload, itemId, groupId } = await setupPhotos()
   const photoId = crypto.randomUUID()
-  fake.put(photoPath(groupId, photoId), 5 * MIN)
+  fake.put(photoPath(groupId, photoId), 5 * MIN, 1000)
 
   const res = await upload(itemId, { photoId })
 
@@ -347,7 +369,7 @@ test("an orphan whose row appeared in the meantime is replayed, not deleted", as
   const photoId = crypto.randomUUID()
   const path = photoPath(groupId, photoId)
   fake.put(path, 45 * MIN)
-  fake.control.beforeCreatedAt = async () => {
+  fake.control.beforeStat = async () => {
     await insertPhotoRow(testDb, { id: photoId, groupId, itemId, userId: ownerId, size: 400 })
   }
 
@@ -363,7 +385,7 @@ test("an object that vanishes between the exists answer and the check is uploade
   const photoId = crypto.randomUUID()
   const path = photoPath(groupId, photoId)
   fake.put(path, 5 * MIN)
-  fake.control.beforeCreatedAt = async () => {
+  fake.control.beforeStat = async () => {
     fake.objects.delete(path)
   }
 
@@ -380,7 +402,7 @@ test("a stale orphan whose row belongs to another item is 422 and the object sta
   const photoId = crypto.randomUUID()
   const path = photoPath(groupId, photoId)
   fake.put(path, 45 * MIN)
-  fake.control.beforeCreatedAt = async () => {
+  fake.control.beforeStat = async () => {
     await insertPhotoRow(testDb, {
       id: photoId,
       groupId,
@@ -402,8 +424,8 @@ test("a young orphan whose row exists for another item is 422", async () => {
   const { fake, upload, itemId, groupId, ownerId } = await setupPhotos()
   const other = await seedItem(groupId, "Other")
   const photoId = crypto.randomUUID()
-  fake.put(photoPath(groupId, photoId), 5 * MIN)
-  fake.control.beforeCreatedAt = async () => {
+  fake.put(photoPath(groupId, photoId), 5 * MIN, 400)
+  fake.control.beforeStat = async () => {
     await insertPhotoRow(testDb, {
       id: photoId,
       groupId,
@@ -422,8 +444,8 @@ test("a young orphan whose row exists for another item is 422", async () => {
 test("a young orphan whose row exists for this item and size is replayed with 200", async () => {
   const { fake, upload, itemId, groupId, ownerId } = await setupPhotos()
   const photoId = crypto.randomUUID()
-  fake.put(photoPath(groupId, photoId), 5 * MIN)
-  fake.control.beforeCreatedAt = async () => {
+  fake.put(photoPath(groupId, photoId), 5 * MIN, 400)
+  fake.control.beforeStat = async () => {
     await insertPhotoRow(testDb, { id: photoId, groupId, itemId, userId: ownerId, size: 400 })
   }
 
@@ -494,6 +516,7 @@ test("a row of the same item and size that belongs to another group is reused, n
 test("the registration holds the photoId lock: a sweep that runs while it is paused keeps the object", async () => {
   const entered = Promise.withResolvers<void>()
   const proceed = Promise.withResolvers<void>()
+  let executes = 0
   const paused = new Proxy(testDb, {
     get(target, prop) {
       if (prop !== "transaction") {
@@ -507,11 +530,13 @@ test("the registration holds the photoId lock: a sweep that runs while it is pau
               new Proxy(tx, {
                 get(t, p) {
                   if (p === "execute") {
-                    // 登録 transaction の最初の execute は photoId の lock。取れた直後で止める
+                    // 登録 transaction の execute は 1 つ目が lock_timeout の設定、2 つ目が photoId の lock。取れた直後で止める
                     return async (...args: unknown[]) => {
                       const r = await (t.execute as (...a: unknown[]) => Promise<unknown>)(...args)
-                      entered.resolve()
-                      await proceed.promise
+                      if (++executes === 2) {
+                        entered.resolve()
+                        await proceed.promise
+                      }
                       return r
                     }
                   }
@@ -530,7 +555,7 @@ test("the registration holds the photoId lock: a sweep that runs while it is pau
   const pending = upload(itemId, { photoId })
   expect(await Promise.race([entered.promise.then(() => "locked"), sleep(3000)])).toBe("locked")
   const swept = sweepPhotos(testDb, fake.storage, () => Date.now() + 2 * 60 * MIN)
-  await sleep(200)
+  await waitForAdvisoryWaiter()
   proceed.resolve()
   const [res, result] = await Promise.all([pending, swept])
 
@@ -541,14 +566,16 @@ test("the registration holds the photoId lock: a sweep that runs while it is pau
 })
 
 test("an adopted object is not deleted when the registration is refused as too late", async () => {
-  let t = Date.parse("2026-11-22T00:00:00Z")
-  const { fake, upload, itemId, groupId } = await setupPhotos({ now: () => t })
+  const t = Date.parse("2026-11-22T00:00:00Z")
+  // 時計の読みは object を置く (1)、route の開始 (2)、引き取りの確認 (3)、登録の期限の検査 (4)。4 回目から 6 分進める
+  let reads = 0
+  const { fake, upload, itemId, groupId } = await setupPhotos({
+    now: () => t + (++reads >= 4 ? 6 * MIN : 0),
+  })
   const photoId = crypto.randomUUID()
   const path = photoPath(groupId, photoId)
-  fake.put(path, 5 * MIN)
-  fake.control.beforeCreatedAt = async () => {
-    t += 21 * MIN
-  }
+  // 引き取りの確認の時点では 15 分 (若い)。登録の期限の検査では object の作成から 21 分になる
+  fake.put(path, 15 * MIN, 1000)
 
   const res = await upload(itemId, { photoId })
 
@@ -565,7 +592,7 @@ test("unclear commit with no row, for an adopted object: the object is kept", as
   const { fake, upload, itemId, groupId } = await setupPhotos({ db: flaky })
   const photoId = crypto.randomUUID()
   const path = photoPath(groupId, photoId)
-  fake.put(path, 5 * MIN)
+  fake.put(path, 5 * MIN, 1000)
 
   const res = await upload(itemId, { photoId })
 
@@ -728,16 +755,21 @@ test("sweep does not delete an object whose row is committed while the sweep wai
   const path = photoPath(groupId, photoId)
   fake.put(path, 2 * 60 * MIN)
   const locked = Promise.withResolvers<void>()
+  const commit = Promise.withResolvers<void>()
   // 登録 transaction が photoId の lock を持ち、行を入れたがまだ commit していない
   const registration = testDb.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${photoId}::text, 0))`)
     await insertPhotoRow(tx, { id: photoId, groupId, itemId, userId: ownerId, size: 10 })
     locked.resolve()
-    await sleep(300)
+    await commit.promise
   })
   await locked.promise
 
-  const result = await sweepPhotos(testDb, fake.storage)
+  const swept = sweepPhotos(testDb, fake.storage)
+  // sweep が lock の待ちに入ったことを見てから commit させる
+  await waitForAdvisoryWaiter()
+  commit.resolve()
+  const result = await swept
   await registration
 
   expect(result).toMatchObject({ orphansRemoved: 0, orphansKept: 1 })
@@ -772,8 +804,8 @@ test("sweep: a row that appears between the listing and the check keeps the obje
   const path = photoPath(groupId, photoId)
   fake.put(path, 2 * 60 * MIN)
   const listing = fake.storage.listObjects
-  fake.storage.listObjects = async () => {
-    const objects = await listing()
+  fake.storage.listObjects = async (olderThan, limit) => {
+    const objects = await listing(olderThan, limit)
     await insertPhotoRow(testDb, { id: photoId, groupId, itemId, userId: ownerId, size: 10 })
     return objects
   }
@@ -791,4 +823,408 @@ test("an upload form sent without a photoId field never reaches Storage", async 
 
   expect(res.status).toBe(422)
   expect(fake.calls).toEqual([])
+})
+
+// ---- review follow-ups ----
+
+test("a young object of another size is not adopted: 422, the object stays, nothing is deleted", async () => {
+  const { fake, upload, itemId, groupId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  const path = photoPath(groupId, photoId)
+  fake.put(path, 5 * MIN, 999)
+
+  const res = await upload(itemId, { photoId, bytes: jpeg(1000) })
+
+  expect(res.status).toBe(422)
+  expect((await json(res)).error.code).toBe("IDEMPOTENCY_KEY_REUSED")
+  expect(fake.objects.get(path)?.size).toBe(999)
+  expect(fake.callsOf("remove")).toEqual([])
+  expect(await rowsOf(photoId)).toEqual([])
+})
+
+test("an adopted object that is removed before the registration is uploaded again, and no row points at nothing", async () => {
+  const { fake, upload, itemId, groupId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  const path = photoPath(groupId, photoId)
+  fake.put(path, 5 * MIN, 1000)
+  // 引き取りの確認の直後に、元の要求の補償の削除が object を消す
+  fake.control.afterStat = async () => {
+    fake.objects.delete(path)
+  }
+
+  const res = await upload(itemId, { photoId, bytes: jpeg(1000) })
+
+  expect(res.status).toBe(201)
+  expect(fake.objects.get(path)?.size).toBe(1000)
+  expect(fake.callsOf("upload")).toHaveLength(2)
+  expect(await rowsOf(photoId)).toHaveLength(1)
+})
+
+test("an object younger than 20 minutes is adopted and one older than 20 minutes is replaced", async () => {
+  const young = await setupPhotos()
+  const youngId = crypto.randomUUID()
+  young.fake.put(photoPath(young.groupId, youngId), 19 * MIN, 1000)
+  const youngRes = await young.upload(young.itemId, { photoId: youngId })
+  expect(youngRes.status).toBe(201)
+  expect(young.fake.callsOf("remove")).toEqual([])
+  expect(young.fake.callsOf("upload")).toHaveLength(1)
+
+  const stale = await setupPhotos()
+  const staleId = crypto.randomUUID()
+  stale.fake.put(photoPath(stale.groupId, staleId), 21 * MIN, 1000)
+  const staleRes = await stale.upload(stale.itemId, { photoId: staleId })
+  expect(staleRes.status).toBe(201)
+  expect(stale.fake.callsOf("remove")).toHaveLength(1)
+  expect(stale.fake.callsOf("upload")).toHaveLength(2)
+})
+
+test("sweep removes an object whose photoId row lives under another group's path, and keeps that row's object", async () => {
+  const { fake, groupId, ownerId } = await setupPhotos()
+  const otherGroup = await seedGroupWithMembership(ownerId, "B")
+  const otherItem = await seedItem(otherGroup, "B item")
+  const photoId = crypto.randomUUID()
+  await insertPhotoRow(testDb, {
+    id: photoId,
+    groupId: otherGroup,
+    itemId: otherItem,
+    userId: ownerId,
+    size: 10,
+  })
+  const lost = photoPath(groupId, photoId)
+  const owned = photoPath(otherGroup, photoId)
+  fake.put(lost, 2 * 60 * MIN)
+  fake.put(owned, 2 * 60 * MIN)
+
+  const result = await sweepPhotos(testDb, fake.storage)
+
+  expect(result).toMatchObject({ orphansRemoved: 1, orphansKept: 1 })
+  expect(fake.objects.has(lost)).toBe(false)
+  expect(fake.objects.has(owned)).toBe(true)
+})
+
+test("sweep removes an object left at the path of a row whose object removal already finished", async () => {
+  const { fake, itemId, groupId, ownerId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  await insertPhotoRow(testDb, { id: photoId, groupId, itemId, userId: ownerId, size: 10 })
+  await testDb
+    .update(itemPhotos)
+    .set({ deletedAt: new Date("2026-01-01T00:00:00Z"), storageDeletedAt: new Date("2026-01-01") })
+    .where(eq(itemPhotos.id, photoId))
+  const path = photoPath(groupId, photoId)
+  fake.put(path, 2 * 60 * MIN)
+
+  const result = await sweepPhotos(testDb, fake.storage)
+
+  expect(result).toMatchObject({ orphansRemoved: 1 })
+  expect(fake.objects.has(path)).toBe(false)
+})
+
+test("sweep reads an upper-case object name as the same photoId and removes the orphan", async () => {
+  const { fake, groupId } = await setupPhotos()
+  const path = `${groupId}/${crypto.randomUUID().toUpperCase()}.jpg`
+  fake.put(path, 2 * 60 * MIN)
+
+  const result = await sweepPhotos(testDb, fake.storage)
+
+  expect(result).toMatchObject({ orphansRemoved: 1 })
+  expect(fake.objects.has(path)).toBe(false)
+})
+
+test("the photoId lock is the same for upper and lower case: a held lower-case lock makes the sweep of an upper-case name busy", async () => {
+  const { fake, groupId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  const path = `${groupId}/${photoId.toUpperCase()}.jpg`
+  fake.put(path, 2 * 60 * MIN)
+  const locked = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const holder = testDb.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${photoId}::text, 0))`)
+    locked.resolve()
+    await release.promise
+  })
+  await locked.promise
+
+  const result = await sweepPhotos(testDb, fake.storage)
+  release.resolve()
+  await holder
+
+  expect(result).toMatchObject({ orphansRemoved: 0, orphansBusy: 1, orphansFailed: 0 })
+  expect(fake.objects.has(path)).toBe(true)
+})
+
+test("sweep counts a Storage failure on an orphan as failed, not busy, and the job exits non-zero", async () => {
+  const { fake, groupId } = await setupPhotos()
+  const path = photoPath(groupId, crypto.randomUUID())
+  fake.put(path, 2 * 60 * MIN)
+  fake.control.failRemove = true
+
+  const result = await sweepPhotos(testDb, fake.storage)
+
+  expect(result).toMatchObject({ orphansFailed: 1, orphansBusy: 0, orphansRemoved: 0 })
+  expect(exitCodeFor(result)).toBe(1)
+})
+
+test("the sweep job exits 0 when nothing failed, also when objects were only busy", () => {
+  const base = {
+    pendingRemoved: 0,
+    pendingFailed: 0,
+    orphansRemoved: 0,
+    orphansKept: 0,
+    orphansBusy: 3,
+    orphansFailed: 0,
+  }
+
+  expect(exitCodeFor(base)).toBe(0)
+  expect(exitCodeFor({ ...base, pendingFailed: 1 })).toBe(1)
+})
+
+test("sweep asks Storage for objects older than 60 minutes, at most 500", async () => {
+  const { fake } = await setupPhotos()
+  const t = Date.parse("2026-11-22T00:00:00Z")
+
+  await sweepPhotos(testDb, fake.storage, () => t)
+
+  expect(fake.callsOf("list")).toEqual([
+    { op: "list", olderThan: new Date(t - 60 * MIN), limit: 500 },
+  ])
+})
+
+test("a database error after the object was removed leaves the row pending instead of throwing", async () => {
+  const { fake } = await setupPhotos()
+  const brokenDb = {
+    update: () => {
+      throw new Error("connection lost")
+    },
+  } as unknown as Db
+  fake.put("g/p.jpg")
+
+  const result = await removeObjectOf(
+    brokenDb,
+    fake.storage,
+    { id: "p", storagePath: "g/p.jpg" },
+    Date.now,
+  )
+
+  expect(result).toBe("failed")
+  expect(fake.objects.has("g/p.jpg")).toBe(false)
+})
+
+test("a registration waits for the photoId lock only up to its lock timeout", async () => {
+  const { groupId, itemId, ownerId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  const locked = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const holder = testDb.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${photoId}::text, 0))`)
+    locked.resolve()
+    await release.promise
+  })
+  await locked.promise
+  const input = {
+    groupId,
+    itemId,
+    byteSize: 10,
+    photoId,
+    userId: ownerId,
+    storagePath: photoPath(groupId, photoId),
+    width: null,
+    height: null,
+    uploadStartedAt: Date.now(),
+  }
+
+  const started = Date.now()
+  await expect(registerPhoto(testDb, input, Date.now, 5, "200ms")).rejects.toThrow()
+  const waited = Date.now() - started
+  release.resolve()
+  await holder
+
+  expect(waited).toBeGreaterThanOrEqual(150)
+  expect(waited).toBeLessThan(3000)
+})
+
+test("a cover needs the item to belong to the group the photo row names", async () => {
+  const { fake, groupId, itemId, ownerId, as } = await setupPhotos()
+  const strangerId = await seedUser()
+  const strangerGroup = await seedGroupWithMembership(strangerId, "S")
+  const photoId = crypto.randomUUID()
+  await insertPhotoRow(testDb, {
+    id: photoId,
+    groupId: strangerGroup,
+    itemId,
+    userId: ownerId,
+    size: 10,
+  })
+  // 署名できる object があるので、item の group の条件が無ければ cover に入ってしまう
+  fake.put(photoPath(strangerGroup, photoId))
+  const stranger = await as(strangerId)
+
+  const res = await stranger.req("GET", `/v1/items/photos?groupId=${strangerGroup}`)
+
+  expect(groupId).not.toBe(strangerGroup)
+  expect(await json(res)).toEqual({ covers: [] })
+})
+
+test("an upper-case item id in the path still replays a recorded photo with 200", async () => {
+  const { upload, itemId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  const first = await upload(itemId.toUpperCase(), { photoId, bytes: jpeg(300) })
+
+  const again = await upload(itemId.toUpperCase(), { photoId, bytes: jpeg(300) })
+
+  expect(first.status).toBe(201)
+  expect(again.status).toBe(200)
+})
+
+test("no connection is held across the upload: with a single database connection a tag PUT still completes", async () => {
+  const single = createDb(TEST_DB_URL, { max: 1 })
+  const { fake, upload, app, ownerId, itemId } = await setupPhotos({ db: single })
+  const gate = gateUploads(fake, 1)
+
+  const pending = upload(itemId)
+  await gate.reached
+  const put = await Promise.race([
+    Promise.resolve(
+      app.request(`/v1/items/${itemId}/tags`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", authorization: await bearer(ownerId) },
+        body: JSON.stringify({ tagIds: [] }),
+      }),
+    ).then((r) => r.status),
+    sleep(3000).then(() => "blocked" as const),
+  ])
+  gate.release()
+  const res = await pending
+
+  expect(put).toBe(200)
+  expect(res.status).toBe(201)
+})
+
+test("createDb with max 1 really allows one connection at a time", async () => {
+  const single = createDb(TEST_DB_URL, { max: 1 })
+  const hold = Promise.withResolvers<void>()
+  const taken = Promise.withResolvers<void>()
+  const holder = single.transaction(async (tx) => {
+    await tx.execute(sql`select 1`)
+    taken.resolve()
+    await hold.promise
+  })
+  await taken.promise
+
+  const second = await Promise.race([
+    single.execute(sql`select 1`).then(() => "ran" as const),
+    sleep(300).then(() => "blocked" as const),
+  ])
+  hold.resolve()
+  await holder
+
+  expect(second).toBe("blocked")
+})
+
+test("a registration waits out a short hold of the photoId lock and then succeeds", async () => {
+  const { upload, itemId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  const locked = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const holder = testDb.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${photoId}::text, 0))`)
+    locked.resolve()
+    await release.promise
+  })
+  await locked.promise
+
+  const pending = upload(itemId, { photoId })
+  await waitForAdvisoryWaiter()
+  await sleep(200)
+  release.resolve()
+  await holder
+  const res = await pending
+
+  expect(res.status).toBe(201)
+})
+
+test("an adopted object that vanishes is uploaded again; the new object is cleaned up if the registration then fails", async () => {
+  const { fake, upload, itemId, groupId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  const path = photoPath(groupId, photoId)
+  fake.put(path, 5 * MIN, 1000)
+  // 最初の確認 (stat) の後で object を消す。2 回目の upload の時に item を消して、2 回目の登録を失敗させる
+  fake.control.afterStat = async () => {
+    fake.objects.delete(path)
+  }
+  let uploads = 0
+  fake.control.onUploadReached = async () => {
+    if (++uploads === 2) {
+      await testDb
+        .update(itemsTable)
+        .set({ deletedAt: new Date() })
+        .where(eq(itemsTable.id, itemId))
+    }
+  }
+
+  const res = await upload(itemId, { photoId, bytes: jpeg(1000) })
+
+  expect(res.status).toBe(404)
+  expect(fake.callsOf("remove")).toEqual([{ op: "remove", path }])
+  expect(fake.objects.has(path)).toBe(false)
+  // 引き取り (inspect) と、最初の登録の確認の 2 回。置き直した後の登録は確認しない
+  expect(fake.callsOf("stat")).toHaveLength(2)
+})
+
+test("after an adopted object vanished, the new registration deadline counts from the new upload", async () => {
+  let t = Date.parse("2026-11-22T00:00:00Z")
+  const { fake, upload, itemId, groupId } = await setupPhotos({ now: () => t })
+  const photoId = crypto.randomUUID()
+  const path = photoPath(groupId, photoId)
+  fake.put(path, 1 * MIN, 1000)
+  fake.control.afterStat = async () => {
+    fake.objects.delete(path)
+    t += 10 * MIN
+  }
+  let uploads = 0
+  fake.control.onUploadReached = () => {
+    // 2 回目の upload が Storage で 12 分かかった
+    if (++uploads === 2) t += 12 * MIN
+  }
+
+  const res = await upload(itemId, { photoId, bytes: jpeg(1000) })
+
+  expect(res.status).toBe(201)
+})
+
+test("when the re-upload of a vanished adopted object fails, the answer is 502 and no row exists", async () => {
+  const { fake, upload, itemId, groupId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  const path = photoPath(groupId, photoId)
+  fake.put(path, 5 * MIN, 1000)
+  fake.control.afterStat = async () => {
+    fake.objects.delete(path)
+  }
+  let uploads = 0
+  fake.control.onUploadReached = () => {
+    if (++uploads === 2) fake.control.failUpload = true
+  }
+
+  const res = await upload(itemId, { photoId, bytes: jpeg(1000) })
+
+  expect(res.status).toBe(502)
+  expect(await rowsOf(photoId)).toEqual([])
+})
+
+test("when the re-upload of a vanished adopted object meets an existing object again, the answer is 503", async () => {
+  const { fake, upload, itemId, groupId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  const path = photoPath(groupId, photoId)
+  fake.put(path, 5 * MIN, 1000)
+  fake.control.afterStat = async () => {
+    fake.objects.delete(path)
+  }
+  let uploads = 0
+  fake.control.onUploadReached = () => {
+    if (++uploads === 2) fake.control.uploadAlwaysExists = true
+  }
+
+  const res = await upload(itemId, { photoId, bytes: jpeg(1000) })
+
+  expect(res.status).toBe(503)
+  expect(await rowsOf(photoId)).toEqual([])
 })

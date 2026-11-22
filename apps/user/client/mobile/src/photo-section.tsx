@@ -1,6 +1,7 @@
 import { Image } from "expo-image"
 import * as ImageManipulator from "expo-image-manipulator"
 import * as ImagePicker from "expo-image-picker"
+import { randomUUID } from "expo-crypto"
 import { useFocusEffect } from "expo-router"
 import { useCallback, useRef, useState } from "react"
 import {
@@ -51,7 +52,11 @@ async function prepare(asset: ImagePicker.ImagePickerAsset): Promise<Prepared> {
     Platform.OS === "web"
       ? await (await fetch(out.uri)).blob()
       : { uri: out.uri, name: "photo.jpg", type: "image/jpeg" }
-  return { attempt: newPhotoAttempt(), file, size: { width: out.width, height: out.height } }
+  return {
+    attempt: newPhotoAttempt(randomUUID),
+    file,
+    size: { width: out.width, height: out.height },
+  }
 }
 
 export function PhotoSection({ itemId }: { itemId: string }) {
@@ -62,13 +67,16 @@ export function PhotoSection({ itemId }: { itemId: string }) {
   // 送信に失敗して結果が分からない写真。縮小した file も同じものを使う (作り直すと大きさが変わり、同じ photoId が拒否される)
   const [pending, setPending] = useState<Prepared | null>(null)
   const busyRef = useRef(false)
+  // 追加・削除が成功するたびに進める。取得の途中で進んだら、遅れて届いた一覧 (古い) は捨てる
+  const generationRef = useRef(0)
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false
+      const startedAt = generationRef.current
       void (async () => {
         const res = await listPhotos(getApiClient(), itemId)
-        if (cancelled) return
+        if (cancelled || generationRef.current !== startedAt) return
         if (res.ok) {
           setPhotos(res.photos)
           setError(null)
@@ -91,8 +99,15 @@ export function PhotoSection({ itemId }: { itemId: string }) {
       prepared.attempt,
     )
     if (res.ok) {
+      generationRef.current++
       setPending(null)
-      setPhotos((prev) => [...(prev ?? []).filter((p) => p.id !== res.photo.id), res.photo])
+      // 再送で 200 が返った写真は、既にある位置のまま差し替える (末尾に動かさない)
+      setPhotos((prev) => {
+        const list = prev ?? []
+        return list.some((p) => p.id === res.photo.id)
+          ? list.map((p) => (p.id === res.photo.id ? res.photo : p))
+          : [...list, res.photo]
+      })
       return
     }
     setError(res.message)
@@ -145,6 +160,7 @@ export function PhotoSection({ itemId }: { itemId: string }) {
       if (!(await confirmDelete())) return
       const res = await deletePhoto(getApiClient(), itemId, photo.id)
       if (!res.ok) return setError(res.message)
+      generationRef.current++
       setPhotos((prev) => (prev ?? []).filter((p) => p.id !== photo.id))
       setViewing(null)
     })
@@ -226,7 +242,12 @@ export function PhotoSection({ itemId }: { itemId: string }) {
           {error}
         </Text>
       ) : null}
-      <Modal visible={viewing !== null} transparent animationType="fade">
+      <Modal
+        visible={viewing !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewing(null)}
+      >
         <View style={styles.viewer}>
           {viewing?.url ? (
             <Image

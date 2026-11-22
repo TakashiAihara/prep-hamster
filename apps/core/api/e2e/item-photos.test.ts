@@ -240,10 +240,12 @@ test("a deleted photo frees a slot under the cap", async () => {
     const photoId = crypto.randomUUID()
     ids.push(photoId)
     // oxlint-disable-next-line no-await-in-loop
-    await upload(itemId, { photoId })
+    expect((await upload(itemId, { photoId })).status).toBe(201)
   }
-  await owner.req("DELETE", `/v1/items/${itemId}/photos/${ids[0]}`)
+  expect((await upload(itemId)).status).toBe(422)
+  const del = await owner.req("DELETE", `/v1/items/${itemId}/photos/${ids[0]}`)
 
+  expect(del.status).toBe(204)
   expect((await upload(itemId)).status).toBe(201)
 })
 

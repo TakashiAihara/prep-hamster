@@ -399,6 +399,7 @@ export const groupsRelations = relations(groups, ({ one, many }) => ({
   categories: many(categories),
   tags: many(tags),
   items: many(items),
+  itemPhotos: many(itemPhotos),
   stocks: many(stocks),
   stockEvents: many(stockEvents),
   requirementSetting: one(requirementSettings),

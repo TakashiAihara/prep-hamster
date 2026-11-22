@@ -19,11 +19,19 @@ export const SIGN_CHUNK = 100
 
 const MINUTE = 60 * 1000
 
-// 3 つの時間は REGISTER_DEADLINE_MS < ADOPT_MAX_AGE_MS < SWEEP_MIN_AGE_MS を守る。
-// 登録が間に合わなかった upload の object は、sweep が消せる歳になる前に必ず登録を断られている。
+// 登録は object ができてから REGISTER_DEADLINE_MS を過ぎると断られる (自分で upload したときは upload の開始から、
+// 引き取った object は object の作成から数える)。sweep が消すのはそれより長く経った object だけ
+// (REGISTER_DEADLINE_MS < SWEEP_MIN_AGE_MS)。登録が間に合わなかった object は、消せる歳になる前に必ず断られている。
+// 引き取る object の歳の上限は期限と同じ: それより古い行の無い object は、元の登録がもう来ない orphan として消して置き直す。
 export const REGISTER_DEADLINE_MS = 20 * MINUTE
-export const ADOPT_MAX_AGE_MS = 30 * MINUTE
+export const ADOPT_MAX_AGE_MS = REGISTER_DEADLINE_MS
 export const SWEEP_MIN_AGE_MS = 60 * MINUTE
+
+// Storage の 1 回の HTTP 呼び出しの上限。transaction と photoId の lock を握って呼ぶ削除が止まらないようにする
+export const STORAGE_TIMEOUT_MS = 30 * 1000
+
+// 登録が photoId の lock を待つ上限。超えたら登録の transaction は失敗し、route の確定の経路 (503) に入る
+export const REGISTER_LOCK_TIMEOUT = "10s"
 
 // 削除直後の再試行を sweep に任せるまでの猶予 (API が自分で消す最初の試行と重ならないように)
 export const REMOVAL_RETRY_AFTER_MS = 5 * MINUTE

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { provisionPhotoBucket } from "../../scripts/provision-photo-bucket"
 import { PHOTOS_PER_ITEM_MAX } from "@prep-hamster/schema"
-import { PHOTO_BUCKET } from "./config"
+import { ADOPT_MAX_AGE_MS, PHOTO_BUCKET, REGISTER_DEADLINE_MS, SWEEP_MIN_AGE_MS } from "./config"
 
 type Buckets = Record<
   string,
@@ -22,6 +22,16 @@ test("supabase/config.toml defines the photo bucket as private, 2 MiB, image/jpe
   expect(bucket?.public).toBe(false)
   expect(bucket?.file_size_limit).toBe("2MiB")
   expect(bucket?.allowed_mime_types).toEqual(["image/jpeg"])
+})
+
+test("the time limits keep their order: a registration is refused before the sweep may remove its object", () => {
+  const minute = 60 * 1000
+
+  expect(REGISTER_DEADLINE_MS).toBe(20 * minute)
+  expect(ADOPT_MAX_AGE_MS).toBe(20 * minute)
+  expect(SWEEP_MIN_AGE_MS).toBe(60 * minute)
+  expect(REGISTER_DEADLINE_MS).toBeLessThan(SWEEP_MIN_AGE_MS)
+  expect(ADOPT_MAX_AGE_MS).toBeLessThanOrEqual(REGISTER_DEADLINE_MS)
 })
 
 test("the per-item photo limit is five", () => {

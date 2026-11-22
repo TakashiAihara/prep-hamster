@@ -4,8 +4,8 @@ export type StorageCall =
   | { op: "upload"; path: string; contentType: string; size: number }
   | { op: "remove"; path: string }
   | { op: "sign"; paths: string[]; expiresIn: number }
-  | { op: "createdAt"; path: string }
-  | { op: "list" }
+  | { op: "stat"; path: string }
+  | { op: "list"; olderThan: Date; limit: number }
 
 // Storage の偽物。受け取った呼び出しを records に残し、テストは応答だけでなく
 // 「どの bucket 内の path に何を置いて何を消したか」も確かめる。
@@ -23,8 +23,9 @@ export function createFakePhotoStorage() {
     uploadGate: null as Promise<void> | null,
     // upload が呼ばれるたびに呼ぶ通知 (gate で待たせる側が「着いた」を知る / 他の要求を割り込ませる)
     onUploadReached: null as (() => void | Promise<void>) | null,
-    // 次の createdAt の応答の前に走らせる処理 (object が消える瞬間などを作る)
-    beforeCreatedAt: null as (() => Promise<void>) | null,
+    // 次の stat の応答の前 / 後に走らせる処理 (object が消える瞬間・時間が進む瞬間などを作る)
+    beforeStat: null as (() => Promise<void>) | null,
+    afterStat: null as (() => Promise<void>) | null,
     now: () => Date.now(),
   }
 
@@ -51,19 +52,29 @@ export function createFakePhotoStorage() {
         if (objects.has(p)) urls.set(p, `https://storage.test/sign/${p}?t=${crypto.randomUUID()}`)
       return urls
     },
-    async createdAt(path) {
-      calls.push({ op: "createdAt", path })
-      if (control.beforeCreatedAt) {
-        const f = control.beforeCreatedAt
-        control.beforeCreatedAt = null
+    async stat(path) {
+      calls.push({ op: "stat", path })
+      if (control.beforeStat) {
+        const f = control.beforeStat
+        control.beforeStat = null
         await f()
       }
       if (control.failInfo) throw new Error("storage down")
-      return objects.get(path)?.createdAt ?? null
+      const o = objects.get(path)
+      const found = o ? { createdAt: o.createdAt, size: o.size } : null
+      if (control.afterStat) {
+        const f = control.afterStat
+        control.afterStat = null
+        await f()
+      }
+      return found
     },
-    async listObjects() {
-      calls.push({ op: "list" })
-      return [...objects].map(([path, o]) => ({ path, createdAt: o.createdAt }))
+    async listObjects(olderThan, limit) {
+      calls.push({ op: "list", olderThan, limit })
+      return [...objects]
+        .filter(([, o]) => o.createdAt < olderThan)
+        .slice(0, limit)
+        .map(([path, o]) => ({ path, createdAt: o.createdAt }))
     },
   }
 
@@ -80,9 +91,9 @@ export function createFakePhotoStorage() {
       if (!o) throw new Error(`no object ${path}`)
       o.createdAt = new Date(control.now() - ms)
     },
-    put: (path: string, ageMs = 0) => {
+    put: (path: string, ageMs = 0, size = 1) => {
       objects.set(path, {
-        size: 1,
+        size,
         contentType: "image/jpeg",
         createdAt: new Date(control.now() - ageMs),
       })
