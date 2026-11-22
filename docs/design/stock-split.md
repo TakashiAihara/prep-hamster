@@ -54,6 +54,7 @@ Response 201: `{ source: Stock, created: Stock, events: [StockEvent, StockEvent]
 
 Replay: a request whose `newStockId` already exists as a stock created by a split of the same source with the same quantity returns 200 with `{ source, created, events }` read at replay time. `source` and `created` are the current rows (they may have changed since the first call), `events` are the two recorded events. The location, dates and note of the request are not compared on replay, because the stock may have been edited since. The replay check runs after the source row is read (including a soft-deleted one) and the caller's access to its group is checked, and before every quantity and location check (see Concurrency), so it is reachable after the source quantity, the source row or the target location changed, and it never looks outside the caller's group.
 
+- `quantity` must not round to 0 at the list's display precision (6 decimals, the same rule the remainder gets): a split quantity such as 0.0000004 is rejected with 422 VALIDATION_ERROR, because the new stock would exist but never appear in the list (the list filters on `round(quantity::numeric, 6) > 0`)
 - `quantity` must be greater than 0 and strictly less than the source's remaining quantity. Splitting off everything is a move, which already exists
 - Omitted `locationId`, `useByDate` and `bestBeforeDate` mean "copy from the source". A date sent as null clears the date on the new stock (same meaning as null in `updateStockBodyDtoSchema`). `note` is never copied: omitted or null both give a null note
 - Roles: EDITOR or higher, via `checkGroupAccess`, like move and consume
@@ -129,16 +130,16 @@ sequenceDiagram
     A->>D: ROLLBACK, restart from the source read (max 3)
   end
   A->>D: lock source stock FOR NO KEY UPDATE
-  alt no row or deleted meanwhile
-    A-->>C: 404
-  end
-  A->>D: lock the effective target location FOR NO KEY UPDATE (active, same group)
-  alt not valid
-    A-->>C: 422 LOCATION_GROUP_MISMATCH
-  end
+  A->>D: lock the effective target location FOR NO KEY UPDATE (if it is active and in the same group)
   A->>D: replay probe again, under the locks, before any state check
   alt exists
     A-->>C: 200 recorded result, or 422 IDEMPOTENCY_KEY_REUSED
+  end
+  alt source stock: no row or deleted meanwhile
+    A-->>C: 404
+  end
+  alt location not valid
+    A-->>C: 422 LOCATION_GROUP_MISMATCH
   end
   A->>D: locked quantity strictly greater than split quantity?
   alt not enough
@@ -169,9 +170,9 @@ sequenceDiagram
 - API e2e (`stocks-split.test.ts`, `stocks-concurrency.test.ts` additions with `lock-helper.ts`):
   1. 6 split by 2 to another location (an unequal split, so swapped or overwritten quantities fail): source 4, new 2 at the chosen location, the new stock's ADD event is +2 and the source's event is -2, the two events point at each other
   2. omitted `locationId` and dates copy the source; null date clears the date on the new stock only; `note` is null on the new stock when omitted even if the source has a note
-  3. quantity equal to or above remaining: 422, nothing written (no new row, no event); a remainder that rounds to 0 at 6 decimals is rejected the same way; a source of 100000000 split by 1 is rejected by the representability guard with nothing written, and 6 split by 2 passes it
+  3. a split quantity that rounds to 0 at 6 decimals (for example 0.0000004) is rejected with nothing written, also when the remainder alone would pass; quantity equal to or above remaining: 422, nothing written (no new row, no event); a remainder that rounds to 0 at 6 decimals is rejected the same way; a source of 100000000 split by 1 is rejected by the representability guard with nothing written, and 6 split by 2 passes it
   4. wrong-group location 422; VIEWER 403; deleted source 404
-  5. replay: split 3 of 5 (remaining 2, below the split quantity), then the identical request again: 200 with one new stock and no second event. Repeat after the source is consumed to 0, after the source is soft deleted, and after the target location is soft deleted: each answers 200. The same `newStockId` with quantity 1: 422 IDEMPOTENCY_KEY_REUSED. A `newStockId` that belongs to a stock created by POST: 422
+  5. replay: split 3 of 5 (remaining 2, below the split quantity), then the identical request again: 200 with one new stock and no second event. Repeat after the source is consumed to 0, after the source is soft deleted, and after the target location is soft deleted: each answers 200. Also the race form: the second of two identical requests waits at the stock lock, the source is soft deleted before it gets the lock, and it still answers 200 (the probe under the locks runs before the 404 check). The same `newStockId` with quantity 1: 422 IDEMPOTENCY_KEY_REUSED. A `newStockId` that belongs to a stock created by POST: 422
   6. races: split against delete of the source (404, no orphan new stock); two splits of 3 against a stock of 5 (exactly one succeeds); split against a consume that leaves too little; two identical requests at once against a stock of 5 split by 3, forced to both pass the first probe (one 201, one 200, one new stock; the 200 must not become INSUFFICIENT_QUANTITY, which is what a probe only before the locks would give)
   7. split against merge (with `item-merge.md`): hold the merge's item locks in an open transaction, start the split against a stock of the source item, release the merge; the split must answer 201 with the new stock on the destination item (a 404 here fails the test, because the stock was not deleted), and no active stock references a soft-deleted item. Run both orders of arrival (merge first, split first: then the new stock is repointed by the merge). A second case with the stock soft deleted answers 404, and a third with the item soft deleted and the stock left on it answers 422 ITEM_GROUP_MISMATCH without retrying
   8. replay across groups: a `newStockId` that belongs to a stock of another group gets 422 IDEMPOTENCY_KEY_REUSED with the same body as an id used by an unrelated stock of this group, never 403 or 404
