@@ -137,7 +137,8 @@ test("POST /v1/items reuses the barcode of a soft-deleted manual item and keeps 
   expect(secondItem.id).not.toBe(firstItem.id)
 
   const [oldRow] = await testDb.select().from(items).where(eq(items.id, firstItem.id))
-  expect(oldRow?.deletedAt).not.toBeNull()
+  expect(oldRow).toBeDefined()
+  expect(oldRow?.deletedAt).toBeInstanceOf(Date)
 
   const third = await app.request("/v1/items", {
     method: "POST",
@@ -145,6 +146,8 @@ test("POST /v1/items reuses the barcode of a soft-deleted manual item and keeps 
     body: JSON.stringify({ groupId, name: "Third", barcode: "4901234567890" }),
   })
   expect(third.status).toBe(422)
+  const thirdBody = (await third.json()) as { error: { code: string } }
+  expect(thirdBody.error.code).toBe("ITEM_BARCODE_DUPLICATE")
 })
 
 test("GET /v1/items?groupId=X returns active items only", async () => {

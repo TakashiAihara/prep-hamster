@@ -33,8 +33,8 @@
     {
       "idx": 4,
       "version": "7",
-      "when": 1795320546534,
-      "tag": "0004_item_barcode_idx_active_only",
+      "when": 1795321110298,
+      "tag": "0004_item_unique_idx_active_only",
       "breakpoints": true
     }
   ]

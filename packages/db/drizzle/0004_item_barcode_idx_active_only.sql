@@ -1,2 +1,0 @@
-DROP INDEX "items_group_barcode_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "items_group_barcode_idx" ON "items" USING btree ("group_id","barcode") WHERE "items"."product_master_id" IS NULL AND "items"."barcode" IS NOT NULL AND "items"."deleted_at" IS NULL;

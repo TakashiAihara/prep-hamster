@@ -1,5 +1,5 @@
 {
-  "id": "58ffc4d3-0ae9-4a69-82a3-7a8ad38ffe7b",
+  "id": "6b0aa78a-1908-41fa-8118-2701289b4226",
   "prevId": "b10a02db-8c7e-4820-97a7-dcb7ed80a15a",
   "version": "7",
   "dialect": "postgresql",
@@ -367,7 +367,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"items\".\"product_master_id\" IS NOT NULL",
+          "where": "\"items\".\"product_master_id\" IS NOT NULL AND \"items\".\"deleted_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
