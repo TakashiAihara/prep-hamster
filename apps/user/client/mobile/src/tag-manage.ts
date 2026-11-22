@@ -203,3 +203,18 @@ export function removeTag<T extends { id: string }>(tags: T[], id: string): T[] 
   if (!tags.some((t) => t.id === id)) return tags
   return tags.filter((t) => t.id !== id)
 }
+
+// focus での取り直しが、取り直しの開始後に始まった・終わったタグ操作の結果を古い集合で上書きしないための印。
+// begin() の返す関数は、その後に bump() が呼ばれていなければ true
+export function createRefetchGuard() {
+  let seq = 0
+  return {
+    bump: () => {
+      seq += 1
+    },
+    begin: () => {
+      const started = seq
+      return () => seq === started
+    },
+  }
+}

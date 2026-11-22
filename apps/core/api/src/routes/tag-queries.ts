@@ -47,7 +47,10 @@ export async function listTagsWithCount(
 }
 
 // item ごとの tagId の一覧。削除済みのタグの行が紛れても出さない。
-export async function loadTagIdsByItem(db: Db, itemIds: string[]): Promise<Map<string, string[]>> {
+export async function loadTagIdsByItem(
+  db: Reader,
+  itemIds: string[],
+): Promise<Map<string, string[]>> {
   const result = new Map<string, string[]>()
   if (itemIds.length === 0) return result
   const rows = await db

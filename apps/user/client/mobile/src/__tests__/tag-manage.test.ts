@@ -3,6 +3,7 @@ import type { ApiClient } from "@prep-hamster/api-client"
 import {
   addTagToItem,
   applyRenamedTag,
+  createRefetchGuard,
   deleteTagDetail,
   findTagByName,
   mergeTags,
@@ -223,4 +224,22 @@ test("applyRenamedTag and removeTag keep the reference when the id is absent", (
   expect(applyRenamedTag(tags, T3, "z")).toBe(tags)
   expect(removeTag(tags, T1).map((t) => t.id)).toEqual([T2])
   expect(removeTag(tags, T3)).toBe(tags)
+})
+
+test("createRefetchGuard rejects a refetch that overlapped a tag operation", () => {
+  const guard = createRefetchGuard()
+  const untouched = guard.begin()
+  expect(untouched()).toBe(true)
+
+  // 取り直しの途中で操作が始まる / 終わる
+  const overlapped = guard.begin()
+  guard.bump()
+  expect(overlapped()).toBe(false)
+
+  // 操作の後に始めた取り直しは有効
+  const after = guard.begin()
+  expect(after()).toBe(true)
+  guard.bump()
+  expect(after()).toBe(false)
+  expect(untouched()).toBe(false)
 })

@@ -356,15 +356,24 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
     if (tagId) conditions.push(inArray(items.id, itemIdsWithTag(db, tagId)))
     if (barcode) conditions.push(eq(items.barcode, barcode))
 
-    const rows = await db
-      .select()
-      .from(items)
-      .where(and(...conditions))
-      .orderBy(asc(items.name))
-
-    const tagIdsByItem = await loadTagIdsByItem(
-      db,
-      rows.map((r) => r.id),
+    // item の行と tagIds は同じスナップショットで読む。別々の文だと、間に入った PUT /items/{id}/tags が
+    // 古い updatedAt と新しい tagIds の組を作る (updatedAt で差分を取るクライアントが変更を取りこぼす)
+    const { rows, tagIdsByItem } = await db.transaction(
+      async (tx) => {
+        const found = await tx
+          .select()
+          .from(items)
+          .where(and(...conditions))
+          .orderBy(asc(items.name))
+        return {
+          rows: found,
+          tagIdsByItem: await loadTagIdsByItem(
+            tx,
+            found.map((r) => r.id),
+          ),
+        }
+      },
+      { isolationLevel: "repeatable read" },
     )
     return c.json({ items: rows.map((r) => toItemDto(r, tagIdsByItem.get(r.id) ?? [])) }, 200)
   })
@@ -437,8 +446,22 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
       return c.json(access.body, access.status)
     }
 
-    const tagIdsByItem = await loadTagIdsByItem(db, [row.id])
-    return c.json({ item: toItemDto(row, tagIdsByItem.get(row.id) ?? []) }, 200)
+    // 行と tagIds は同じスナップショットで読み直す (list と同じ理由)
+    const snapshot = await db.transaction(
+      async (tx) => {
+        const [fresh] = await tx
+          .select()
+          .from(items)
+          .where(and(eq(items.id, id), isNull(items.deletedAt)))
+          .limit(1)
+        return fresh ? { fresh, tagIdsByItem: await loadTagIdsByItem(tx, [id]) } : null
+      },
+      { isolationLevel: "repeatable read" },
+    )
+    if (!snapshot) {
+      return c.json({ error: { code: "NOT_FOUND", message: "item が見つかりません" } }, 404)
+    }
+    return c.json({ item: toItemDto(snapshot.fresh, snapshot.tagIdsByItem.get(id) ?? []) }, 200)
   })
   .openapi(patchItemRoute, async (c) => {
     const { id } = c.req.valid("param")

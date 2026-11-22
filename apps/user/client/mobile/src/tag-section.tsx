@@ -11,6 +11,7 @@ import {
   removeTagFromItem,
   type TagDto,
   type TagResult,
+  createRefetchGuard,
 } from "@/tag-manage"
 
 // 在庫詳細のタグ欄。タグは item に付くので、同じ item の別の在庫でも同じタグが出る。
@@ -26,10 +27,13 @@ export function TagSection({ groupId, itemId }: { groupId: string; itemId: strin
   const [reloadKey, setReloadKey] = useState(0)
   // キーボード送信の 2 連打は state ではなく同期フラグで止める
   const busyRef = useRef(false)
+  // 取り直しの途中にタグ操作が入ったら、取り直しの結果は捨てる (操作の応答が新しい)
+  const guardRef = useRef(createRefetchGuard())
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false
+      const stillCurrent = guardRef.current.begin()
       void (async () => {
         try {
           const client = getApiClient()
@@ -41,7 +45,7 @@ export function TagSection({ groupId, itemId }: { groupId: string; itemId: strin
           if (!list.ok) return setError(list.message)
           if (!itemRes.ok) return setError(await apiErrorMessage(itemRes, `HTTP ${itemRes.status}`))
           const { item } = await itemRes.json()
-          if (cancelled) return
+          if (cancelled || !stillCurrent()) return
           setError(null)
           setTags(list.tags)
           setTagIds(item.tagIds)
@@ -58,6 +62,7 @@ export function TagSection({ groupId, itemId }: { groupId: string; itemId: strin
   async function run(job: () => Promise<TagResult<{ tagIds: string[]; tags: TagDto[] }>>) {
     if (busyRef.current) return
     busyRef.current = true
+    guardRef.current.bump()
     setBusy(true)
     setError(null)
     try {
@@ -68,6 +73,7 @@ export function TagSection({ groupId, itemId }: { groupId: string; itemId: strin
       setTags((prev) => mergeTags(prev ?? [], res.tags))
       setDraft("")
     } finally {
+      guardRef.current.bump()
       busyRef.current = false
       setBusy(false)
     }
