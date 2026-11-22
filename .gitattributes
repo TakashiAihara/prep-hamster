@@ -18,3 +18,4 @@ pnpm-lock.yaml    linguist-generated=true
 yarn.lock         linguist-generated=true
 
 packages/db/drizzle/** linguist-generated=true
+docs/reference/** linguist-generated=true

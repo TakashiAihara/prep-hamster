@@ -24,7 +24,8 @@
     "job:expiry-notify": "bun run src/jobs/expiry-notify.ts",
     "typecheck": "tsgo --noEmit",
     "test": "bun test src",
-    "test:e2e": "bun test e2e"
+    "test:e2e": "bun test e2e",
+    "docs:generate": "bun run scripts/generate-api-docs.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.6.3",

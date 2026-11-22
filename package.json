@@ -22,7 +22,8 @@
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "typecheck:bun": "bun run --filter '*' typecheck",
-    "test:bun": "bun run --filter '*' test"
+    "test:bun": "bun run --filter '*' test",
+    "docs:generate": "bun run --filter @prep-hamster/db docs:generate && bun run --filter @prep-hamster/api docs:generate && bunx oxfmt docs/reference/"
   },
   "devDependencies": {
     "@types/bun": "latest",

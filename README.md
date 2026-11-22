@@ -14,6 +14,9 @@
   - [glossary.md](docs/stock/glossary.md) — 用語集
   - [roles.md](docs/stock/roles.md) — ロール定義
   - [operational-policy.md](docs/stock/operational-policy.md) — 運用ポリシー
+- コードから生成した参照ドキュメント: [`docs/reference/`](docs/reference/)（`bun run docs:generate` で再生成）
+  - [data-model.md](docs/reference/data-model.md) — ER 図・テーブル定義（`packages/db` のスキーマから生成）
+  - [api.md](docs/reference/api.md) — API リファレンス（OpenAPI spec から生成）
 
 ## ワークスペース構成
 
