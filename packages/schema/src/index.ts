@@ -35,4 +35,5 @@ export {
 
 export * from "./common"
 export * from "./error-map"
+export * from "./photo"
 export * from "./tag-name"

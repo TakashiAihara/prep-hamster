@@ -22,6 +22,8 @@
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "job:expiry-notify": "bun run src/jobs/expiry-notify.ts",
+    "job:photo-sweep": "bun run src/jobs/photo-sweep.ts",
+    "provision:photo-bucket": "bun run scripts/provision-photo-bucket.ts",
     "typecheck": "tsgo --noEmit",
     "test": "bun test src",
     "test:e2e": "bun test e2e"
@@ -32,6 +34,7 @@
     "@prep-hamster/jan-api": "workspace:*",
     "@prep-hamster/schema": "workspace:*",
     "@scalar/hono-api-reference": "^0.12.16",
+    "@supabase/supabase-js": "^2.118.0",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.14",
     "zod": "^4.6.7"

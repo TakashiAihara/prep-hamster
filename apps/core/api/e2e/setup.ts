@@ -33,6 +33,7 @@ export async function truncateAll() {
     TRUNCATE TABLE
       stock_events,
       stocks,
+      item_photos,
       item_tags,
       tags,
       items,

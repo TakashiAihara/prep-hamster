@@ -228,6 +228,38 @@ export const itemTags = pgTable(
   (t) => [primaryKey({ columns: [t.itemId, t.tagId] }), index("item_tags_tag_idx").on(t.tagId)],
 )
 
+export const itemPhotos = pgTable(
+  "item_photos",
+  {
+    id: uuid("id").primaryKey(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id),
+    storagePath: text("storage_path").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    ...timestamps,
+    // object の削除が済んだ (または object が無かった) 時刻。deleted_at があって null のものが「削除待ち」
+    storageDeletedAt: tsCol("storage_deleted_at"),
+  },
+  (t) => [
+    check("item_photos_byte_size_positive", sql`${t.byteSize} > 0`),
+    index("item_photos_item_idx").on(t.itemId, t.createdAt, t.id),
+    index("item_photos_group_idx").on(t.groupId),
+    index("item_photos_pending_removal_idx")
+      .on(t.deletedAt)
+      .where(sql`${t.deletedAt} IS NOT NULL AND ${t.storageDeletedAt} IS NULL`),
+  ],
+)
+
 export const stocks = pgTable(
   "stocks",
   {
@@ -415,7 +447,14 @@ export const itemsRelations = relations(items, ({ one, many }) => ({
   category: one(categories, { fields: [items.categoryId], references: [categories.id] }),
   stocks: many(stocks),
   itemTags: many(itemTags),
+  photos: many(itemPhotos),
   shoppingListItems: many(shoppingListItems),
+}))
+
+export const itemPhotosRelations = relations(itemPhotos, ({ one }) => ({
+  group: one(groups, { fields: [itemPhotos.groupId], references: [groups.id] }),
+  item: one(items, { fields: [itemPhotos.itemId], references: [items.id] }),
+  creator: one(users, { fields: [itemPhotos.createdBy], references: [users.id] }),
 }))
 
 export const tagsRelations = relations(tags, ({ one, many }) => ({

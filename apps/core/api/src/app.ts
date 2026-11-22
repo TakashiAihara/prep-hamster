@@ -6,6 +6,7 @@ import { withUserAuth, type AuthOptions } from "./middleware/auth"
 import { withBodyLimit } from "./middleware/body-limit"
 import { withDb } from "./middleware/db"
 import { onError, validationHook } from "./middleware/error"
+import type { PhotoStorage } from "./photos/storage"
 import { categoriesRouter } from "./routes/categories"
 import { groupsRouter } from "./routes/groups"
 import { invitationsRouter } from "./routes/invitations"
@@ -13,6 +14,7 @@ import { itemTagsRouter } from "./routes/item-tags"
 import { itemsRouter } from "./routes/items"
 import { locationsRouter } from "./routes/locations"
 import { membershipsRouter } from "./routes/memberships"
+import { itemPhotosRouter } from "./routes/item-photos"
 import { pushTokensRouter } from "./routes/push-tokens"
 import { stocksRouter } from "./routes/stocks"
 import { tagsRouter } from "./routes/tags"
@@ -22,6 +24,9 @@ export type AppEnv = {
     db: Db
     userId: string
     janApi: JanApiClient
+    // 鍵が無いときは undefined。写真の route だけが 503 になる
+    photoStorage: PhotoStorage | undefined
+    photoClock: () => number
   }
 }
 
@@ -31,6 +36,9 @@ export type CreateAppOptions = {
   // 消費者は JanApiClient interface のみに依存。
   // 未指定なら env (YAHOO_SHOPPING_APP_ID) ベースの default chain を使う。
   janApi?: JanApiClient
+  photoStorage?: PhotoStorage | undefined
+  // 写真の登録期限と sweep の時刻判定が読む時計 (テストで進める)
+  photoClock?: () => number
 }
 
 export function createApp(opts: CreateAppOptions) {
@@ -41,6 +49,8 @@ export function createApp(opts: CreateAppOptions) {
   app.use("*", withDb(opts.db))
   app.use("*", async (c, next) => {
     c.set("janApi", janApi)
+    c.set("photoStorage", opts.photoStorage)
+    c.set("photoClock", opts.photoClock ?? Date.now)
     await next()
   })
   app.use("/v1/*", withBodyLimit)
@@ -66,6 +76,8 @@ export function createApp(opts: CreateAppOptions) {
       .route("/v1/groups", groupsRouter)
       .route("/v1/locations", locationsRouter)
       .route("/v1/categories", categoriesRouter)
+      // GET /v1/items/photos (一覧用の先頭写真) は itemsRouter の /{id} より先に登録する
+      .route("/v1/items", itemPhotosRouter)
       .route("/v1/items", itemsRouter)
       .route("/v1/items", itemTagsRouter)
       .route("/v1/tags", tagsRouter)

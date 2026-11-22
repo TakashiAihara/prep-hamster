@@ -1,6 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
 import { categories, itemTags, items, productMasters, stocks } from "@prep-hamster/db"
+import { removeObjectOf, softDeletePhotosOfItem } from "../photos/service"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
@@ -567,16 +568,27 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
     // 行を押さえてから外す。並行する PUT /items/{id}/tags は同じ行を FOR NO KEY UPDATE で
     // 取るので、削除済みの item に tag が付き直ることはない。
     const now = new Date()
-    await db.transaction(async (tx) => {
+    // 写真は item と同じ transaction で soft delete する (削除済みの item に写真を残さない)
+    const removedPhotos = await db.transaction(async (tx) => {
       const [locked] = await tx
         .select({ id: items.id })
         .from(items)
         .where(and(eq(items.id, id), isNull(items.deletedAt)))
         .for("no key update")
-      if (!locked) return
+      if (!locked) return []
       await tx.update(items).set({ deletedAt: now, updatedAt: now }).where(eq(items.id, id))
       await tx.delete(itemTags).where(eq(itemTags.itemId, id))
+      return softDeletePhotosOfItem(tx, id, now)
     })
+
+    // object の削除は commit の後。失敗した写真は削除待ちの行として残り、sweep が片付ける
+    const storage = c.get("photoStorage")
+    if (storage) {
+      for (const photo of removedPhotos) {
+        // oxlint-disable-next-line no-await-in-loop
+        await removeObjectOf(db, storage, photo, c.get("photoClock"))
+      }
+    }
 
     return c.body(null, 204)
   })

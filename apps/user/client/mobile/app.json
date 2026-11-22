@@ -22,13 +22,22 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "JAN コードを読み取って商品を登録するためにカメラを使用します"
+          "cameraPermission": "JAN コードの読み取りと、商品の写真の撮影にカメラを使用します"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "商品に付ける写真を選ぶために写真ライブラリを使用します",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
       "expo-secure-store",
       "@react-native-community/datetimepicker",
       "expo-web-browser",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true

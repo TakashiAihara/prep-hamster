@@ -2,6 +2,7 @@ import { createDb } from "@prep-hamster/db"
 import { installJaErrorMap } from "@prep-hamster/schema"
 import { createApp } from "./app"
 import { createJwksKeys } from "./auth/jwks"
+import { createPhotoStorageFromEnv } from "./photos/storage"
 
 installJaErrorMap()
 
@@ -15,8 +16,16 @@ if (!supabaseUrl) {
   process.exit(1)
 }
 
+const photoStorage = createPhotoStorageFromEnv() ?? undefined
+if (!photoStorage) {
+  console.warn(
+    "[api] SUPABASE_SECRET_KEY is not set: photo routes answer 503 PHOTO_STORAGE_NOT_CONFIGURED",
+  )
+}
+
 const app = createApp({
   db,
+  photoStorage,
   auth: {
     getKeys: createJwksKeys(`${supabaseUrl}/auth/v1/.well-known/jwks.json`),
     // 手元の supabase start は iss を外向きの URL (127.0.0.1) で発行する。API がコンテナから

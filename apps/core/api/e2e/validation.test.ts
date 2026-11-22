@@ -206,7 +206,12 @@ test("operations without a JSON request body declare neither 400 nor 415 in /ope
 
   const noJsonBodyOps = Object.entries(spec.paths).flatMap(([path, methods]) =>
     Object.entries(methods)
-      .filter(([, op]) => !op.requestBody?.content?.["application/json"])
+      // multipart の写真 upload は自分の上限 (file 2 MiB) で 413 を返す route なので、JSON の body と同じ側に数える
+      .filter(
+        ([, op]) =>
+          !op.requestBody?.content?.["application/json"] &&
+          !op.requestBody?.content?.["multipart/form-data"],
+      )
       .map(([method, op]) => ({ name: `${method.toUpperCase()} ${path}`, op })),
   )
   expect(noJsonBodyOps.length).toBeGreaterThan(10)
@@ -237,7 +242,7 @@ test("every /v1 operation declares 409 and 503 as ApiError in /openapi.json", as
         op,
       })),
     )
-  expect(v1Ops.length).toBe(40)
+  expect(v1Ops.length).toBe(44)
 
   const missing = v1Ops.flatMap(({ name, op }) =>
     ["409", "503"]

@@ -1,6 +1,6 @@
 # Attach user-taken photos to items (#213)
 
-Status: proposal. Names of tables, columns, routes, request keys, buckets and error codes below are proposals; each is listed under "Open decisions" and none is final.
+Status: decided (2026-11-22) and implemented. Every item under "Open decisions" was decided as recommended (each carries its `Decided:` line). Where the implementation settled a point the first revisions left open (issue #238), the Concurrency section says so.
 
 ## To-Be
 
@@ -75,29 +75,30 @@ Proposed routes (names pending), under `/v1`, group access via `checkGroupAccess
 - Routing: `GET /items/photos` and `GET /items/{id}` share a path shape, and `photos` is not a UUID, so the static route must be registered before the parameter route or the batch route answers 422 for the id. A test calls the batch route and expects covers, not a validation error
 - Signed URLs carry a per-signature token, so a client that caches by URL downloads every photo again after each refresh. The mobile list therefore caches images under a key made from the photo id, not the URL (expo-image's `cacheKey`: "The cache key used to query and store this specific image. If not provided, the `uri` is used also as the cache key", Expo SDK reference), and `cachePolicy` `'disk'`. Without it, 20 rows of 300 KB are 6 MB per refresh, which is the egress risk; with it, each photo is fetched once per device. `expo-image` is not a dependency of the app today and is added with the capture libraries
 
-- Access model (proposal): the bucket is private and holds no policies for `anon` or `authenticated`, so those roles can neither read nor write objects (default deny from the access control page quote). All access goes through the API, which authorizes by group membership exactly as for every other resource and talks to Storage with the Supabase secret key (`PREP_HAMSTER_SUPABASE_SECRET_KEY`, already in Infisical; the API would need it as a new runtime env on Coolify)
+- Access model (proposal): the bucket is private and holds no policies for `anon` or `authenticated`, so those roles can neither read nor write objects (default deny from the access control page quote). All access goes through the API, which authorizes by group membership exactly as for every other resource and talks to Storage with the Supabase secret key (the key is `PREP_HAMSTER_SUPABASE_SECRET_KEY` in Infisical; the API reads it as the runtime env `SUPABASE_SECRET_KEY`, a new env on Coolify next to the existing `SUPABASE_URL`; without it every photo route answers 503 and the other routes keep working)
 - Why not direct upload from the app with the user's JWT: every policy would have to answer "is this user a member of the group in the path" inside `storage.objects` RLS. `anon` and `authenticated` have all privileges on public tables revoked (migration 0003), so the policy needs a SECURITY DEFINER function that `authenticated` may execute, which is a second authorization implementation next to `checkGroupAccess`, tested separately, and the pitfall memory (`reference_supabase_expo_pitfalls`) says a new function needs its EXECUTE revoked from anon and authenticated, which is the opposite of what such a policy function needs
 - Upload through the API: the global body limit is 1 MiB (`MAX_BODY_BYTES` in `middleware/body-limit.ts`). The photo route needs its own higher limit while every other route keeps 1 MiB. The limit counts the whole multipart body, so it is the file cap plus room for the multipart framing and the small text fields (proposal: file cap 2 MiB, route limit 2 MiB + 64 KiB); the file part's own size is then checked against 2 MiB, so a file at exactly the cap is accepted and a body just over the route limit gets 413 before any validation. The pitfall memory notes that `@hono/zod-openapi` skips validation for non-JSON bodies on routes whose body is not `required: true`; the upload route must validate content type, size and image signature (magic bytes) by hand and declare the body required
 - The client resizes before upload (long edge 1280 px, JPEG), so the server accepts only `image/jpeg` up to the cap and rejects anything else. The server does not re-encode (no image library on the API). The signature check (first bytes `FF D8 FF`) is spoofable: a client can send those bytes followed by anything. The residual risk is accepted because the objects are private, are served only through short-lived signed URLs, and are stored and returned with a fixed `image/jpeg` content type; the check exists to catch mistakes, not to prove the bytes are a valid image
 - Signed read URLs: `GET` returns URLs valid for a short time (proposal: 1 hour). The client does not store them
 - Errors, following the 422 convention for business rules, 413 for oversize:
 
-| Status | Code (proposed)                                         | When                                                                                                  |
-| ------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| 404    | NOT_FOUND                                               | item or photo missing, soft deleted, or deleted during the request                                    |
-| 403    | existing group-access codes                             | not a member or VIEWER (writes)                                                                       |
-| 413    | PAYLOAD_TOO_LARGE (existing)                            | body over the route limit, or the file part over the file cap                                         |
-| 422    | VALIDATION_ERROR                                        | missing file or `photoId` field, non-positive or oversized `width` / `height`                         |
-| 422    | IDEMPOTENCY_KEY_REUSED (existing)                       | `photoId` exists but for another item, another group or another size                                  |
-| 422    | PHOTO_TYPE_UNSUPPORTED                                  | not image/jpeg, or the bytes are not a JPEG                                                           |
-| 422    | PHOTO_LIMIT_EXCEEDED                                    | the item already has the maximum number of photos                                                     |
-| 409    | CONFLICT_RETRY (proposed, shared with `stock-split.md`) | the object for this `photoId` already exists but its row is not committed yet; retry with the same id |
-| 502    | STORAGE_UNAVAILABLE                                     | Storage rejected or failed; nothing is attached                                                       |
+| Status | Code (proposed)                   | When                                                                                                                   |
+| ------ | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 404    | NOT_FOUND                         | item or photo missing, soft deleted, or deleted during the request                                                     |
+| 403    | existing group-access codes       | not a member or VIEWER (writes)                                                                                        |
+| 413    | PAYLOAD_TOO_LARGE (existing)      | body over the route limit, or the file part over the file cap                                                          |
+| 422    | VALIDATION_ERROR                  | missing file or `photoId` field, non-positive or oversized `width` / `height`                                          |
+| 422    | IDEMPOTENCY_KEY_REUSED (existing) | `photoId` exists but for another item, another group or another size                                                   |
+| 422    | PHOTO_TYPE_UNSUPPORTED            | not image/jpeg, or the bytes are not a JPEG                                                                            |
+| 422    | PHOTO_LIMIT_EXCEEDED              | the item already has the maximum number of photos                                                                      |
+| 503    | TEMPORARILY_UNAVAILABLE           | the outcome of the registration could not be settled, or the registration came too late; retry with the same `photoId` |
+| 503    | PHOTO_STORAGE_NOT_CONFIGURED      | the API has no Storage secret key; every photo route answers it                                                        |
+| 502    | STORAGE_UNAVAILABLE               | Storage rejected or failed; nothing is attached                                                                        |
 
 ## Mobile screens touched
 
 - `app/stocks/[id].tsx`: photo strip, "add photo" action sheet (camera or library), full-screen viewer with delete
-- Stock list rows: thumbnail from the cover photo (batch route, cached by photo id, see API section), else the product master image
+- Stock list rows: thumbnail from the cover photo (batch route, cached by photo id, see API section), else the product master image. Not part of the first implementation PR: the stock list screen is being rewritten in another open PR, so the batch route exists and the list rows are wired afterwards
 - Upload generates `photoId` once per attempt and reuses it on retry, like `newStockId` in the split design
 - Pure module `src/photo-upload.ts`: validation, resize plan, multipart building, error-message mapping; tested without rendering like `location-manage.ts`
 - New dependencies for capture and resize (to be installed with `expo install` so SDK 58 compatible versions are chosen; versions not verified here): `expo-image-picker` and `expo-image-manipulator`. `expo-camera` is already installed but is a live-preview component for barcode scanning; `expo-image-picker` gives camera and library in one call
@@ -119,6 +120,10 @@ Lock order shared by the four designs (item, stock, location, photo and tag rows
 
 No database transaction, connection or row lock is held across a call to Storage. A transaction that waited on an external HTTP upload would keep a pooled connection and the item row lock for as long as the upload takes, which stalls every other writer of that item (tag PUT, stock create, split, merge) and can exhaust the connection pool when Storage is slow. The upload therefore happens first, outside any transaction, and the row is written afterwards under a short lock.
 
+Advisory lock, added when implementing (settles #238 points 1 and 2): a `pg_advisory_xact_lock` keyed on the `photoId` serializes the registration of a row with every deletion of that photo's object that is based on "no row exists". It is not a row lock and not part of the order above: the registration takes the item row lock first and then this lock, and the sweep and the compensating deletes take only this lock, so no cycle exists. Holding it across the Storage `remove` of those deletes stalls nothing but another operation on the same `photoId`.
+
+Time limits, all in one module (`apps/core/api/src/photos/config.ts`), always in this order: a registration is refused after 20 minutes from the start of its upload (`REGISTER_DEADLINE_MS`) < an existing object without a row is adopted only when it is younger than 30 minutes (`ADOPT_MAX_AGE_MS`) < the sweep removes an object without a row only when it is older than 60 minutes (`SWEEP_MIN_AGE_MS`).
+
 ```mermaid
 sequenceDiagram
   participant C as Client
@@ -132,67 +137,70 @@ sequenceDiagram
     A-->>C: 404
   end
   A->>D: access check on the item's group (EDITOR)
-  A->>D: replay probe: photo with id = photoId in that group?
+  A->>D: replay probe: photo with id = photoId?
   alt exists
-    A-->>C: 200 recorded photo (active, same item and size), else 422 IDEMPOTENCY_KEY_REUSED
+    A-->>C: 200 recorded photo (active, same group, item and size), else 422 IDEMPOTENCY_KEY_REUSED
   end
   alt item soft deleted
     A-->>C: 404
   end
   A->>D: count active photos (no lock, fast failure)
   alt at the cap
-    A->>D: replay probe again (the original may have committed since the first probe)
+    A->>D: replay probe again, one shared classification (match, reused, none)
     alt row exists and matches
       A-->>C: 200 recorded photo
+    else row exists and does not match
+      A-->>C: 422 IDEMPOTENCY_KEY_REUSED
     else
       A-->>C: 422 PHOTO_LIMIT_EXCEEDED
     end
   end
   A->>S: upload object, upsert false (no transaction open)
   alt object already exists
-    A->>D: probe again
-    alt row exists
-      A->>D: same checks as the first probe (group, item, size, active)
-      A-->>C: 200 recorded photo if they match, else 422 IDEMPOTENCY_KEY_REUSED
-    else no row yet
-      A-->>C: 409 retry (the existing object is not touched)
+    A->>S: read its creation time
+    alt younger than 30 minutes
+      A->>D: probe, then adopt the object (no delete, no second upload)
+    else older
+      A->>D: under the photoId lock: row absent? then remove the object
+      A->>S: upload again
     end
   end
   alt upload fails
     A-->>C: 502 STORAGE_UNAVAILABLE
   end
-  A->>D: BEGIN, lock item FOR NO KEY UPDATE
-  A->>D: probe by photoId, item still active, count still below the cap
+  A->>D: BEGIN, lock item FOR NO KEY UPDATE, then the photoId lock
+  A->>D: probe by photoId, 20 minute deadline, item still active, count still below the cap
   alt a check fails
-    A->>D: ROLLBACK
-    A->>S: delete the object we uploaded unless a row with this photoId exists
-    A-->>C: 200 replay, 404 or 422
+    A->>D: COMMIT (nothing written)
+    A->>D: under the photoId lock: row absent? then remove the object we uploaded
+    A-->>C: 200 replay, 404, 422 or 503
   end
   A->>D: insert item_photos row, COMMIT
-  alt insert or commit fails
-    alt conflict on photoId
-      A-->>C: 422 IDEMPOTENCY_KEY_REUSED (the object is not touched)
-    else outcome unknown (connection lost around the commit)
-      A->>D: probe by photoId on a fresh connection
-      alt row exists and matches
-        A-->>C: 200 recorded photo (the object is not touched)
-      else probe fails or the result is unclear
-        A-->>C: 503 retry, the object is left for the sweep
-      else no row
-        A->>S: delete the object we uploaded
-        A-->>C: error
-      end
+  alt the transaction ends in an error (outcome unknown)
+    A->>D: fresh transaction, wait for the photoId lock (5 s)
+    alt row exists and matches
+      A-->>C: 200 recorded photo (the object is not touched)
+    else row exists and does not match
+      A-->>C: 422 IDEMPOTENCY_KEY_REUSED
+    else lock not obtained or the probe fails
+      A-->>C: 503 retry with the same photoId, the object is left for the sweep
+    else no row
+      A->>S: delete the object we uploaded (the original transaction has ended)
+      A-->>C: the original error (500)
     end
   end
   A-->>C: 201
 ```
 
 - The count and the insert run under the item row lock, so two concurrent uploads at one below the cap cannot both pass; the loser has already uploaded and deletes its own object. The earlier count outside the lock only avoids uploading when the item is clearly full or gone
-- Atomicity is not claimed. If the upload succeeded and the later step fails, the compensating delete removes the object, but only when the absence of the row is confirmed: a failed commit can still have committed (the connection can drop after Postgres committed), so an unclear outcome is resolved by probing on a fresh connection, and if even that fails the object is left in place and the request answers 503 so that the client retries with the same `photoId` (the retry finds the row and answers 200, or finds none and uploads again after the sweep or an overwrite-safe conflict answer). A leftover object without a row is an orphan; the sweep removes it (next bullet)
-- Orphan sweep (part of this design, not a follow-up, because the deletion paths below depend on it): a periodic job, of the kind of `jobs/expiry-notify.ts` (how that job is scheduled was not examined here), lists objects of the bucket that have no `item_photos` row and are older than one hour, and deletes them. The age limit keeps it away from uploads in flight; the row check is made at sweep time, so an object whose commit was unclear and succeeded is never removed. It also deletes objects of soft-deleted rows whose removal is still pending (next bullet)
-- Idempotency: `photoId` is the row's primary key and the object's name (`<group_id>/<photo_id>.jpg`), so the object path is shared by every request that carries the same `photoId`. Therefore a request may delete an object only if it uploaded it itself and no row with that `photoId` exists; deleting on any failure would remove the object that a concurrent identical request's committed row points to. Concretely: the upload is sent with `upsert` false (the Supabase JS reference lists `upsert` as an option and shows `upsert: false`, but states no default, so the design sets it explicitly) so a second upload of the same path fails instead of overwriting; a duplicate-object failure re-runs the probe and answers 200 if the winner's row is there, or 409 (a retryable answer, the code is the shared one in the decisions) if it is not there yet; the item lock serializes identical retries for the same item, and the probe under the lock turns the loser into a 200 replay. If the client keeps the same `photoId` after an orphan was left under that id, the 409 repeats; the client asks the user to retry, which generates a new id, and the sweep removes the orphan
-- The probe is scoped to the item's group, which is read (including a soft-deleted item) and access-checked first, so a `photoId` that exists in another group looks like any other taken id: 422 IDEMPOTENCY_KEY_REUSED. A `photoId` whose row was soft deleted by the user also returns 422 IDEMPOTENCY_KEY_REUSED (the key was used and the photo is gone; the client must use a new id). Never 500 from a primary key violation and never a 200 with a signed URL to an object that was deleted. The probe compares item id, group id and byte size: an upload is identified by its item and size, and the bytes are not compared (an honest client sends the same bytes for the same id; a client-sent checksum column was considered and left out as a name and a column for a case only a dishonest client can produce)
-- Delete: in a short transaction lock the photo row `FOR NO KEY UPDATE`, check it belongs to the item in the path (a photo of another item is 404 and stays untouched), set `deleted_at`, commit; the API then tries to remove the object and, when that works, sets `storage_deleted_at` on the row. The API answers 204 as soon as the row is soft deleted, also when the removal failed: the photo is gone for every user at that point, and the object is removed later. The pending state is persisted as the row itself: soft deleted (`deleted_at` set) with `storage_deleted_at` null. The sweep retries every such row older than a few minutes until Storage reports the object removed or not found, then sets `storage_deleted_at`; that is the completion condition. Signed read URLs issued before the delete stay valid until their expiry (one hour in the proposal) or until the object is removed, whichever comes first, and a client that cached the bytes keeps them
+- Atomicity is not claimed. If the upload succeeded and the later step fails, the compensating delete removes the object, but only when the absence of the row is confirmed under the photoId lock and only when this request uploaded the object itself
+- Object deletion only when row absence is confirmed (#238 point 1): a failed commit can still have committed (the connection can drop after Postgres committed), so a probe that finds no row proves nothing by itself. The photoId lock is what proves it: the registration transaction holds it until it commits or aborts, so a fresh transaction that obtains it knows the original has ended, and its probe is final. If the lock is not obtained within 5 seconds, or the probe itself fails, nothing is deleted; the request answers 503 `TEMPORARILY_UNAVAILABLE`, the client retries with the same `photoId` (it finds the row and gets 200, or finds none and uploads again), and an object that stays behind is removed by the sweep
+- Orphan sweep (part of this design, not a follow-up, because the deletion paths below depend on it): `jobs/photo-sweep.ts` (`bun run job:photo-sweep`, idempotent, scheduled like `jobs/expiry-notify.ts`; the schedule itself is a deploy step) does two things. It retries every soft-deleted row whose `storage_deleted_at` is null and whose `deleted_at` is older than 5 minutes, until Storage reports the object removed or not found, then sets the column. It lists the objects of the bucket and, for each object older than 60 minutes whose name is `<group_id>/<uuid>.jpg`, takes the photoId lock, checks again that no row of any kind exists, and only then removes the object (up to 500 objects per run; a lock that cannot be had within 1 second skips the object until the next run)
+- Sweep against a registration in flight (#238 point 2): the row check and the removal run under the photoId lock, and a registration holds the same lock from its probe to its commit, so a registration that commits between the listing and the removal is either seen by the sweep (row exists, object kept) or waits for it. A registration that stalled so long that the sweep got the lock first would find the object removed; it cannot, because it is refused once more than 20 minutes have passed since its upload started (the check runs after obtaining the lock, and the object is only removable after 60 minutes). The registration answers 503 `TEMPORARILY_UNAVAILABLE` and deletes its object itself
+- Idempotency: `photoId` is the row's primary key and the object's name (`<group_id>/<photo_id>.jpg`), so the object path is shared by every request that carries the same `photoId`. Therefore a request may delete an object only if it uploaded it itself and no row with that `photoId` exists; deleting on any failure would remove the object that a concurrent identical request's committed row points to. The upload is sent with `upsert` false so a second upload of the same path fails instead of overwriting. A duplicate-object answer is resolved as follows: an object younger than 30 minutes belongs to a request that is registering (or has registered) the same upload, so this request does not touch it, probes, and registers its own row for it under the item lock (the loser of the two registrations sees the winner's row and answers 200); an older object is an orphan, so the request removes it under the photoId lock after confirming that no row exists, and uploads its own bytes again
+- A new `photoId` while an orphan remains (#238 point 3): the design no longer asks the client to switch ids. The first revision answered a repeated 409 and told the client to use a new id, which could register the same photo twice when the original upload committed late. With adoption and the 20 minute registration deadline, a retry with the same `photoId` always ends in a definite answer (200, 201 or a 4xx), so the client keeps one `photoId` per picked photo and retries with it after a network failure, a timeout or a 408, 429 or 5xx answer. It mints a new `photoId` only after a 4xx answer that the server decided (cap reached, not a JPEG, `photoId` reused), when no registration of the old id can still land. The client keeps the resized file together with the `photoId`, because re-encoding changes the size and the same `photoId` would then be refused as reused
+- The probe is scoped to the item's group, which is read (including a soft-deleted item) and access-checked first, so a `photoId` that exists in another group looks like any other taken id: 422 IDEMPOTENCY_KEY_REUSED. A `photoId` whose row was soft deleted by the user also returns 422 IDEMPOTENCY_KEY_REUSED (the key was used and the photo is gone; the client must use a new id). Never 500 from a primary key violation and never a 200 with a signed URL to an object that was deleted. The probe compares item id, group id and byte size: an upload is identified by its item and size, and the bytes are not compared (an honest client sends the same bytes for the same id; a client-sent checksum column was considered and left out as a name and a column for a case only a dishonest client can produce). Every probe, including the second one at the cap, uses the same classification, so a row that exists but does not match is always IDEMPOTENCY_KEY_REUSED and never PHOTO_LIMIT_EXCEEDED (#238 point 4)
+- Delete: one `UPDATE ... WHERE id, item_id (the item in the path) and deleted_at IS NULL RETURNING` sets `deleted_at` (the statement locks the row, so two concurrent deletes of one photo give one 204 and one 404; a photo of another item or an already deleted photo is 404 and stays untouched); the API then tries to remove the object and, when that works, sets `storage_deleted_at` on the row. The API answers 204 as soon as the row is soft deleted, also when the removal failed: the photo is gone for every user at that point, and the object is removed later. The pending state is persisted as the row itself: soft deleted (`deleted_at` set) with `storage_deleted_at` null. The sweep retries every such row older than a few minutes until Storage reports the object removed or not found, then sets `storage_deleted_at`; that is the completion condition. Signed read URLs issued before the delete stay valid until their expiry (one hour in the proposal) or until the object is removed, whichever comes first, and a client that cached the bytes keeps them
 - Merge (#212) and photo upload both lock the item row first, so they serialize; an upload against a merged-away item gets 404 at the locked re-check and deletes its object
 - Item delete: the photos of the item are soft-deleted in the same transaction as the item (their objects are then removed and `storage_deleted_at` is set after the commit, or by the sweep), so a deleted item does not keep reachable photos. The locking of item delete is specified in `item-merge.md`
 
@@ -228,6 +236,8 @@ sequenceDiagram
 
 ### D-photo-target. What a photo attaches to
 
+- Decided: item only (2026-11-22)
+
 - Question: does a photo attach to the item or to the individual stock?
 - Options:
   1. Item. Identifies the product; manual products get an image; survives buying the same product again
@@ -238,12 +248,16 @@ sequenceDiagram
 
 ### D-photo-storage. Storage backend
 
+- Decided: Supabase Storage (2026-11-22)
+
 - Question: which storage holds the photos?
 - Options: Supabase Storage; an S3-compatible store outside Supabase; Google Drive
 - Recommendation: Supabase Storage
 - Reason: already in the stack and the Free allowance (1 GB, 50 MB upload cap, 5 GB egress, quoted above) covers the estimated volume; the others add a vendor or a mismatch with group sharing
 
 ### D-photo-access. How the app reaches Storage
+
+- Decided: through the API (2026-11-22)
 
 - Question: does the app upload directly with the user's JWT under `storage.objects` policies, or through the API?
 - Options: through the API (private bucket, no policies for anon or authenticated, secret key in the API); direct upload with membership policies using a SECURITY DEFINER function; public bucket with unguessable paths
@@ -252,12 +266,16 @@ sequenceDiagram
 
 ### D-photo-upload-path. One-step proxy or signed upload URL
 
+- Decided: proxy through the API (2026-11-22)
+
 - Question: does the file go through the API in one request, or does the API hand out a signed upload URL and the client uploads directly?
 - Options: proxy through the API (multipart, route limit slightly above the 2 MiB file cap, upload to Storage before any transaction opens); signed upload URL plus a second "complete" call
 - Recommendation: proxy through the API
 - Reason (changed): one request from the app, and no pending rows (the row is written only after the upload succeeded). It is not atomic: a failure after the upload is compensated by deleting the object, and an orphan can remain if that fails too. The cost is API bandwidth for files of a few hundred KB. The first revision claimed the row and the object succeed or fail together, which was wrong, and held a transaction open across the upload, which the second revision removed
 
 ### D-photo-thumbnails. Thumbnails on the Free plan
+
+- Decided: the list downloads the resized original, cached on the device under a key made from the photo id (2026-11-22)
 
 - Question: how are list thumbnails produced, given Free has no image transformation?
 - Options: the client uploads a second small file (for example 320 px) next to the original; the list downloads the resized original; upgrade to Pro for transformations
@@ -266,6 +284,8 @@ sequenceDiagram
 
 ### D-photo-limits. Size and count limits
 
+- Decided: 2 MiB and 5 photos (2026-11-22)
+
 - Question: what are the per-photo size cap and the per-item photo cap?
 - Options: 2 MiB and 5 photos; 5 MiB and 10 photos; 1 MiB (the existing global body limit) and 3 photos
 - Recommendation: 2 MiB and 5 photos
@@ -273,12 +293,16 @@ sequenceDiagram
 
 ### D-photo-names. Table, bucket, route and field names
 
+- Decided: `item_photos`, `item-photos`, `/items/{id}/photos` and `/items/photos`, fields `file`, `photoId`, `width`, `height`, and `storage_deleted_at` (2026-11-22)
+
 - Question: what are the table name, bucket name, route paths and request keys?
 - Options: table `item_photos`, bucket `item-photos`, routes `/items/{id}/photos` and `/items/photos`, fields `file`, `photoId`, `width`, `height`; table `item_images` with `/items/{id}/images`; photos as a column array on `items`
 - Recommendation: `item_photos`, `item-photos`, `/items/{id}/photos` and `/items/photos` (response `covers` with `itemId`, `photoId`, `url`), `file`, `photoId`, `width`, `height`, and `storage_deleted_at` (changed: `photoId`, `width`, `height` and the batch route were added in the second revision; `photoId` in the covers and `storage_deleted_at` in the third)
 - Reason: the issue says photos; a separate table keeps per-photo metadata and soft delete; an array column cannot hold them
 
 ### D-photo-delete. What deleting a photo does to the object
+
+- Decided: option 1 (remove the object at once and soft-delete the row) (2026-11-22)
 
 - Question: is the stored object removed immediately when the user deletes a photo?
 - Options:
@@ -290,12 +314,16 @@ sequenceDiagram
 
 ### D-photo-bucket-provisioning. How the bucket is created
 
+- Decided: `config.toml` for local plus a Storage API call as a deploy step for hosted (2026-11-22)
+
 - Question: how is the private bucket created on the hosted project and locally?
 - Options: `[storage.buckets.*]` in `supabase/config.toml` for local and a Storage API call (secret key) as a deploy step for hosted; a guarded SQL insert in a drizzle migration (skipped where no storage schema exists); the API creates it at boot if missing
 - Recommendation: `config.toml` for local plus a Storage API call as a deploy step for hosted (changed; the first revision recommended the SQL insert in the migration)
 - Reason: the Supabase docs show the SQL insert but do not say which role may run it, and a migration role without the privilege would fail the whole migration; the guard only tests that the storage schema exists. The deploy step uses the secret key the API already needs. The bucket definition stays in git: one shared module holds the name, the 2 MiB size limit and the MIME type, a repo script (idempotent) creates or updates the hosted bucket from it, and tests compare `config.toml` and the script's result with it, so hosted and local cannot drift unnoticed (changed: the script and the shared module were added after review). Boot-time creation gives the API a permission it should not need at runtime
 
 ### D-photo-list-covers. How list rows get thumbnails (new)
+
+- Decided: a separate batch route (2026-11-22)
 
 - Question: how does the stock list get the cover photo URL of each row?
 - Options: a separate batch route returning one cover per item; embed the cover URL in `GET /v1/items`; no batch (list rows call the per-item route)
@@ -304,12 +332,16 @@ sequenceDiagram
 
 ### D-photo-idempotency. Upload retry key (new)
 
+- Decided: client-generated `photoId` (2026-11-22)
+
 - Question: how is a retried upload recognized?
 - Options: client-generated `photoId` that becomes the row's primary key and the object's name; no key (a retry may create a duplicate)
 - Recommendation: client-generated `photoId`
 - Reason: upload retries after a timeout are the normal failure on a phone, and a duplicate uses up the per-item cap; the same pattern as `newStockId` in the split design
 
 ### D-photo-exif. Location and other metadata in uploaded photos (new)
+
+- Decided: verify on a device that the resize output has no EXIF and add an explicit client-side strip if it does (the implementation also asks the picker for no EXIF; the device check is still to be done by hand) (2026-11-22)
 
 - Question: how is EXIF metadata (GPS position, device) kept out of stored photos?
 - Options: verify on a device that the resize output has no EXIF and rely on it; strip metadata explicitly on the client before upload; strip it on the server
@@ -318,12 +350,16 @@ sequenceDiagram
 
 ### D-photo-item-delete. What item delete does to its photos (new)
 
+- Decided: soft-delete the photos with the item and remove the objects after the commit (2026-11-22)
+
 - Question: what happens to an item's photos when the item is deleted?
 - Options: soft-delete the photos in the same transaction as the item and remove the objects after the commit; refuse the item delete while photos exist (like `ITEM_IN_USE` for stocks); leave the photos
 - Recommendation: soft-delete the photos with the item and remove the objects after the commit
 - Reason: refusing would force the user to delete photos one by one before deleting a product they already decided to delete; leaving them keeps reachable objects of a deleted item
 
 ### D-photo-delete-retry. Retrying the Storage removal of a deleted photo (new)
+
+- Decided: option 1 (`storage_deleted_at` column on `item_photos`) (2026-11-22)
 
 - Question: how is a failed Storage removal after a photo delete retried, and what does the API answer meanwhile?
 - Options:
@@ -335,6 +371,8 @@ sequenceDiagram
 - Reason: the pending state must be persisted, because the orphan sweep only looks at objects without a row and would never see a soft-deleted photo's object. A column on the existing row needs no new table (a new table would need its own RLS statement) and gives the sweep a completion condition. The API answers 204 because the photo is already gone for every user. Option 4 would show a photo the user just deleted. With physical row deletion (option 2 of D-photo-delete) a separate table (option 3) would be needed instead
 
 ### D-photo-capture-libs. Capture and resize libraries
+
+- Decided: `expo-image-picker` and `expo-image-manipulator` (2026-11-22)
 
 - Question: are `expo-image-picker` and `expo-image-manipulator` the libraries for capture and resize?
 - Options: those two; `expo-camera` only (already installed) with its own capture and no library picker; no client-side resize (upload the original)

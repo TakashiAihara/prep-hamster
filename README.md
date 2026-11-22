@@ -125,3 +125,17 @@ curl -s http://localhost:3000/health
 PREP_HAMSTER_ACCESS_TOKEN=<access token> \
   bun run --filter @prep-hamster/cli-user start stock list
 ```
+
+## 商品の写真 (Supabase Storage)
+
+設計は `docs/design/item-photos.md`。写真は private bucket `item-photos` に置き、API だけが secret key で触る。
+
+- API の runtime env に `SUPABASE_SECRET_KEY` を渡す (本番は Infisical の prep-hamster/prod の `PREP_HAMSTER_SUPABASE_SECRET_KEY`、手元は `bunx supabase status` の secret key)。値は repo に書かない。無いと `/v1/items/**/photos` だけが 503 `PHOTO_STORAGE_NOT_CONFIGURED` になり、起動時に警告が出る
+- 手元の bucket は `supabase/config.toml` の `[storage.buckets.item-photos]` が `bunx supabase start` で作る。名前・2 MiB・`image/jpeg` の定義は `apps/core/api/src/photos/config.ts` が出所で、`bun test src/photos` が `config.toml` との一致を見る
+- 本番の bucket は migration では作らず、deploy の手順として 1 回流す (冪等。定義が変われば同じ手順で更新される):
+
+```sh
+inf-run --only SUPABASE_SECRET_KEY -- env SUPABASE_URL=<project の URL> bun run --filter @prep-hamster/api provision:photo-bucket
+```
+
+- 削除待ちの object と、行の無い古い object は定期ジョブが片付ける (冪等)。`DATABASE_URL` / `SUPABASE_URL` / `SUPABASE_SECRET_KEY` を渡して `bun run --filter @prep-hamster/api job:photo-sweep`。1 日 1 回以上
