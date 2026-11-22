@@ -4,7 +4,7 @@
 
 Notes on how a JAN code is built. `isValidJan` validates a code and `computeJanCheckDigit` computes its check digit; both are exported from this package.
 
-Source: a 2023 note from the predecessor repo, checked against GS1 Japan's page on GS1 company prefixes and GTIN (https://www.gs1jp.org/code/jan/about_jan.html, read 2026-11-22). Points the GS1 Japan page does not cover are marked as from the original note.
+Source: a 2023 note from the predecessor repo (preppy), checked against GS1 Japan's page on GS1 company prefixes and GTIN (https://www.gs1jp.org/code/jan/about_jan.html, read 2026-11-22). Points the GS1 Japan page does not cover are marked as from the original note.
 
 ## General
 
@@ -44,18 +44,18 @@ The original note splits the prefix into a 2-digit country code and a company co
 - 45 with a company code starting 95: company code 8 digits, item code 2 digits
 - 45 with any other company code starting 6 to 9: company code 7 digits, item code 3 digits
 
-The 95 rule is listed before the 6 to 9 rule because a company code starting 95 also starts with 9.
+The 95 rule is listed before the 6 to 9 rule because a company code starting 95 also starts with 9. These rules may be wrong; check GS1 Japan before relying on them in code.
 
 ## Check digit calculation
 
-Positions are counted from the right of the full code, with the check digit itself as position 1.
+Positions are counted from the right of the full code, with the check digit itself as position 1. The same steps apply to 13-digit and 8-digit codes.
 
 1. Sum all the even-position digits, then multiply the sum by 3
 2. Sum the odd-position digits other than the check digit
 3. Add the two results and take the last digit
 4. 10 minus that last digit is the check digit; if the last digit is 0, the check digit is 0
 
-`computeJanCheckDigit` takes the digits without the check digit. Its rightmost input digit is therefore position 2 and gets weight 3. Example: `computeJanCheckDigit("490123456789")` returns 4, giving `4901234567894`.
+`computeJanCheckDigit` takes the digits without the check digit. Its rightmost input digit is therefore position 2 and gets weight 3. Examples: `computeJanCheckDigit("456789012345")` returns 6, giving `4567890123456`, and `computeJanCheckDigit("4901234")` returns 7, giving `49012347`. Swapping the odd and even weights would give 8 and 1 for these inputs, so they tell the two apart.
 
 ## GTIN-8 (short type)
 
