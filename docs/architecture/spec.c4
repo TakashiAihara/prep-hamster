@@ -1,0 +1,13 @@
+specification {
+  element person { style { shape person } }
+  element system
+  element host
+  element process
+  element module
+  element store { style { shape storage } }
+  element external
+
+  tag planned
+  tag job
+}
+

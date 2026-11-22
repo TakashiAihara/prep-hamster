@@ -76,6 +76,10 @@ export default function GroupsScreen() {
             <Text style={styles.name}>保管場所を管理</Text>
             <Ionicons name="chevron-forward" size={14} color="#888" />
           </Pressable>
+          <Pressable style={styles.row} onPress={() => router.push("/tags" as never)}>
+            <Text style={styles.name}>タグを管理</Text>
+            <Ionicons name="chevron-forward" size={14} color="#888" />
+          </Pressable>
         </View>
       ) : null}
 

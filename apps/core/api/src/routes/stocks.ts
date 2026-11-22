@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
-import { and, asc, eq, gte, isNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm"
 import { items, locations, stockEvents, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
@@ -14,6 +14,7 @@ import {
   stockQuantityDeltaBodyDtoSchema,
   updateStockBodyDtoSchema,
 } from "./schemas"
+import { itemIdsWithTag } from "./tag-queries"
 import { isUniqueViolation } from "./items"
 
 const IdParamSchema = z.object({
@@ -32,6 +33,7 @@ const booleanQuery = z
 const ListQuerySchema = z.object({
   groupId: z.string().guid().openapi({ example: "00000000-0000-0000-0000-000000000000" }),
   categoryId: z.string().guid().optional(),
+  tagId: z.string().guid().optional(),
   locationId: z.string().guid().optional(),
   expiringBefore: z.string().date().optional(),
   includeExpired: booleanQuery.optional(),
@@ -143,7 +145,7 @@ const listStocksRoute = createRoute({
   path: "/",
   tags: ["stocks"],
   summary:
-    "在庫一覧を取得 (categoryId / locationId / 期限で絞り込み可。使い切った在庫は includeEmpty=true のときだけ含む)",
+    "在庫一覧を取得 (categoryId / tagId / locationId / 期限で絞り込み可。使い切った在庫は includeEmpty=true のときだけ含む)",
   middleware: [withGroupAccess({ in: "query", name: "groupId" })] as const,
   request: {
     query: ListQuerySchema,
@@ -436,7 +438,7 @@ const deleteStockRoute = createRoute({
 
 export const stocksRouter = new OpenAPIHono<AppEnv>()
   .openapi(listStocksRoute, async (c) => {
-    const { groupId, categoryId, locationId, expiringBefore, includeExpired, includeEmpty } =
+    const { groupId, categoryId, tagId, locationId, expiringBefore, includeExpired, includeEmpty } =
       c.req.valid("query")
     const db = c.get("db")
 
@@ -446,6 +448,10 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
     const conditions = [eq(stocks.groupId, groupId), isNull(stocks.deletedAt)]
     if (locationId) {
       conditions.push(eq(stocks.locationId, locationId))
+    }
+    // tag は item に付く。item を JOIN せず stocks.itemId の部分問い合わせで絞る (categoryId の JOIN と併用できる)
+    if (tagId) {
+      conditions.push(inArray(stocks.itemId, itemIdsWithTag(db, tagId)))
     }
     if (expiringBefore) {
       // 「いずれかの期限日が指定日以前」= useByDate <= X OR bestBeforeDate <= X

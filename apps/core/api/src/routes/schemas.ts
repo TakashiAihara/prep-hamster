@@ -1,4 +1,5 @@
 import { z } from "@hono/zod-openapi"
+import { TAG_NAME_MAX } from "@prep-hamster/schema"
 
 // API I/O 用 DTO スキーマ。drizzle-zod 由来の row schema は branded type を含むが、
 // HTTP I/O 層では plain string で十分なため API 専用に切り出す。
@@ -186,6 +187,40 @@ export const updateCategoryBodyDtoSchema = requireUpdatableField(
   }),
 ).openapi("UpdateCategoryBody")
 
+export const tagDtoSchema = z
+  .object({
+    id: z.string().guid(),
+    groupId: z.string().guid(),
+    name: z.string(),
+    // 紐づく active な item の数。一覧の並び (多い順) の根拠
+    itemCount: z.number().int().nonnegative(),
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    deletedAt: z.string().datetime({ offset: true }).nullable(),
+  })
+  .openapi("Tag")
+
+export const createTagBodyDtoSchema = z
+  .object({
+    groupId: z.string().guid(),
+    name: z.string().trim().min(1).max(TAG_NAME_MAX),
+  })
+  .openapi("CreateTagBody")
+
+export const updateTagBodyDtoSchema = z
+  .object({
+    name: z.string().trim().min(1).max(TAG_NAME_MAX),
+  })
+  .openapi("UpdateTagBody")
+
+// 上限 (TAGS_PER_ITEM_MAX) は schema に入れない。入れると超過が VALIDATION_ERROR になり
+// TAG_LIMIT_EXCEEDED に届かない。ここは入力の暴走を止める桁だけ。
+export const putItemTagsBodyDtoSchema = z
+  .object({
+    tagIds: z.array(z.string().guid()).max(100),
+  })
+  .openapi("PutItemTagsBody")
+
 export const itemDtoSchema = z
   .object({
     id: z.string().guid(),
@@ -194,6 +229,7 @@ export const itemDtoSchema = z
     name: z.string(),
     barcode: z.string().nullable(),
     categoryId: z.string().guid().nullable(),
+    tagIds: z.array(z.string().guid()),
     defaultUnit: z.string().nullable(),
     manufacturer: z.string().nullable(),
     memo: z.string().nullable(),
