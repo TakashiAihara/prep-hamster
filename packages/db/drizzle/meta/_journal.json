@@ -36,6 +36,13 @@
       "when": 1795321110298,
       "tag": "0004_item_unique_idx_active_only",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795332059787,
+      "tag": "0006_numeric_quantities",
+      "breakpoints": true
     }
   ]
 }

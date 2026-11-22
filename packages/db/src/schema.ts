@@ -6,9 +6,9 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
-  real,
   text,
   timestamp,
   unique,
@@ -65,6 +65,10 @@ const timestamps = {
   updatedAt: tsCol("updated_at").notNull().defaultNow(),
   deletedAt: tsCol("deleted_at"),
 }
+
+// 数量系の列は numeric(12,3) で保存する。drizzle の numeric は既定では文字列を返すが、
+// API が JSON number で返す契約に合わせて mode: "number" で number のまま読み書きする
+const quantityNumericConfig = { precision: 12, scale: 3, mode: "number" } as const
 
 // ============================================================================
 // Tables
@@ -153,7 +157,7 @@ export const productMasters = pgTable(
     name: text("name").notNull(),
     manufacturer: text("manufacturer"),
     brand: text("brand"),
-    contentAmount: real("content_amount"),
+    contentAmount: numeric("content_amount", quantityNumericConfig),
     contentUnit: text("content_unit"),
     categoryHint: text("category_hint"),
     imageUrl: text("image_url"),
@@ -207,7 +211,7 @@ export const stocks = pgTable(
     locationId: uuid("location_id")
       .notNull()
       .references(() => locations.id),
-    quantity: real("quantity").notNull(),
+    quantity: numeric("quantity", quantityNumericConfig).notNull(),
     unit: text("unit").notNull(),
     useByDate: date("use_by_date"),
     bestBeforeDate: date("best_before_date"),
@@ -235,7 +239,7 @@ export const stockEvents = pgTable(
       .notNull()
       .references(() => stocks.id),
     eventType: stockEventTypeEnum("event_type").notNull(),
-    quantityDelta: real("quantity_delta").notNull(),
+    quantityDelta: numeric("quantity_delta", quantityNumericConfig).notNull(),
     fromLocationId: uuid("from_location_id").references(() => locations.id),
     toLocationId: uuid("to_location_id").references(() => locations.id),
     occurredAt: tsCol("occurred_at").notNull(),
@@ -268,7 +272,7 @@ export const shoppingListItems = pgTable("shopping_list_items", {
     .references(() => groups.id),
   itemId: uuid("item_id").references(() => items.id),
   name: text("name").notNull(),
-  quantity: real("quantity").notNull(),
+  quantity: numeric("quantity", quantityNumericConfig).notNull(),
   unit: text("unit"),
   source: shoppingListSourceEnum("source").notNull(),
   status: shoppingListStatusEnum("status").notNull(),

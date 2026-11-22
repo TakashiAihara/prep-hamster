@@ -285,7 +285,8 @@ export const createStockBodyDtoSchema = z
     groupId: z.string().guid(),
     itemId: z.string().guid(),
     locationId: z.string().guid(),
-    quantity: z.number().nonnegative(),
+    // 保存先は numeric(12,3) なので、上限を超える値は DB エラーになる前に弾く
+    quantity: z.number().nonnegative().max(999_999_999.999),
     unit: z.string().min(1),
     useByDate: z.string().date().nullable(),
     bestBeforeDate: z.string().date().nullable(),
@@ -329,7 +330,8 @@ export const stockEventDtoSchema = z
 // stock_events には `-quantityDelta` を保存することで集計時の SUM 整合を保つ。
 export const stockQuantityDeltaBodyDtoSchema = z
   .object({
-    // 保存先の列は real (float4)。単精度に丸めて 0 や無限大になる値は DB に渡す前に弾く
+    // float4 に丸めると 0 か無限大になる値は DB に渡す前に弾く。
+    // numeric(12,3) の下限 (残量が変わらない微小量) は #194 で決める
     quantityDelta: z
       .number()
       .positive()

@@ -81,6 +81,60 @@ test("POST /v1/stocks/:id/consume reduces quantity + records CONSUME event", asy
   expect(events[0]?.groupId).toBe(groupId)
 })
 
+test("quantity keeps exact numeric(12,3) precision through create, read and consume", async () => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const locationId = await seedLocation(groupId, "Pantry")
+  const itemId = await seedItem(groupId, "Apple")
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const auth = await bearer(userId)
+
+  // real (float4) では 131072.04 は 131072.046875 として保存され、読み出しで値が変わる
+  const createRes = await app.request("/v1/stocks", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: auth },
+    body: JSON.stringify({
+      groupId,
+      itemId,
+      locationId,
+      quantity: 131072.04,
+      unit: "g",
+      useByDate: null,
+      bestBeforeDate: null,
+      openedAt: null,
+      note: null,
+    }),
+  })
+
+  expect(createRes.status).toBe(201)
+  const created = (await createRes.json()) as { stock: { id: string; quantity: number } }
+  expect(created.stock.quantity).toBe(131072.04)
+
+  const getRes = await app.request(`/v1/stocks/${created.stock.id}`, {
+    headers: { authorization: auth },
+  })
+  expect(getRes.status).toBe(200)
+  const got = (await getRes.json()) as { stock: { quantity: number } }
+  expect(got.stock.quantity).toBe(131072.04)
+
+  const consumeRes = await app.request(`/v1/stocks/${created.stock.id}/consume`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: auth },
+    body: JSON.stringify({ quantityDelta: 0.29 }),
+  })
+
+  expect(consumeRes.status).toBe(200)
+  const consumed = (await consumeRes.json()) as {
+    stock: { quantity: number }
+    event: { quantityDelta: number }
+  }
+  expect(consumed.stock.quantity).toBe(131071.75)
+  expect(consumed.event.quantityDelta).toBe(-0.29)
+
+  const [row] = await testDb.select().from(stocks).where(eq(stocks.id, created.stock.id))
+  expect(row?.quantity).toBe(131071.75)
+})
+
 test("POST /v1/stocks/:id/consume rejects when result would be negative", async () => {
   const { userId, stockId } = await setupGroupWithStock(2)
 
