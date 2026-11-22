@@ -3,8 +3,8 @@ views {
     title 'System landscape'
     include user, operator
     include userPhone, userPhone.mobile, userPc, userPc.userCli, opPc, opPc.adminCli
-    include coolify, coolify.api, expiryJob, adminWeb
-    include supabase.auth, supabase.pg, google, expoPush, fcm
+    include apiHost, apiHost.api, expiryJob, adminWeb
+    include lib.clientPkg, lib.dbPkg, supabase.auth, supabase.pg, google, expoPush, fcm
     style element.tag = #planned {
       opacity 40%
       border dashed
@@ -12,16 +12,20 @@ views {
     autoLayout LeftRight
   }
 
-  view clients of coolify.api {
+  view clients of apiHost.api {
     title 'Clients and sign-in'
-    include userPhone.mobile, userPc.userCli, opPc.adminCli
-    include coolify.api, supabase.auth, google
+    include userPhone.mobile, userPc.userCli, adminWeb
+    include lib.clientPkg, apiHost.api, supabase.auth, google
+    style element.tag = #planned {
+      opacity 40%
+      border dashed
+    }
     autoLayout LeftRight
   }
 
-  view api of coolify.api {
+  view api of apiHost.api {
     title 'Core API internals'
-    include coolify.api.*
+    include apiHost.api.*
     include lib.schemaPkg, lib.dbPkg, lib.janPkg
     include supabase.auth, supabase.pg, yahoo
     autoLayout LeftRight
@@ -30,14 +34,14 @@ views {
   view mobile of userPhone.mobile {
     title 'Mobile app'
     include userPhone.mobile.*
-    include coolify.api, supabase.auth, google
+    include lib.clientPkg, apiHost.api, supabase.auth, google
     autoLayout LeftRight
   }
 
   view notification {
     title 'Expiry notification'
     include expiryJob, expiryJob.*
-    include supabase.pg, expoPush, fcm, userPhone.mobile
+    include lib.dbPkg, supabase.pg, expoPush, fcm, userPhone.mobile
     autoLayout LeftRight
   }
 }
