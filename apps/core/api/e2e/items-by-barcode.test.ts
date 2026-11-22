@@ -191,3 +191,44 @@ test("POST /v1/items/by-barcode by non-member returns 403 FORBIDDEN_GROUP_ACCESS
   const body = (await res.json()) as { error: { code: string } }
   expect(body.error.code).toBe("FORBIDDEN_GROUP_ACCESS")
 })
+
+type ScanBody = { item: { id: string }; productLookup: string }
+
+const scanAfterDelete = async (janApi: JanApiClient, expectedLookup: string) => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const app = createApp({ db: testDb, auth: e2eAuth, janApi })
+  const headers = { "content-type": "application/json", authorization: await bearer(userId) }
+  const scan = () =>
+    app.request("/v1/items/by-barcode", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ groupId, barcode: VALID_JAN }),
+    })
+
+  const first = await scan()
+  expect(first.status).toBe(201)
+  const firstBody = (await first.json()) as ScanBody
+  expect(firstBody.productLookup).toBe(expectedLookup)
+
+  const del = await app.request(`/v1/items/${firstBody.item.id}`, { method: "DELETE", headers })
+  expect(del.status).toBe(204)
+
+  const second = await scan()
+  expect(second.status).toBe(201)
+  const secondBody = (await second.json()) as ScanBody
+  expect(secondBody.productLookup).toBe(expectedLookup)
+  expect(secondBody.item.id).not.toBe(firstBody.item.id)
+
+  const [oldRow] = await testDb.select().from(items).where(eq(items.id, firstBody.item.id))
+  expect(oldRow).toBeDefined()
+  expect(oldRow?.deletedAt).toBeInstanceOf(Date)
+}
+
+test("POST /v1/items/by-barcode lookup hit after the item was soft-deleted creates a new item", async () => {
+  await scanAfterDelete(stubJanApi(sampleCandidate()), "hit")
+})
+
+test("POST /v1/items/by-barcode lookup miss after the item was soft-deleted creates a new placeholder", async () => {
+  await scanAfterDelete(stubJanApi(null), "miss")
+})
