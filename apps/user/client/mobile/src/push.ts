@@ -44,8 +44,11 @@ function isMissingProjectId(err: unknown): boolean {
 // web と simulator/emulator では push token を取れないのでここで弾く。
 // Expo Go の実機はここを通る (projectId 未設定などは後段で個別に弾く)。
 async function pushRuntime() {
-  const Device = await import("expo-device")
-  const { Platform } = await import("react-native")
+  // import() ではなく require で引く。Metro は import() を非同期チャンクとして別評価し、
+  // emulator の E2E で在庫保存後の遷移が不安定になった (PR #221)。react-native は
+  // 既に読み込み済みなのでキャッシュが返り、expo-device の factory も初回 require 時だけ走る。
+  const Device = require("expo-device") as typeof import("expo-device")
+  const { Platform } = require("react-native") as typeof import("react-native")
   if (Platform.OS === "web" || Device.isDevice !== true) return null
   const Notifications = await import("expo-notifications")
   return { Notifications, platform: Platform.OS }
