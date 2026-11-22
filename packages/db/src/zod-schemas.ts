@@ -27,6 +27,7 @@ import {
   shoppingListItems,
   stockEvents,
   stocks,
+  tags,
   users,
 } from "./schema"
 
@@ -111,6 +112,17 @@ export const CategoryInsertSchema = createInsertSchema(categories, categoryBrand
 export const CategoryUpdateSchema = createUpdateSchema(categories, categoryBrands)
 export type Category = typeof categories.$inferSelect
 export type CategoryInsert = typeof categories.$inferInsert
+
+// tags
+const tagBrands = {
+  id: brandUuid("TagId"),
+  groupId: brandUuid("GroupId"),
+}
+export const TagSchema = createSelectSchema(tags, tagBrands)
+export const TagInsertSchema = createInsertSchema(tags, tagBrands)
+export const TagUpdateSchema = createUpdateSchema(tags, tagBrands)
+export type Tag = typeof tags.$inferSelect
+export type TagInsert = typeof tags.$inferInsert
 
 // productMasters
 const productMasterBrands = {

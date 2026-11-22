@@ -15,6 +15,7 @@ export {
   ShoppingListItemSchema,
   StockEventSchema,
   StockSchema,
+  TagSchema,
   UserSchema,
   type Category,
   type Group,
@@ -28,8 +29,10 @@ export {
   type ShoppingListItem,
   type Stock,
   type StockEvent,
+  type Tag,
   type User,
 } from "@prep-hamster/db/zod"
 
 export * from "./common"
 export * from "./error-map"
+export * from "./tag-name"

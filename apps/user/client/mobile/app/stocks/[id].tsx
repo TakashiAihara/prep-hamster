@@ -13,6 +13,7 @@ import {
 import { getApiClient } from "@/api"
 import { AuthGate } from "@/auth-status"
 import { KeyboardScrollView } from "@/keyboard-scroll-view"
+import { TagSection } from "@/tag-section"
 import {
   formatQuantity,
   loadStockDetail,
@@ -173,6 +174,8 @@ function DetailBody({
           {formatQuantity(stock.quantity)} {stock.unit}
         </Text>
       </View>
+
+      <TagSection groupId={stock.groupId} itemId={stock.itemId} />
 
       {message ? (
         <Text

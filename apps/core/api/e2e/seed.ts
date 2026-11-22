@@ -1,4 +1,14 @@
-import { categories, groups, items, locations, memberships, stocks, users } from "@prep-hamster/db"
+import {
+  categories,
+  groups,
+  itemTags,
+  items,
+  locations,
+  memberships,
+  stocks,
+  tags,
+  users,
+} from "@prep-hamster/db"
 import { testDb } from "./setup"
 
 export type SeedFixture = {
@@ -73,6 +83,19 @@ export async function seedCategory(
   const id = crypto.randomUUID()
   await testDb.insert(categories).values({ id, groupId, name, sortOrder })
   return id
+}
+
+export async function seedTag(groupId: string, name: string): Promise<string> {
+  const id = crypto.randomUUID()
+  await testDb
+    .insert(tags)
+    .values({ id, groupId, name, normalizedName: name.normalize("NFKC").toLowerCase() })
+  return id
+}
+
+export async function attachTags(itemId: string, tagIds: string[]): Promise<void> {
+  if (tagIds.length === 0) return
+  await testDb.insert(itemTags).values(tagIds.map((tagId) => ({ itemId, tagId })))
 }
 
 export async function seedItem(

@@ -11,6 +11,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./tag-name": {
+      "types": "./src/tag-name.ts",
+      "import": "./src/tag-name.ts",
+      "default": "./src/tag-name.ts"
     }
   },
   "scripts": {
