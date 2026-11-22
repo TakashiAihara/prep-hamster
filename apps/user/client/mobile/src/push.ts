@@ -81,7 +81,10 @@ let lastDeviceToken: string | null = null
 export async function registerDevicePushToken(): Promise<void> {
   const rt = await pushRuntime()
   if (!rt) return
-  if (!(await ensureNotificationPermission(rt.Notifications))) return
+  // Android の token 取得に通知権限は要らない (権限が要るのは通知の表示側)。
+  // サインイン直後の権限ダイアログは E2E の操作を遮るので Android では要求しない。
+  // iOS は APNs token に権限が要るので従来どおり要求する。
+  if (rt.platform === "ios" && !(await ensureNotificationPermission(rt.Notifications))) return
   if (rt.platform === "android") await ensureAndroidChannel(rt.Notifications)
 
   let token: string
