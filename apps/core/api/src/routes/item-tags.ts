@@ -96,14 +96,16 @@ export const itemTagsRouter = new OpenAPIHono<AppEnv>().openapi(putItemTagsRoute
     return c.json(access.body, access.status)
   }
 
-  // 重複は先に落とす (同じ id を 2 回入れると item_tags の主キーに当たる)。
+  // 重複は先に落とす (同じ id を 2 回入れると item_tags の主キーに当たる)。uuid は大文字小文字を
+  // 区別せず同じ行を指すので、小文字にそろえてから落とす。
   // ロックは常に昇順にそろえて、同じ tag を取り合う別の PUT と待ち合いの輪を作らない
-  const tagIds = [...new Set(body.tagIds)].toSorted()
+  const tagIds = [...new Set(body.tagIds.map((t) => t.toLowerCase()))].toSorted()
 
+  let saved: typeof items.$inferSelect
   try {
-    await db.transaction(async (tx) => {
+    saved = await db.transaction(async (tx) => {
       const [lockedItem] = await tx
-        .select({ id: items.id })
+        .select()
         .from(items)
         .where(and(eq(items.id, id), isNull(items.deletedAt)))
         .for("no key update")
@@ -122,10 +124,27 @@ export const itemTagsRouter = new OpenAPIHono<AppEnv>().openapi(putItemTagsRoute
         if (!tag || tag.groupId !== existing.groupId) throw new TagMismatch()
       }
 
+      const current = await tx
+        .select({ tagId: itemTags.tagId })
+        .from(itemTags)
+        .where(eq(itemTags.itemId, id))
+      const currentIds = current.map((r) => r.tagId).toSorted()
+      // 同じ集合の PUT (再送) は書かない。item_tags.created_at と items.updatedAt を動かさない
+      if (currentIds.join() === tagIds.join()) return lockedItem
+
       await tx.delete(itemTags).where(eq(itemTags.itemId, id))
       if (tagIds.length > 0) {
         await tx.insert(itemTags).values(tagIds.map((tagId) => ({ itemId: id, tagId })))
       }
+      // tagIds は item の表現に含まれるので、updatedAt を見て差分を取るクライアントが変更に気づけるよう touch する。
+      // 応答は行を押さえたこの transaction の値から作る (削除済みの item を 200 で返さない)
+      const [touched] = await tx
+        .update(items)
+        .set({ updatedAt: new Date() })
+        .where(eq(items.id, id))
+        .returning()
+      if (!touched) throw new Error("item update returned no row")
+      return touched
     })
   } catch (err) {
     if (err instanceof ItemGone) return c.json(ITEM_NOT_FOUND, 404)
@@ -134,14 +153,10 @@ export const itemTagsRouter = new OpenAPIHono<AppEnv>().openapi(putItemTagsRoute
     throw err
   }
 
-  const [item] = await db.select().from(items).where(eq(items.id, id)).limit(1)
-  if (!item) {
-    return c.json(ITEM_NOT_FOUND, 404)
-  }
   const applied = await listTagsWithCount(db, existing.groupId, tagIds)
   return c.json(
     {
-      item: toItemDto(item, applied.map((t) => t.id).toSorted()),
+      item: toItemDto(saved, applied.map((t) => t.id).toSorted()),
       tags: applied.map(toTagDto),
     },
     200,

@@ -175,7 +175,7 @@ function DetailBody({
         </Text>
       </View>
 
-      <TagSection groupId={stock.groupId} itemId={stock.itemId} />
+      <TagSection key={stock.itemId} groupId={stock.groupId} itemId={stock.itemId} />
 
       {message ? (
         <Text

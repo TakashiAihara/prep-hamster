@@ -5,6 +5,7 @@ import {
   applyRenamedTag,
   deleteTagDetail,
   findTagByName,
+  mergeTags,
   parseTagName,
   removeTag,
   removeTagFromItem,
@@ -31,6 +32,13 @@ const tagDto = (id: string, name: string) => ({
   deletedAt: null,
 })
 
+// 応答は送った集合を逆順で返し、tag の名前も別の値にする (応答ではなくリクエストを返す実装を落とす)
+const respond = (ids: string[]) =>
+  json({
+    item: { tagIds: ids.toReversed() },
+    tags: ids.map((id) => tagDto(id, `saved-${id.slice(0, 1)}`)),
+  })
+
 // hono client の v1.tags.$get / $post と v1.items[":id"].tags.$put の形だけを模した偽物
 function fakeClient(opts: {
   post?: () => Response
@@ -55,9 +63,7 @@ function fakeClient(opts: {
           tags: {
             $put: async (args: { json: { tagIds: string[] } }) => {
               calls.put.push(args)
-              return (opts.put ?? ((ids) => json({ item: { tagIds: ids }, tags: [] })))(
-                args.json.tagIds,
-              )
+              return (opts.put ?? respond)(args.json.tagIds)
             },
           },
         },
@@ -90,7 +96,12 @@ test("addTagToItem reuses an existing tag without calling POST", async () => {
     knownTags: [tag(T1, "Pet")],
     name: "ＰＥＴ",
   })
-  expect(res).toEqual({ ok: true, tagIds: [T2, T1], tagId: T1 })
+  expect(res).toEqual({
+    ok: true,
+    tagIds: [T1, T2],
+    tags: [tagDto(T2, "saved-b"), tagDto(T1, "saved-a")],
+    tagId: T1,
+  })
   expect(calls.post).toEqual([])
   expect(calls.put).toEqual([{ param: { id: ITEM }, json: { tagIds: [T2, T1] } }])
 })
@@ -104,7 +115,7 @@ test("addTagToItem creates a missing tag and then applies it", async () => {
     knownTags: [],
     name: " new ",
   })
-  expect(res).toEqual({ ok: true, tagIds: [T3], tagId: T3 })
+  expect(res).toEqual({ ok: true, tagIds: [T3], tags: [tagDto(T3, "saved-c")], tagId: T3 })
   expect(calls.post).toEqual([{ json: { groupId: GROUP, name: "new" } }])
   expect(calls.put).toEqual([{ param: { id: ITEM }, json: { tagIds: [T3] } }])
 })
@@ -121,7 +132,7 @@ test("addTagToItem on TAG_NAME_DUPLICATE re-reads the list and applies the winne
     knownTags: [],
     name: "winner",
   })
-  expect(res).toEqual({ ok: true, tagIds: [T1], tagId: T1 })
+  expect(res).toEqual({ ok: true, tagIds: [T1], tags: [tagDto(T1, "saved-a")], tagId: T1 })
   expect(calls.get).toBe(1)
   expect(calls.put).toEqual([{ param: { id: ITEM }, json: { tagIds: [T1] } }])
 })
@@ -150,7 +161,7 @@ test("addTagToItem skips the PUT when the item already has the tag", async () =>
     knownTags: [tag(T1, "Pet")],
     name: "pet",
   })
-  expect(res).toEqual({ ok: true, tagIds: [T1], tagId: T1 })
+  expect(res).toEqual({ ok: true, tagIds: [T1], tags: [tag(T1, "Pet")], tagId: T1 })
   expect(calls.put).toEqual([])
 })
 
@@ -171,7 +182,7 @@ test("addTagToItem surfaces the API's TAG_LIMIT_EXCEEDED message", async () => {
 test("removeTagFromItem puts the set without the removed tag", async () => {
   const { client, calls } = fakeClient({})
   const res = await removeTagFromItem(client, ITEM, [T1, T2], T1)
-  expect(res).toEqual({ ok: true, tagIds: [T2] })
+  expect(res).toEqual({ ok: true, tagIds: [T2], tags: [tagDto(T2, "saved-b")] })
   expect(calls.put).toEqual([{ param: { id: ITEM }, json: { tagIds: [T2] } }])
 })
 
@@ -181,6 +192,13 @@ test("deleteTagDetail states how many items lose the tag", () => {
     detail: "3 件の商品からこのタグが外れます",
   })
   expect(deleteTagDetail(tag(T1, "Pet", 0)).detail).toBe("このタグを付けている商品はありません")
+})
+
+test("mergeTags adds new tags, refreshes existing ones and keeps the rest", () => {
+  const list = [tag(T1, "a", 1), tag(T2, "b", 2)]
+  const merged = mergeTags(list, [tag(T2, "b2", 3), tag(T3, "c", 0)])
+  expect(merged).toEqual([tag(T1, "a", 1), tag(T2, "b2", 3), tag(T3, "c", 0)])
+  expect(mergeTags(list, [])).toEqual(list)
 })
 
 test("applyRenamedTag and removeTag keep the reference when the id is absent", () => {

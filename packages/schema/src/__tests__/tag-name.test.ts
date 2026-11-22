@@ -6,6 +6,12 @@ test("normalizeTagName trims surrounding whitespace", () => {
   expect(normalizeTagName("　pet　")).toBe("pet")
 })
 
+test("normalizeTagName trims a space that NFKC itself produces", () => {
+  // U+00B4 は NFKC で空白 + 結合記号に分解される。NFKC の前に trim すると先頭の空白が残る
+  expect(normalizeTagName("´foo")).toBe("́foo")
+  expect(normalizeTagName("´foo")).toBe(normalizeTagName(" ́foo"))
+})
+
 test("normalizeTagName folds full-width forms with NFKC", () => {
   expect(normalizeTagName("ＰＥＴ１")).toBe("pet1")
   expect(normalizeTagName("ﾍﾟｯﾄ")).toBe("ペット")

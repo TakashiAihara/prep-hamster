@@ -152,7 +152,7 @@ const listItemsRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["items"],
-  summary: "group 単位で item 一覧 (categoryId / barcode 絞り込み可)",
+  summary: "group 単位で item 一覧 (categoryId / tagId / barcode 絞り込み可)",
   middleware: [withGroupAccess({ in: "query", name: "groupId" })] as const,
   request: { query: ListQuerySchema },
   responses: {

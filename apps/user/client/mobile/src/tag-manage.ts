@@ -107,13 +107,13 @@ export async function putItemTags(
   client: ApiClient,
   itemId: string,
   tagIds: string[],
-): Promise<TagResult<{ tagIds: string[] }>> {
+): Promise<TagResult<{ tagIds: string[]; tags: TagDto[] }>> {
   try {
     const res = await client.v1.items[":id"].tags.$put({ param: { id: itemId }, json: { tagIds } })
     if (!res.ok)
       return { ok: false, message: (await readApiError(res, `HTTP ${res.status}`)).message }
-    const { item } = await res.json()
-    return { ok: true, tagIds: item.tagIds }
+    const { item, tags } = await res.json()
+    return { ok: true, tagIds: item.tagIds, tags }
   } catch (err) {
     return failure(err)
   }
@@ -124,7 +124,7 @@ export async function removeTagFromItem(
   itemId: string,
   currentTagIds: string[],
   tagId: string,
-): Promise<TagResult<{ tagIds: string[] }>> {
+): Promise<TagResult<{ tagIds: string[]; tags: TagDto[] }>> {
   return putItemTags(
     client,
     itemId,
@@ -144,7 +144,7 @@ export async function addTagToItem(
     knownTags: TagDto[]
     name: string
   },
-): Promise<TagResult<{ tagIds: string[]; tagId: string }>> {
+): Promise<TagResult<{ tagIds: string[]; tags: TagDto[]; tagId: string }>> {
   const parsed = parseTagName(args.name)
   if (!parsed.ok) return parsed
 
@@ -170,10 +170,20 @@ export async function addTagToItem(
   }
 
   if (args.currentTagIds.includes(tagId)) {
-    return { ok: true, tagIds: args.currentTagIds, tagId }
+    const existing = args.knownTags.filter((t) => args.currentTagIds.includes(t.id))
+    return { ok: true, tagIds: args.currentTagIds, tags: existing, tagId }
   }
   const put = await putItemTags(client, args.itemId, [...args.currentTagIds, tagId])
-  return put.ok ? { ok: true, tagIds: put.tagIds, tagId } : put
+  return put.ok ? { ok: true, tagIds: put.tagIds, tags: put.tags, tagId } : put
+}
+
+// 一覧に、PUT の応答に載った (付いている) tag を入れる。無ければ足し、有れば件数と名前を新しい値にする。
+// 取り直しの往復を待たずに、付けたばかりの tag の chip を出すため
+export function mergeTags(list: TagDto[], applied: TagDto[]): TagDto[] {
+  const byId = new Map(applied.map((t) => [t.id, t]))
+  const merged = list.map((t) => byId.get(t.id) ?? t)
+  const known = new Set(list.map((t) => t.id))
+  return [...merged, ...applied.filter((t) => !known.has(t.id))]
 }
 
 // 一覧の差し替え。対象が無ければ同じ配列を返す (React の再描画を省くため参照を保つ)

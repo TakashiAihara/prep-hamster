@@ -1,48 +1,61 @@
-import { useEffect, useRef, useState } from "react"
+import { useFocusEffect } from "expo-router"
+import { useCallback, useRef, useState } from "react"
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native"
+import { TAG_NAME_MAX } from "@prep-hamster/schema/tag-name"
 import { getApiClient } from "@/api"
 import { apiErrorMessage } from "@/api-error"
-import { addTagToItem, listTags, removeTagFromItem, type TagDto } from "@/tag-manage"
+import {
+  addTagToItem,
+  listTags,
+  mergeTags,
+  removeTagFromItem,
+  type TagDto,
+  type TagResult,
+} from "@/tag-manage"
 
 // 在庫詳細のタグ欄。タグは item に付くので、同じ item の別の在庫でも同じタグが出る。
-// 詳細画面の state とは独立に、item のタグと group のタグ一覧を自分で読む。
+// 詳細画面の state とは独立に、item のタグと group のタグ一覧を自分で読む。focus のたびに取り直し
+// (他のメンバーが付け替えたタグを古いまま操作しない)、失敗したら再試行できる。
+// item が変わったら親が key で作り直す。
 export function TagSection({ groupId, itemId }: { groupId: string; itemId: string }) {
   const [tags, setTags] = useState<TagDto[] | null>(null)
   const [tagIds, setTagIds] = useState<string[]>([])
   const [draft, setDraft] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   // キーボード送信の 2 連打は state ではなく同期フラグで止める
   const busyRef = useRef(false)
 
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        const client = getApiClient()
-        const [list, itemRes] = await Promise.all([
-          listTags(client, groupId),
-          client.v1.items[":id"].$get({ param: { id: itemId } }),
-        ])
-        if (cancelled) return
-        if (!list.ok) return setError(list.message)
-        if (!itemRes.ok) return setError(await apiErrorMessage(itemRes, `HTTP ${itemRes.status}`))
-        const { item } = await itemRes.json()
-        if (cancelled) return
-        setTags(list.tags)
-        setTagIds(item.tagIds)
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "unknown")
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false
+      void (async () => {
+        try {
+          const client = getApiClient()
+          const [list, itemRes] = await Promise.all([
+            listTags(client, groupId),
+            client.v1.items[":id"].$get({ param: { id: itemId } }),
+          ])
+          if (cancelled) return
+          if (!list.ok) return setError(list.message)
+          if (!itemRes.ok) return setError(await apiErrorMessage(itemRes, `HTTP ${itemRes.status}`))
+          const { item } = await itemRes.json()
+          if (cancelled) return
+          setError(null)
+          setTags(list.tags)
+          setTagIds(item.tagIds)
+        } catch (err) {
+          if (!cancelled) setError(err instanceof Error ? err.message : "unknown")
+        }
+      })()
+      return () => {
+        cancelled = true
       }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [groupId, itemId])
+    }, [groupId, itemId, reloadKey]),
+  )
 
-  async function run(
-    job: () => Promise<{ ok: true; tagIds: string[] } | { ok: false; message: string }>,
-  ) {
+  async function run(job: () => Promise<TagResult<{ tagIds: string[]; tags: TagDto[] }>>) {
     if (busyRef.current) return
     busyRef.current = true
     setBusy(true)
@@ -51,10 +64,9 @@ export function TagSection({ groupId, itemId }: { groupId: string; itemId: strin
       const res = await job()
       if (!res.ok) return setError(res.message)
       setTagIds(res.tagIds)
+      // 付けたばかりの tag も応答から一覧へ入れる (一覧の取り直しを待つと chip が出ない間ができ、失敗すると出ない)
+      setTags((prev) => mergeTags(prev ?? [], res.tags))
       setDraft("")
-      // 新しく作ったタグを候補に出すため、一覧を取り直す
-      const list = await listTags(getApiClient(), groupId)
-      if (list.ok) setTags(list.tags)
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -76,9 +88,22 @@ export function TagSection({ groupId, itemId }: { groupId: string; itemId: strin
 
   if (tags === null) {
     return error ? (
-      <Text style={styles.error} testID="detail-tags-error">
-        {error}
-      </Text>
+      <View style={styles.section}>
+        <Text style={styles.error} testID="detail-tags-error">
+          {error}
+        </Text>
+        <Pressable
+          testID="detail-tags-retry"
+          accessibilityRole="button"
+          style={styles.add}
+          onPress={() => {
+            setError(null)
+            setReloadKey((n) => n + 1)
+          }}
+        >
+          <Text style={styles.addLabel}>タグを再取得</Text>
+        </Pressable>
+      </View>
     ) : (
       <ActivityIndicator />
     )
@@ -112,7 +137,7 @@ export function TagSection({ groupId, itemId }: { groupId: string; itemId: strin
           value={draft}
           onChangeText={setDraft}
           editable={!busy}
-          maxLength={50}
+          maxLength={TAG_NAME_MAX}
           returnKeyType="done"
           onSubmitEditing={() => void onAdd(draft)}
           style={styles.input}

@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native"
+import { TAG_NAME_MAX } from "@prep-hamster/schema/tag-name"
 import { getApiClient } from "@/api"
 import { useCurrentGroup } from "@/current-group"
 import { KeyboardScrollView } from "@/keyboard-scroll-view"
@@ -190,7 +191,7 @@ function TagsBody({ groupId }: { groupId: string }) {
                   onChangeText={setDraftName}
                   editable={pending === null}
                   autoFocus
-                  maxLength={50}
+                  maxLength={TAG_NAME_MAX}
                   returnKeyType="done"
                   onSubmitEditing={() => void onRename(tag)}
                   style={styles.input}

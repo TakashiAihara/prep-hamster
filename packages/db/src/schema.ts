@@ -414,13 +414,13 @@ export const itemsRelations = relations(items, ({ one, many }) => ({
   }),
   category: one(categories, { fields: [items.categoryId], references: [categories.id] }),
   stocks: many(stocks),
-  tags: many(itemTags),
+  itemTags: many(itemTags),
   shoppingListItems: many(shoppingListItems),
 }))
 
 export const tagsRelations = relations(tags, ({ one, many }) => ({
   group: one(groups, { fields: [tags.groupId], references: [groups.id] }),
-  items: many(itemTags),
+  itemTags: many(itemTags),
 }))
 
 export const itemTagsRelations = relations(itemTags, ({ one }) => ({

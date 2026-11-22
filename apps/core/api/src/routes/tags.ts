@@ -65,7 +65,7 @@ const createTagRoute = createRoute({
   tags: ["tags"],
   summary: "tag を作成 (EDITOR 以上)",
   request: {
-    body: { content: { "application/json": { schema: createTagBodyDtoSchema } } },
+    body: { content: { "application/json": { schema: createTagBodyDtoSchema } }, required: true },
   },
   responses: {
     ...authErrorResponses,

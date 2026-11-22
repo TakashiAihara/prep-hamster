@@ -25,6 +25,7 @@ beforeEach(async () => {
 
 type TagBody = { id: string; name: string; itemCount: number }
 type ApiErr = { error: { code: string; message: string } }
+const sleep = () => new Promise((r) => setTimeout(r, 15))
 
 async function setup() {
   const userId = await seedUser()
@@ -374,17 +375,86 @@ test("anon and authenticated roles cannot read the tag tables", async () => {
 
   for (const role of ["anon", "authenticated"]) {
     for (const table of ["tags", "item_tags"]) {
+      // ロール切替の失敗はテストの失敗にする。拒否を期待して捕まえるのは対象表の SELECT だけで、
+      // 失敗した文が外側の transaction を壊さないよう savepoint (入れ子の transaction) に入れる
       // oxlint-disable-next-line no-await-in-loop
-      const result = await testDb
-        .transaction(async (tx) => {
-          await tx.execute(sql.raw(`set local role ${role}`))
-          await tx.execute(sql.raw(`select count(*) from public.${table}`))
-          return "readable"
-        })
-        .catch((err: unknown) =>
-          String((err as { cause?: { message?: string } }).cause?.message ?? err),
-        )
+      const result = await testDb.transaction(async (tx) => {
+        await tx.execute(sql.raw(`set local role ${role}`))
+        return tx
+          .transaction(async (inner) => {
+            await inner.execute(sql.raw(`select count(*) from public.${table}`))
+            return "readable"
+          })
+          .catch((err: unknown) =>
+            String((err as { cause?: { message?: string } }).cause?.message ?? err),
+          )
+      })
       expect(result).toContain("permission denied")
     }
   }
+})
+
+test("both tag tables have row level security enabled", async () => {
+  const rows = (await testDb.execute(
+    sql`select relname, relrowsecurity as rls from pg_class where relname in ('tags', 'item_tags') and relkind = 'r' order by relname`,
+  )) as unknown as { relname: string; rls: boolean }[]
+
+  expect(rows.map((r) => [r.relname, r.rls])).toEqual([
+    ["item_tags", true],
+    ["tags", true],
+  ])
+})
+
+test("POST /v1/tags without a body is VALIDATION_ERROR, not a pass-through", async () => {
+  const { app, auth } = await setup()
+
+  const res = await app.request("/v1/tags", { method: "POST", headers: { authorization: auth } })
+
+  expect(res.status).toBe(422)
+  expect(((await res.json()) as ApiErr).error.code).toBe("VALIDATION_ERROR")
+})
+
+test("PUT treats ids that differ only in letter case as one", async () => {
+  const { putTags, groupId } = await setup()
+  const itemId = await seedItem(groupId, "water")
+  const a = await seedTag(groupId, "a")
+
+  const res = await putTags(itemId, [a, a.toUpperCase()])
+
+  expect(res.status).toBe(200)
+  expect(await attachedTagIds(itemId)).toEqual([a])
+})
+
+test("PUT bumps items.updatedAt only when the set changes", async () => {
+  const { putTags, groupId } = await setup()
+  const itemId = await seedItem(groupId, "water")
+  const a = await seedTag(groupId, "a")
+  const b = await seedTag(groupId, "b")
+  const read = async () => {
+    const [item] = await testDb.select().from(items).where(eq(items.id, itemId))
+    const rows = await testDb.select().from(itemTags).where(eq(itemTags.itemId, itemId))
+    return {
+      updatedAt: item?.updatedAt.getTime(),
+      createdAt: rows.map((r) => r.createdAt.getTime()),
+    }
+  }
+
+  const before = await read()
+  await sleep()
+  const firstRes = await putTags(itemId, [a])
+  const first = await read()
+  expect(first.updatedAt).toBeGreaterThan(before.updatedAt ?? 0)
+  // 応答の item も、保存した行の updatedAt を返す
+  const firstBody = (await firstRes.json()) as { item: { updatedAt: string } }
+  expect(new Date(firstBody.item.updatedAt).getTime()).toBe(first.updatedAt ?? -1)
+
+  // 同じ集合の再送は何も書かない
+  await sleep()
+  const same = await putTags(itemId, [a])
+  expect(same.status).toBe(200)
+  expect(await read()).toEqual(first)
+
+  await sleep()
+  await putTags(itemId, [a, b])
+  expect((await read()).updatedAt).toBeGreaterThan(first.updatedAt ?? 0)
 })

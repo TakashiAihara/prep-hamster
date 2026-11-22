@@ -9,6 +9,7 @@ import {
   tags,
   users,
 } from "@prep-hamster/db"
+import { normalizeTagName } from "@prep-hamster/schema"
 import { testDb } from "./setup"
 
 export type SeedFixture = {
@@ -87,9 +88,7 @@ export async function seedCategory(
 
 export async function seedTag(groupId: string, name: string): Promise<string> {
   const id = crypto.randomUUID()
-  await testDb
-    .insert(tags)
-    .values({ id, groupId, name, normalizedName: name.normalize("NFKC").toLowerCase() })
+  await testDb.insert(tags).values({ id, groupId, name, normalizedName: normalizeTagName(name) })
   return id
 }
 
