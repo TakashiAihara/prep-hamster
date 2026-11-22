@@ -1,6 +1,6 @@
 # Tags as a second axis to categories (#210)
 
-Status: proposal. Names of tables, columns, routes, request keys and error codes below are proposals; each is listed under "Open decisions" and none is final.
+Status: decided on 2026-11-22. Every open decision below was decided as the recommended option, with tags attached to the item; the options and reasons are kept as the record.
 
 ## To-Be
 
@@ -93,15 +93,16 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Lock order shared by the four designs (item, stock, location, photo and tag rows): item rows (ascending id), then stock rows, then location rows, then photo rows, then tag rows (ascending id). A transaction takes only the kinds it needs, in this order, and never returns to an earlier kind. Several rows of one kind are locked with one `SELECT ... FOR ...` statement per row after sorting the ids in application code. The one exception is a single `UPDATE` that touches many rows of one kind (merge's repoint of stocks and of photos). It is safe because no other transaction locks more than one row of that kind at a time (consume, discard, move, split and photo delete each lock one row), and two merges that could touch the same rows are serialized by the item locks. Writing to an item row that the transaction already holds the lock on is not a new lock.
 - Acquiring several rows in id order is done with one `SELECT ... FOR ...` statement per row, after sorting the ids in application code. The Postgres documentation (SELECT, "The Locking Clause", Caution) says that with `ORDER BY` and a locking clause "ORDER BY is applied first" and the command "might then block trying to obtain a lock on one or more of the rows", and it does not state the order in which rows are locked. Sorting in the application and locking one row per statement does not depend on that unstated behavior, and the cost is at most tens of statements (bounded by the caps)
 - PUT `/items/{id}/tags`: one transaction. Lock the item row with `FOR NO KEY UPDATE`; 0 rows (deleted meanwhile) means 404. Lock each requested tag row `FOR SHARE` in ascending id order and re-check `deleted_at IS NULL` and group; delete the item's current `item_tags`, insert the deduplicated set. The cap is counted on the locked item, so two concurrent PUTs for one item serialize
-- DELETE `/tags/{id}`: lock the tag row `FOR NO KEY UPDATE`, soft delete, delete its `item_tags`. `FOR SHARE` from a concurrent PUT conflicts with this lock (Postgres, Explicit Locking, Table 13.3: FOR SHARE conflicts with FOR NO KEY UPDATE), so a PUT either finishes first (its rows are then deleted by the tag delete) or sees the tag as deleted and returns 422 TAG_GROUP_MISMATCH. No cycle: tag delete takes no item lock
+- DELETE `/tags/{id}`: touches `items.updated_at` of every item that loses the tag, so a client that diffs on `updated_at` sees the detach (PUT does the same). To keep the item-then-tag order, the transaction first reads the item ids attached to the tag and locks those items `FOR NO KEY UPDATE` in ascending id order, then locks the tag row `FOR NO KEY UPDATE`, and reads the attached set again. A PUT that attached a new item meanwhile holds that item's lock and a `FOR SHARE` on the tag, so the tag lock waits for it to commit and the second read sees its row. That item is not locked by this transaction (taking an item lock after the tag lock would form a cycle with a PUT that holds the item and waits for the tag), so the transaction is rolled back and retried, at most 5 times, then fails with 500. Then it soft deletes the tag, deletes the `item_tags` rows with `RETURNING`, and sets `updated_at` on exactly the returned items. `FOR SHARE` from a concurrent PUT conflicts with the tag lock (Postgres, Explicit Locking, Table 13.3: FOR SHARE conflicts with FOR NO KEY UPDATE), so a PUT either finishes first or sees the tag as deleted and returns 422 TAG_GROUP_MISMATCH
 - PATCH `/tags/{id}` (rename): one transaction. Lock the tag row `FOR NO KEY UPDATE`; no row or `deleted_at` set means 404. Compute `normalized_name` with the shared helper and update `name`, `normalized_name` and `updated_at`; a unique violation on the partial index is 422 TAG_NAME_DUPLICATE. It serializes with DELETE on the tag row (the loser sees the tag as deleted and answers 404) and two renames of one tag apply one after the other, last write wins
 - Item merge (#212) also writes `item_tags`; it follows the same order (items, then tags `FOR SHARE`) and skips deleted tags, so a tag delete cannot leave an `item_tags` row for a deleted tag (see `item-merge.md`)
 - Every reader of `item_tags` joins `tags.deleted_at IS NULL` as a second line of defense, so a stray row for a deleted tag would not be counted or shown
 - Create duplicates are decided by the unique index, not by a read-then-insert (the exact race class that #220 reports for location delete)
+- Waits on the unique index entry are outside the lock scheme above. Two renames that exchange names, or a create and a rename that meet on the same normalized name, wait on each other's uncommitted index entry and can deadlock (SQLSTATE 40P01). It surfaces as a 500 and a retry is safe because nothing was committed. No `CONFLICT_RETRY` response exists in the code yet, so it is not mapped; creates and renames that collide this way are rare in a household
 
 ## Tests
 
-- API e2e (`apps/core/api/e2e/tags.test.ts`, concurrency in a `tags-concurrency.test.ts` using `lock-helper.ts`):
+- API e2e (`apps/core/api/e2e/tags.test.ts`, concurrency in a `tags-concurrency.test.ts` that runs the racing requests together and checks invariants that hold in either order):
   1. create, rename, duplicate name 422, cross-group tag 422; POST and PATCH produce the same normalized name for the same input
   2. list ordered by usage: fixtures give four tags counts 3, 1, 1 and 0 with names in the opposite alphabetical order of the counts, so a missing `ORDER BY count DESC` fails and the two tags tied at 1 are listed in name order, so a missing secondary sort fails; `itemCount` excludes soft-deleted items
   3. PUT replaces the set; a second PUT with fewer tags removes the others; `[a, a]` equals `[a]`; over the cap returns 422 with code TAG_LIMIT_EXCEEDED (the test asserts the code, not only the status, so a schema-level VALIDATION_ERROR does not satisfy it)
@@ -128,6 +129,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
   2. Stock. Matches the issue title "tags on stocks". Tags like "opened" or "for the trip" are lot-level. Every purchase and every split needs retagging
 - Recommendation: item
 - Reason: the issue body says "second axis to categories" and the old requirement says "tag a product". Categories live on items. Lot-level state is better served by existing fields (`opened_at`, `note`). The issue title wording differs, so this needs the user's confirmation
+- Decided: item (2026-11-22)
 
 ### D-tag-scope. Whether to build tags before the category UI
 
@@ -137,6 +139,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
   2. Build the category UI first and see whether categories alone suffice, as the issue asks ("decide whether categories are enough")
 - Recommendation: build tags now
 - Reason: the issue question cannot be answered from use, because categories are not usable in the app today; a single-valued axis is known to be insufficient for the old requirement 1
+- Decided: build tags now (2026-11-22)
 
 ### D-tag-table-names. Table names
 
@@ -144,6 +147,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: `tags` and `item_tags`; `labels` and `item_labels`; `item_tag_assignments`
 - Recommendation: `tags` and `item_tags`
 - Reason: the requirement and the issue use the word tag, and the join name states what it joins
+- Decided: `tags` and `item_tags` (2026-11-22)
 
 ### D-tag-route-names. Route and field names
 
@@ -151,6 +155,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: `/tags` with `PUT /items/{id}/tags` and `tagIds`; `/tags` with add and remove sub-routes (`POST` and `DELETE /items/{id}/tags/{tagId}`)
 - Recommendation: the first (full-set replace, key `tagIds`)
 - Reason: idempotent retries and one request from mobile
+- Decided: the first (full-set replace, key `tagIds`) (2026-11-22)
 
 ### D-tag-put-conflict. Stale tag sets in a full-set PUT (new)
 
@@ -161,6 +166,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
   3. Add and remove sub-routes instead of a full-set PUT (the second option of D-tag-route-names), so concurrent changes to different tags both survive
 - Recommendation: option 1
 - Reason: two members editing the tags of the same product at the same moment is rare in a household, and option 2 adds a column and a client retry path for it. If that case matters, option 3 is the cleaner change and also removes the lost-update on a retried PUT, at the price of two requests when the user changes several tags in one edit. The alternative stays open in D-tag-route-names
+- Decided: option 1 (2026-11-22)
 
 ### D-tag-error-codes. Error code names
 
@@ -168,6 +174,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: `TAG_NAME_DUPLICATE`, `TAG_GROUP_MISMATCH`, `TAG_LIMIT_EXCEEDED`; or reuse `ITEM_BARCODE_DUPLICATE`-style naming with a `_CONFLICT` suffix
 - Recommendation: the first set
 - Reason: it mirrors the existing `ITEM_BARCODE_DUPLICATE` and `CATEGORY_GROUP_MISMATCH`
+- Decided: the first set (2026-11-22)
 
 ### D-tag-uniqueness. What counts as the same tag name
 
@@ -175,6 +182,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: exact string; trimmed and case-insensitive; trimmed, NFKC-normalized and lower-cased in application code (stored in a plain `normalized_name` column, name kept as typed)
 - Recommendation: trimmed, NFKC-normalized, lower-cased in application code
 - Reason: Japanese input mixes full-width and half-width forms, so "ＰＥＴ" and "pet" would otherwise be two tags. Full Unicode case folding is not required for a household tag list; the helper lives in the API so the client and the API share one implementation (changed from the first revision, which proposed a generated column; the earlier statement that Postgres has no NFKC was wrong and is corrected in the data model section)
+- Decided: trimmed, NFKC-normalized, lower-cased in application code (2026-11-22) (the implementation trims after NFKC, so a space produced by NFKC is also removed)
 
 ### D-tag-delete. Delete semantics
 
@@ -182,6 +190,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: soft-delete the tag and physically delete its `item_tags` rows; physically delete both; soft-delete the tag and keep `item_tags` rows hidden by the join
 - Recommendation: soft-delete the tag, physically delete the join rows
 - Reason: consistent with the 90 day policy for entities, and a restored tag (future trash UI) starts empty, matching "also removes the tag from related products"
+- Decided: soft-delete the tag, physically delete the join rows (2026-11-22)
 
 ### D-tag-filter. Match rule for several selected tags
 
@@ -189,6 +198,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: any (OR); all (AND); both with a switch
 - Recommendation: any (OR), single-select in the first version
 - Reason: single select satisfies the old requirement 2 and avoids a UI switch; multi-select can be added without an API break if `tagId` becomes repeatable
+- Decided: any (OR), single-select in the first version (2026-11-22)
 
 ### D-tag-caps. Length and count caps
 
@@ -196,6 +206,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: 50 characters and 20 tags; 100 characters (same as location and category names) and 10 tags; no tag cap
 - Recommendation: 50 characters and 20 tags
 - Reason: tags are chip labels; location and category names allow 100 but are single labels, and a cap keeps `tagIds` in `itemDtoSchema` small
+- Decided: 50 characters and 20 tags (2026-11-22)
 
 ### D-tag-order. Usage-frequency computation
 
@@ -203,3 +214,4 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: computed with a join on each list; stored counter column on `tags`
 - Recommendation: computed on read
 - Reason: a counter drifts under concurrent PUT and delete; a group has tens of tags, not thousands
+- Decided: computed on read (2026-11-22)

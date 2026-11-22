@@ -1,0 +1,127 @@
+# 在庫詳細でタグを付ける → タグ管理で rename → 詳細に新しい名前で出る → タグを外す
+#
+# 前提は stock-detail-edit.yaml と同じ (Android 専用 / ローカルの API / EDITOR 以上のテスト用ユーザー)。
+#   - グループ名が "E2E" (scripts/e2e.ts の seed)。タブのヘッダーのグループ名を押して /groups を開く
+#   - タグ名は scripts/unique-tag.js が作る ASCII (inputText は ASCII しか入らない)
+#   - タグの chip は "<名前> ×" で出る。押すと外れる
+appId: com.example.prephamster
+---
+- launchApp:
+    clearState: true
+- runFlow: subflows/dev-sign-in.yaml
+- extendedWaitUntil:
+    visible:
+      text: "追加"
+    timeout: 15000
+- waitForAnimationToEnd
+- runScript:
+    file: scripts/unique-stock.js
+    env:
+      PREFIX: tag
+- runFlow:
+    file: subflows/add-unique-stock.yaml
+    env:
+      BARCODE: ${output.barcode}
+      NAME: ${output.name}
+      QUANTITY: "1"
+- runScript:
+    file: scripts/unique-tag.js
+- scrollUntilVisible:
+    element:
+      text: ${output.name}
+- tapOn:
+    text: ${output.name}
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    id: "detail-quantity"
+# タグ欄は在庫の情報の直下。まだタグが無い
+- assertVisible:
+    text: "タグはありません"
+- tapOn:
+    id: "detail-tag-input"
+- inputText: ${output.tag}
+- hideKeyboard
+- tapOn:
+    id: "detail-tag-add"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    text: "${output.tag} ×"
+- assertNotVisible:
+    text: "タグはありません"
+- takeScreenshot: tag-detail-added
+# 詳細 → 一覧 → /groups → タグ管理
+- back
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    id: "stock-list"
+- tapOn:
+    text: "E2E"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: "タグを管理"
+- waitForAnimationToEnd:
+    timeout: 5000
+# 付けたタグが 1 件の商品に使われている
+- assertVisible:
+    text: ${output.tag}
+- assertVisible:
+    text: "1 件"
+# 今回作ったタグの編集ボタンだけを押す (他のタグが残っていても取り違えない)。ボタンの accessibilityLabel
+# (Android では content-description。Maestro の text は contentDescription にも当たる) にタグ名が入っている。
+# 行の View は accessibility の階層に出ず、入れ子 (childOf) では指せなかった (CI run 44999401796)
+- tapOn:
+    text: "タグ ${output.tag} を編集"
+# 編集欄は autoFocus で、カーソルは文字列の末尾にある。ここで欄を押し直すと押した位置にカーソルが移り、
+# eraseText はカーソルより前だけを消して後ろの文字が残る (旧名の末尾が新名の後ろに付いた)
+- assertVisible:
+    id: "tag-edit-input"
+- eraseText
+- inputText: ${output.renamed}
+- hideKeyboard
+- tapOn:
+    id: "tag-edit-save"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    id: "tags-message"
+    text: "タグの名前を変更しました"
+- assertVisible:
+    text: ${output.renamed}
+- assertNotVisible:
+    text: ${output.tag}
+- takeScreenshot: tag-manager-renamed
+# タグ管理 → /groups → 一覧 → 詳細
+- back
+- waitForAnimationToEnd:
+    timeout: 5000
+- back
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    id: "stock-list"
+- scrollUntilVisible:
+    element:
+      text: ${output.name}
+- tapOn:
+    text: ${output.name}
+- waitForAnimationToEnd:
+    timeout: 5000
+# 詳細は focus のたびにタグを取り直すので、新しい名前で出る
+- assertVisible:
+    text: "${output.renamed} ×"
+- assertNotVisible:
+    text: "${output.tag} ×"
+- takeScreenshot: tag-detail-renamed
+- tapOn:
+    text: "${output.renamed} ×"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    text: "タグはありません"
+- assertNotVisible:
+    text: "${output.renamed} ×"
+- takeScreenshot: tag-detail-removed

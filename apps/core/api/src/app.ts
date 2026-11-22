@@ -9,11 +9,13 @@ import { onError, validationHook } from "./middleware/error"
 import { categoriesRouter } from "./routes/categories"
 import { groupsRouter } from "./routes/groups"
 import { invitationsRouter } from "./routes/invitations"
+import { itemTagsRouter } from "./routes/item-tags"
 import { itemsRouter } from "./routes/items"
 import { locationsRouter } from "./routes/locations"
 import { membershipsRouter } from "./routes/memberships"
 import { pushTokensRouter } from "./routes/push-tokens"
 import { stocksRouter } from "./routes/stocks"
+import { tagsRouter } from "./routes/tags"
 
 export type AppEnv = {
   Variables: {
@@ -65,6 +67,8 @@ export function createApp(opts: CreateAppOptions) {
       .route("/v1/locations", locationsRouter)
       .route("/v1/categories", categoriesRouter)
       .route("/v1/items", itemsRouter)
+      .route("/v1/items", itemTagsRouter)
+      .route("/v1/tags", tagsRouter)
       .route("/v1/stocks", stocksRouter)
       .route("/v1/push-tokens", pushTokensRouter)
       // memberships / invitations は full-path (`/v1/groups/{groupId}/...` and
