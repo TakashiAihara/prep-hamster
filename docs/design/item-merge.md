@@ -61,15 +61,15 @@ Response 200:
 
 Errors, existing codes reused where the meaning is the same:
 
-| Status | Code | When |
-| --- | --- | --- |
-| 404 | NOT_FOUND | source missing or deleted (not by a merge); destination missing, soft deleted or in another group (one message for all three) |
-| 403 | existing group-access codes | not a member or VIEWER |
-| 422 | VALIDATION_ERROR | `targetItemId` missing or not a guid |
-| 422 | ITEM_MERGE_SAME_ITEM (proposed) | source equals destination |
-| 422 | ITEM_MERGE_SOURCE_NOT_MANUAL (proposed) | the source has a product master |
-| 422 | ITEM_MERGE_LIMIT_EXCEEDED (proposed) | the union of tags or the sum of photos would exceed the per-item limit of the destination |
-| 422 | ITEM_ALREADY_MERGED (proposed) | the source was already merged, and the requested destination is not on its chain |
+| Status | Code                                    | When                                                                                                                          |
+| ------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 404    | NOT_FOUND                               | source missing or deleted (not by a merge); destination missing, soft deleted or in another group (one message for all three) |
+| 403    | existing group-access codes             | not a member or VIEWER                                                                                                        |
+| 422    | VALIDATION_ERROR                        | `targetItemId` missing or not a guid                                                                                          |
+| 422    | ITEM_MERGE_SAME_ITEM (proposed)         | source equals destination                                                                                                     |
+| 422    | ITEM_MERGE_SOURCE_NOT_MANUAL (proposed) | the source has a product master                                                                                               |
+| 422    | ITEM_MERGE_LIMIT_EXCEEDED (proposed)    | the union of tags or the sum of photos would exceed the per-item limit of the destination                                     |
+| 422    | ITEM_ALREADY_MERGED (proposed)          | the source was already merged, and the requested destination is not on its chain                                              |
 
 Replay: the handler reads the source row including soft-deleted rows before treating a soft-deleted source as missing. A source that carries `merged_into_item_id` is followed along the chain (A to B to C). If the requested destination is on that chain, the request is a retry of a merge that already happened (possibly followed by later merges): it returns 200 with `movedStocks: 0` and `movedDeletedStocks: 0`, and `item` is the active item at the end of the chain, which is where the product lives now. If the requested destination is not on the chain, it returns 422 ITEM_ALREADY_MERGED. A soft-deleted source with no merge pointer (deleted the ordinary way) is 404. Because pointers are not flattened, a retry of A into B after B was merged into C still finds B on A's chain and gets 200.
 

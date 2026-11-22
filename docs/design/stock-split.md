@@ -59,15 +59,15 @@ Replay: a request whose `newStockId` already exists as a stock created by a spli
 
 Errors (existing codes are reused wherever the meaning is the same):
 
-| Status | Code | When |
-| --- | --- | --- |
-| 404 | NOT_FOUND | source missing, soft deleted, or deleted during the request |
-| 403 | existing group-access codes | not a member or VIEWER |
-| 422 | VALIDATION_ERROR | body fails schema (quantity not positive, bad date) |
-| 422 | INSUFFICIENT_QUANTITY | quantity is not strictly less than the remaining quantity (message states both) |
-| 422 | LOCATION_GROUP_MISMATCH | `locationId` is not an active location of the same group |
-| 422 | IDEMPOTENCY_KEY_REUSED | `newStockId` exists but was not created by a split of this source with this quantity |
-| 409 | new code (see decisions) | the source's item was merged away on each of 3 attempts |
+| Status | Code                        | When                                                                                 |
+| ------ | --------------------------- | ------------------------------------------------------------------------------------ |
+| 404    | NOT_FOUND                   | source missing, soft deleted, or deleted during the request                          |
+| 403    | existing group-access codes | not a member or VIEWER                                                               |
+| 422    | VALIDATION_ERROR            | body fails schema (quantity not positive, bad date)                                  |
+| 422    | INSUFFICIENT_QUANTITY       | quantity is not strictly less than the remaining quantity (message states both)      |
+| 422    | LOCATION_GROUP_MISMATCH     | `locationId` is not an active location of the same group                             |
+| 422    | IDEMPOTENCY_KEY_REUSED      | `newStockId` exists but was not created by a split of this source with this quantity |
+| 409    | new code (see decisions)    | the source's item was merged away on each of 3 attempts                              |
 
 Whether a distinct code is wanted for "split off everything" is a decision below; the proposal reuses INSUFFICIENT_QUANTITY.
 

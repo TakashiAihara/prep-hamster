@@ -28,10 +28,10 @@ Status: proposal. Names of tables, columns, routes, request keys and error codes
 
 Proposed (names pending, see decisions):
 
-| Table | Columns | Notes |
-| --- | --- | --- |
-| tags | id uuid pk, group_id uuid fk groups, name text not null, normalized_name text not null, created_at, updated_at, deleted_at | the common `timestamps` helper; `name` is kept as typed, `normalized_name` is computed by the API (see below) and carries the unique index |
-| item_tags | item_id uuid fk items, tag_id uuid fk tags, created_at | primary key (item_id, tag_id); no deleted_at |
+| Table     | Columns                                                                                                                    | Notes                                                                                                                                      |
+| --------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| tags      | id uuid pk, group_id uuid fk groups, name text not null, normalized_name text not null, created_at, updated_at, deleted_at | the common `timestamps` helper; `name` is kept as typed, `normalized_name` is computed by the API (see below) and carries the unique index |
+| item_tags | item_id uuid fk items, tag_id uuid fk tags, created_at                                                                     | primary key (item_id, tag_id); no deleted_at                                                                                               |
 
 - `tags.normalized_name` is a plain `text not null` column that the API computes (one shared helper used by POST, PATCH rename, and the client's find-or-create match). It is not a generated column: Postgres has no NFKC normalization, `lower()` is not Unicode case folding, and a generated column needs an `IMMUTABLE` expression, so the normalization has to live in application code
 - Unique index on tags `(group_id, normalized_name)` where `deleted_at IS NULL`. Same shape as `items_group_barcode_idx`, which is a partial unique index. The index enforces whatever the helper produced, so every write path must go through the helper (a test pins POST and PATCH producing the same value for the same input)
@@ -46,28 +46,28 @@ Proposed (names pending, see decisions):
 
 Proposed routes (names pending). All under `/v1`, group access checked with `checkGroupAccess` (VIEWER for reads, EDITOR for writes), errors in the existing `{ error: { code, message } }` shape.
 
-| Method and path | Purpose | Success |
-| --- | --- | --- |
-| GET `/tags?groupId=` | list active tags with `itemCount`, ordered by `itemCount` desc then name | 200 `{ tags: [...] }` |
-| POST `/tags` | create `{ groupId, name }` | 201 `{ tag }` |
-| PATCH `/tags/{id}` | rename `{ name }` | 200 `{ tag }` |
-| DELETE `/tags/{id}` | soft delete and detach | 204 |
-| PUT `/items/{id}/tags` | replace the item's tag set with `{ tagIds: [...] }` | 200 `{ item, tags }` |
-| GET `/stocks?tagId=` | additional filter, via items like `categoryId` | 200 |
-| GET `/items?tagId=` | same for items | 200 |
+| Method and path        | Purpose                                                                  | Success               |
+| ---------------------- | ------------------------------------------------------------------------ | --------------------- |
+| GET `/tags?groupId=`   | list active tags with `itemCount`, ordered by `itemCount` desc then name | 200 `{ tags: [...] }` |
+| POST `/tags`           | create `{ groupId, name }`                                               | 201 `{ tag }`         |
+| PATCH `/tags/{id}`     | rename `{ name }`                                                        | 200 `{ tag }`         |
+| DELETE `/tags/{id}`    | soft delete and detach                                                   | 204                   |
+| PUT `/items/{id}/tags` | replace the item's tag set with `{ tagIds: [...] }`                      | 200 `{ item, tags }`  |
+| GET `/stocks?tagId=`   | additional filter, via items like `categoryId`                           | 200                   |
+| GET `/items?tagId=`    | same for items                                                           | 200                   |
 
 - PUT with a full set (not add and remove endpoints) keeps the mobile call to one request and makes retries idempotent
 - `tagIds` is a set: the API removes duplicate ids before anything else, so `[a, a]` is the same request as `[a]` (inserting both would violate the primary key of `item_tags`). The zod schema bounds the array only by a sanity limit (proposal: 100 ids) and does not carry the per-item cap, because a cap in the schema would turn every over-cap request into VALIDATION_ERROR and leave TAG_LIMIT_EXCEEDED unreachable. The cap is checked after deduplication, inside the transaction
 - `itemDtoSchema` gains `tagIds: string[]` so that the list screens do not need one request per item. `GET /items` already returns every item of a group, so the join is one extra query
 - Errors, following the 422 convention (validation and business-rule failures are 422, see `project_v1_1_0_decisions`):
 
-| Status | Code (proposed) | When |
-| --- | --- | --- |
-| 404 | NOT_FOUND | the item (PUT) or the tag (PATCH, DELETE) named in the URL is missing or soft deleted |
-| 422 | VALIDATION_ERROR | body fails the zod schema (name empty or over the length cap, more tag ids than the sanity bound, non-guid id) |
-| 422 | TAG_NAME_DUPLICATE | another active tag in the group has the same normalized name (mirrors `ITEM_BARCODE_DUPLICATE`, raised from the unique violation) |
-| 422 | TAG_GROUP_MISMATCH | a tag id in the request body is missing, deleted, or belongs to another group: one code and one message for all three, so the answer does not reveal whether a UUID exists in another group (mirrors `CATEGORY_GROUP_MISMATCH`). A tag deleted concurrently with the PUT gets the same answer |
-| 422 | TAG_LIMIT_EXCEEDED | the resulting set would exceed the per-item cap |
+| Status | Code (proposed)    | When                                                                                                                                                                                                                                                                                          |
+| ------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 404    | NOT_FOUND          | the item (PUT) or the tag (PATCH, DELETE) named in the URL is missing or soft deleted                                                                                                                                                                                                         |
+| 422    | VALIDATION_ERROR   | body fails the zod schema (name empty or over the length cap, more tag ids than the sanity bound, non-guid id)                                                                                                                                                                                |
+| 422    | TAG_NAME_DUPLICATE | another active tag in the group has the same normalized name (mirrors `ITEM_BARCODE_DUPLICATE`, raised from the unique violation)                                                                                                                                                             |
+| 422    | TAG_GROUP_MISMATCH | a tag id in the request body is missing, deleted, or belongs to another group: one code and one message for all three, so the answer does not reveal whether a UUID exists in another group (mirrors `CATEGORY_GROUP_MISMATCH`). A tag deleted concurrently with the PUT gets the same answer |
+| 422    | TAG_LIMIT_EXCEEDED | the resulting set would exceed the per-item cap                                                                                                                                                                                                                                               |
 
 - POST `/tags` is find-or-create from the user's point of view in the mobile flow: the client first matches the typed name against the loaded tag list, and only calls POST when there is no match. A race that creates the same name twice is resolved by the unique index (the loser gets 422 TAG_NAME_DUPLICATE and re-reads the list)
 
