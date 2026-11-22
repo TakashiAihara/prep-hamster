@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
-import { and, asc, eq, isNull } from "drizzle-orm"
-import { categories, items, productMasters, stocks } from "@prep-hamster/db"
+import { and, asc, eq, inArray, isNull } from "drizzle-orm"
+import { categories, itemTags, items, productMasters, stocks } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
@@ -14,6 +14,7 @@ import {
   productMasterDtoSchema,
   updateItemBodyDtoSchema,
 } from "./schemas"
+import { itemIdsWithTag, loadTagIdsByItem } from "./tag-queries"
 
 const IdParamSchema = z.object({
   id: z
@@ -25,6 +26,7 @@ const IdParamSchema = z.object({
 const ListQuerySchema = z.object({
   groupId: z.string().guid().openapi({ example: "00000000-0000-0000-0000-000000000000" }),
   categoryId: z.string().guid().optional(),
+  tagId: z.string().guid().optional(),
   barcode: z.string().optional(),
 })
 
@@ -48,13 +50,17 @@ const toProductMasterDto = (
   deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
 })
 
-const toItemDto = (row: typeof items.$inferSelect): z.infer<typeof itemDtoSchema> => ({
+export const toItemDto = (
+  row: typeof items.$inferSelect,
+  tagIds: string[],
+): z.infer<typeof itemDtoSchema> => ({
   id: row.id,
   groupId: row.groupId,
   productMasterId: row.productMasterId,
   name: row.name,
   barcode: row.barcode,
   categoryId: row.categoryId,
+  tagIds,
   defaultUnit: row.defaultUnit,
   manufacturer: row.manufacturer,
   memo: row.memo,
@@ -146,7 +152,7 @@ const listItemsRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["items"],
-  summary: "group 単位で item 一覧 (categoryId / barcode 絞り込み可)",
+  summary: "group 単位で item 一覧 (categoryId / tagId / barcode 絞り込み可)",
   middleware: [withGroupAccess({ in: "query", name: "groupId" })] as const,
   request: { query: ListQuerySchema },
   responses: {
@@ -342,20 +348,34 @@ const deleteItemRoute = createRoute({
 
 export const itemsRouter = new OpenAPIHono<AppEnv>()
   .openapi(listItemsRoute, async (c) => {
-    const { groupId, categoryId, barcode } = c.req.valid("query")
+    const { groupId, categoryId, tagId, barcode } = c.req.valid("query")
     const db = c.get("db")
 
     const conditions = [eq(items.groupId, groupId), isNull(items.deletedAt)]
     if (categoryId) conditions.push(eq(items.categoryId, categoryId))
+    if (tagId) conditions.push(inArray(items.id, itemIdsWithTag(db, tagId)))
     if (barcode) conditions.push(eq(items.barcode, barcode))
 
-    const rows = await db
-      .select()
-      .from(items)
-      .where(and(...conditions))
-      .orderBy(asc(items.name))
-
-    return c.json({ items: rows.map(toItemDto) }, 200)
+    // item の行と tagIds は同じスナップショットで読む。別々の文だと、間に入った PUT /items/{id}/tags が
+    // 古い updatedAt と新しい tagIds の組を作る (updatedAt で差分を取るクライアントが変更を取りこぼす)
+    const { rows, tagIdsByItem } = await db.transaction(
+      async (tx) => {
+        const found = await tx
+          .select()
+          .from(items)
+          .where(and(...conditions))
+          .orderBy(asc(items.name))
+        return {
+          rows: found,
+          tagIdsByItem: await loadTagIdsByItem(
+            tx,
+            found.map((r) => r.id),
+          ),
+        }
+      },
+      { isolationLevel: "repeatable read" },
+    )
+    return c.json({ items: rows.map((r) => toItemDto(r, tagIdsByItem.get(r.id) ?? [])) }, 200)
   })
   .openapi(createItemRoute, async (c) => {
     const body = c.req.valid("json")
@@ -397,7 +417,7 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
       if (!created) {
         throw new Error("item insert returned no row")
       }
-      return c.json({ item: toItemDto(created) }, 201)
+      return c.json({ item: toItemDto(created, []) }, 201)
     } catch (err) {
       // 並行リクエストで事前 check を双方通過した場合に DB の uniqueIndex で 23505。
       // 500 として扱わずユーザーに 422 ITEM_BARCODE_DUPLICATE で返す。
@@ -426,7 +446,22 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
       return c.json(access.body, access.status)
     }
 
-    return c.json({ item: toItemDto(row) }, 200)
+    // 行と tagIds は同じスナップショットで読み直す (list と同じ理由)
+    const snapshot = await db.transaction(
+      async (tx) => {
+        const [fresh] = await tx
+          .select()
+          .from(items)
+          .where(and(eq(items.id, id), isNull(items.deletedAt)))
+          .limit(1)
+        return fresh ? { fresh, tagIdsByItem: await loadTagIdsByItem(tx, [id]) } : null
+      },
+      { isolationLevel: "repeatable read" },
+    )
+    if (!snapshot) {
+      return c.json({ error: { code: "NOT_FOUND", message: "item が見つかりません" } }, 404)
+    }
+    return c.json({ item: toItemDto(snapshot.fresh, snapshot.tagIdsByItem.get(id) ?? []) }, 200)
   })
   .openapi(patchItemRoute, async (c) => {
     const { id } = c.req.valid("param")
@@ -482,7 +517,8 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
       if (!row) {
         return c.json({ error: { code: "NOT_FOUND", message: "item が見つかりません" } }, 404)
       }
-      return c.json({ item: toItemDto(row) }, 200)
+      const tagIdsByItem = await loadTagIdsByItem(db, [row.id])
+      return c.json({ item: toItemDto(row, tagIdsByItem.get(row.id) ?? []) }, 200)
     } catch (err) {
       if (isUniqueViolation(err)) {
         return c.json(BARCODE_DUPLICATE_RESPONSE, 422)
@@ -528,11 +564,19 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
 
     // PATCH と同様 updatedAt も touch する。差分同期 / キャッシュ無効化が
     // updatedAt を見るクライアントから論理削除を検知できるようにするため。
+    // 行を押さえてから外す。並行する PUT /items/{id}/tags は同じ行を FOR NO KEY UPDATE で
+    // 取るので、削除済みの item に tag が付き直ることはない。
     const now = new Date()
-    await db
-      .update(items)
-      .set({ deletedAt: now, updatedAt: now })
-      .where(and(eq(items.id, id), isNull(items.deletedAt)))
+    await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ id: items.id })
+        .from(items)
+        .where(and(eq(items.id, id), isNull(items.deletedAt)))
+        .for("no key update")
+      if (!locked) return
+      await tx.update(items).set({ deletedAt: now, updatedAt: now }).where(eq(items.id, id))
+      await tx.delete(itemTags).where(eq(itemTags.itemId, id))
+    })
 
     return c.body(null, 204)
   })
@@ -567,7 +611,10 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
         : null
       return c.json(
         {
-          item: toItemDto(existingItem),
+          item: toItemDto(
+            existingItem,
+            (await loadTagIdsByItem(db, [existingItem.id])).get(existingItem.id) ?? [],
+          ),
           productMaster: productMaster ? toProductMasterDto(productMaster) : null,
           productLookup: "existing" as const,
         },
@@ -600,7 +647,7 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
       }
       return c.json(
         {
-          item: toItemDto(created),
+          item: toItemDto(created, []),
           productMaster: null,
           productLookup: "miss" as const,
         },
@@ -672,7 +719,7 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
 
     return c.json(
       {
-        item: toItemDto(createdItem),
+        item: toItemDto(createdItem, []),
         productMaster: toProductMasterDto(pm),
         productLookup: "hit" as const,
       },

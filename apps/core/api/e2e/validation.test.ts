@@ -179,7 +179,7 @@ test("every operation with a JSON request body declares 400, 413 and 415 as ApiE
       .filter(([, op]) => op.requestBody?.content?.["application/json"])
       .map(([method, op]) => ({ name: `${method.toUpperCase()} ${path}`, op })),
   )
-  expect(jsonBodyOps.length).toBe(18)
+  expect(jsonBodyOps.length).toBe(21)
 
   const missing = jsonBodyOps.flatMap(({ name, op }) =>
     ["400", "413", "415"]
@@ -237,7 +237,7 @@ test("every /v1 operation declares 409 and 503 as ApiError in /openapi.json", as
         op,
       })),
     )
-  expect(v1Ops.length).toBe(35)
+  expect(v1Ops.length).toBe(40)
 
   const missing = v1Ops.flatMap(({ name, op }) =>
     ["409", "503"]

@@ -22,6 +22,10 @@ export default function RootLayout() {
             name="locations"
             options={{ presentation: "modal", headerShown: true, title: "保管場所" }}
           />
+          <Stack.Screen
+            name="tags"
+            options={{ presentation: "modal", headerShown: true, title: "タグ" }}
+          />
         </Stack>
       </CurrentGroupProvider>
     </AuthStatusProvider>

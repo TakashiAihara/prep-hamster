@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgEnum,
+  primaryKey,
   pgTable,
   real,
   text,
@@ -145,6 +146,25 @@ export const categories = pgTable("categories", {
   ...timestamps,
 })
 
+export const tags = pgTable(
+  "tags",
+  {
+    id: uuid("id").primaryKey(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id),
+    name: text("name").notNull(),
+    // API が trim + NFKC + lowercase で作る。partial unique index の対象 (同名タグの重複防止)。
+    normalizedName: text("normalized_name").notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("tags_group_normalized_name_idx")
+      .on(t.groupId, t.normalizedName)
+      .where(sql`${t.deletedAt} IS NULL`),
+  ],
+)
+
 export const productMasters = pgTable(
   "product_masters",
   {
@@ -192,6 +212,20 @@ export const items = pgTable(
         sql`${t.productMasterId} IS NULL AND ${t.barcode} IS NOT NULL AND ${t.deletedAt} IS NULL`,
       ),
   ],
+)
+
+export const itemTags = pgTable(
+  "item_tags",
+  {
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id),
+    tagId: uuid("tag_id")
+      .notNull()
+      .references(() => tags.id),
+    createdAt: tsCol("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.itemId, t.tagId] }), index("item_tags_tag_idx").on(t.tagId)],
 )
 
 export const stocks = pgTable(
@@ -330,6 +364,7 @@ export const groupsRelations = relations(groups, ({ one, many }) => ({
   invitations: many(invitations),
   locations: many(locations),
   categories: many(categories),
+  tags: many(tags),
   items: many(items),
   stocks: many(stocks),
   stockEvents: many(stockEvents),
@@ -378,7 +413,18 @@ export const itemsRelations = relations(items, ({ one, many }) => ({
   }),
   category: one(categories, { fields: [items.categoryId], references: [categories.id] }),
   stocks: many(stocks),
+  itemTags: many(itemTags),
   shoppingListItems: many(shoppingListItems),
+}))
+
+export const tagsRelations = relations(tags, ({ one, many }) => ({
+  group: one(groups, { fields: [tags.groupId], references: [groups.id] }),
+  itemTags: many(itemTags),
+}))
+
+export const itemTagsRelations = relations(itemTags, ({ one }) => ({
+  item: one(items, { fields: [itemTags.itemId], references: [items.id] }),
+  tag: one(tags, { fields: [itemTags.tagId], references: [tags.id] }),
 }))
 
 export const stocksRelations = relations(stocks, ({ one, many }) => ({
