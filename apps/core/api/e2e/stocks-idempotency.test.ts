@@ -318,8 +318,8 @@ test("a discard duplicate that collides at the event insert is answered from the
   expect(await eventsOf(stockId)).toHaveLength(1)
 })
 
-test("resending a quantity that a real column cannot store exactly still replays", async () => {
-  // quantity_delta は単精度なので、保存値と送った倍精度の値は === では一致しない
+test("resending a quantity that numeric(12,3) cannot store exactly still replays", async () => {
+  // quantity_delta は小数第 3 位に丸めて保存するので、保存値と送った値は === では一致しない
   const { stockId, post } = await setup(10)
 
   for (const quantityDelta of [0.123456789, 1 / 3]) {
@@ -334,16 +334,28 @@ test("resending a quantity that a real column cannot store exactly still replays
   expect(await eventsOf(stockId)).toHaveLength(2)
 })
 
-test("a quantity that differs beyond the real column precision is still treated as different", async () => {
+test("a quantity that differs at the stored precision is still treated as different", async () => {
+  const { stockId, post } = await setup(10)
+
+  await post(stockId, "consume", { quantityDelta: 0.5, eventId: EVENT_ID })
+  const res = await post(stockId, "consume", { quantityDelta: 0.501, eventId: EVENT_ID })
+
+  expect(res.status).toBe(422)
+})
+
+test("a resend whose quantity rounds to the same stored value replays", async () => {
+  // numeric(12,3) では 0.5 と 0.5001 はどちらも -0.500 として保存されるので、
+  // DB の中での一致判定では同じ再送として扱う
   const { stockId, post } = await setup(10)
 
   await post(stockId, "consume", { quantityDelta: 0.5, eventId: EVENT_ID })
   const res = await post(stockId, "consume", { quantityDelta: 0.5001, eventId: EVENT_ID })
 
-  expect(res.status).toBe(422)
+  expect(res.status).toBe(200)
+  expect(await eventsOf(stockId)).toHaveLength(1)
 })
 
-test("a quantity outside the real column range is rejected with 422 before touching the database", async () => {
+test("a quantity that floating point cannot represent is rejected with 422 before touching the database", async () => {
   const { stockId, post } = await setup(10)
 
   for (const quantityDelta of [1e39, 1e-46]) {

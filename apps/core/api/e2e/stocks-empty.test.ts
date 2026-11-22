@@ -44,13 +44,13 @@ test("GET /v1/stocks leaves out used-up stocks by default", async () => {
   expect(await ids("")).toEqual([alive])
 })
 
-test("GET /v1/stocks treats a residue below the sixth decimal as used up", async () => {
-  // 端末が数量 0 とみなす基準 (小数第 6 位で丸めて 0 以下) と揃える
+test("GET /v1/stocks treats a residue below the stored precision as used up", async () => {
+  // numeric(12,3) は小数第 4 位以下を丸めるので、0.0004 は 0.000 として保存される
   const { ids, seed } = await setup()
-  await seed(0.0000004)
-  const smallest = await seed(0.000001)
-  // 切り捨てではなく四捨五入で比べる (0.0000006 は 0.000001 に丸まって残る)
-  const roundedUp = await seed(0.0000006)
+  await seed(0.0004)
+  const smallest = await seed(0.001)
+  // 切り捨てではなく四捨五入で比べる (0.0019 は 0.002 に丸まって残る)
+  const roundedUp = await seed(0.0019)
 
   expect(await ids("")).toEqual([smallest, roundedUp].toSorted())
 })

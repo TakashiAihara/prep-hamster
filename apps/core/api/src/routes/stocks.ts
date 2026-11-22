@@ -102,13 +102,13 @@ async function findRecordedDeltaEvent(
     reason: string | null
   },
 ): Promise<RecordedDeltaEvent> {
-  // quantity_delta は real (float4) で、保存値は送られた倍精度の値と一致しない。DB の表示桁数の設定
-  // (extra_float_digits) によっては読み出しでさらに丸まり、JS 側では元の float4 にも戻せない。
-  // 一致は DB の中で判定する (型の付かない引数は列の型 real として比べられる)
+  // quantity_delta は numeric(12,3) で、保存値は送られた値を小数第 3 位に丸めたもの。
+  // 型の付かない引数は列の型 numeric (丸めなし) として比べられてしまうので、
+  // 保存時と同じ丸めを掛けてから DB の中で判定する
   const [found] = await db
     .select({
       event: stockEvents,
-      sameQuantity: sql<boolean>`${stockEvents.quantityDelta} = ${expected.quantityDelta}`,
+      sameQuantity: sql<boolean>`${stockEvents.quantityDelta} = ${expected.quantityDelta}::numeric(12,3)`,
     })
     .from(stockEvents)
     .where(eq(stockEvents.id, eventId))
