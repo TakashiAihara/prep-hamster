@@ -278,8 +278,8 @@ erDiagram
 - FK `group_id` → `groups`.`id`
 - FK `product_master_id` → `product_masters`.`id`
 - FK `category_id` → `categories`.`id`
-- INDEX `items_group_barcode_idx` (`group_id`, `barcode`) UNIQUE WHERE "items"."product_master_id" IS NULL AND "items"."barcode" IS NOT NULL
-- INDEX `items_group_product_master_idx` (`group_id`, `product_master_id`) UNIQUE WHERE "items"."product_master_id" IS NOT NULL
+- INDEX `items_group_barcode_idx` (`group_id`, `barcode`) UNIQUE WHERE "items"."product_master_id" IS NULL AND "items"."barcode" IS NOT NULL AND "items"."deleted_at" IS NULL
+- INDEX `items_group_product_master_idx` (`group_id`, `product_master_id`) UNIQUE WHERE "items"."product_master_id" IS NOT NULL AND "items"."deleted_at" IS NULL
 
 ### `locations`
 
