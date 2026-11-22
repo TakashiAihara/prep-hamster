@@ -33,8 +33,8 @@ type Pending = { kind: "rename" | "delete"; id: string }
 type ActionMessage = { kind: "ok" | "error"; text: string }
 
 // 場所管理画面 (/locations)。root の Stack の modal として /groups から開く。
-// rename / delete は EDITOR 以上。role をクライアントが持たないのでボタンは常に出し、
-// 403 は API の message をそのまま出す (グループ招待ボタンと同じ既存パターン)。
+// rename / delete は EDITOR 以上。ボタンは role に関わらず出し、
+// 403 は API の message をそのまま出す。
 // /groups と同じく、未サインインやグループ未確定のまま deep link で開かれたら入口へ戻す
 export default function LocationsScreen() {
   const { status, group } = useCurrentGroup()

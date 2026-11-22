@@ -90,6 +90,24 @@ test("GET /v1/groups returns only groups the user is a member of", async () => {
   expect(body.groups[0]?.name).toBe("Alice's Home")
 })
 
+test("GET /v1/groups returns the caller's role for each group", async () => {
+  const userId = await seedUser()
+  const ownedGroupId = await seedGroupWithMembership(userId, "Owned")
+  const sharedGroupId = await seedGroupWithMembership(await seedUser("other"), "Shared")
+  await seedMembership(userId, sharedGroupId, "EDITOR")
+
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const res = await app.request("/v1/groups", {
+    headers: { authorization: await bearer(userId) },
+  })
+
+  expect(res.status).toBe(200)
+  const body = (await res.json()) as { groups: { id: string; role: string }[] }
+  const roleById = new Map(body.groups.map((g) => [g.id, g.role]))
+  expect(roleById.get(ownedGroupId)).toBe("OWNER")
+  expect(roleById.get(sharedGroupId)).toBe("EDITOR")
+})
+
 test("GET /v1/groups/:id by non-member returns 403", async () => {
   const aliceId = await seedUser("Alice")
   const bobId = await seedUser("Bob")
@@ -120,9 +138,10 @@ test("PATCH /v1/groups/:id by OWNER returns 200 and updates name", async () => {
   })
 
   expect(res.status).toBe(200)
-  const body = (await res.json()) as { group: { id: string; name: string } }
+  const body = (await res.json()) as { group: { id: string; name: string; role: string } }
   expect(body.group.id).toBe(groupId)
   expect(body.group.name).toBe("New Name")
+  expect(body.group.role).toBe("OWNER")
 })
 
 test("PATCH /v1/groups/:id with empty body returns 422 and updates nothing", async () => {

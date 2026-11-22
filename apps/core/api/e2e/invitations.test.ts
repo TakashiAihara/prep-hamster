@@ -153,8 +153,114 @@ test("accept by existing member returns 409 ALREADY_MEMBER", async () => {
     headers: { authorization: await bearer(editorId) },
   })
   expect(res.status).toBe(409)
-  const body = (await res.json()) as { error: { code: string } }
+  const body = (await res.json()) as {
+    error: { code: string; details?: { groupId?: string } }
+  }
   expect(body.error.code).toBe("ALREADY_MEMBER")
+  // client が既参加の group を選び直せるよう、details に groupId が載る
+  expect(body.error.details?.groupId).toBe(groupId)
+})
+
+test("DELETE /v1/groups/:groupId/invitations revokes unused tokens", async () => {
+  const ownerId = await seedUser("owner")
+  const newcomerId = await seedUser("newcomer")
+  const groupId = await seedGroupWithMembership(ownerId)
+  const created = await createInvitation(ownerId, groupId)
+
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const res = await app.request(`/v1/groups/${groupId}/invitations`, {
+    method: "DELETE",
+    headers: { authorization: await bearer(ownerId) },
+  })
+  expect(res.status).toBe(204)
+
+  // 失効した token は accept で 404 になる
+  const accept = await app.request(`/v1/invitations/${created.invitation.token}/accept`, {
+    method: "POST",
+    headers: { authorization: await bearer(newcomerId) },
+  })
+  expect(accept.status).toBe(404)
+})
+
+test("DELETE /v1/groups/:groupId/invitations keeps used tokens and other groups' tokens", async () => {
+  const ownerId = await seedUser("owner")
+  const userA = await seedUser("a")
+  const userB = await seedUser("b")
+  const groupId = await seedGroupWithMembership(ownerId)
+  const otherGroupId = await seedGroupWithMembership(ownerId, "Other")
+
+  const used = await createInvitation(ownerId, groupId)
+  const unused = await createInvitation(ownerId, groupId)
+  const other = await createInvitation(ownerId, otherGroupId)
+
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const firstAccept = await app.request(`/v1/invitations/${used.invitation.token}/accept`, {
+    method: "POST",
+    headers: { authorization: await bearer(userA) },
+  })
+  expect(firstAccept.status).toBe(201)
+
+  const res = await app.request(`/v1/groups/${groupId}/invitations`, {
+    method: "DELETE",
+    headers: { authorization: await bearer(ownerId) },
+  })
+  expect(res.status).toBe(204)
+
+  // 使用済み token は履歴として残り INVITATION_USED、未使用は 404、別 group の token は生きている
+  const usedAccept = await app.request(`/v1/invitations/${used.invitation.token}/accept`, {
+    method: "POST",
+    headers: { authorization: await bearer(userB) },
+  })
+  expect(usedAccept.status).toBe(409)
+  const usedBody = (await usedAccept.json()) as { error: { code: string } }
+  expect(usedBody.error.code).toBe("INVITATION_USED")
+
+  const unusedAccept = await app.request(`/v1/invitations/${unused.invitation.token}/accept`, {
+    method: "POST",
+    headers: { authorization: await bearer(userB) },
+  })
+  expect(unusedAccept.status).toBe(404)
+
+  const otherAccept = await app.request(`/v1/invitations/${other.invitation.token}/accept`, {
+    method: "POST",
+    headers: { authorization: await bearer(userB) },
+  })
+  expect(otherAccept.status).toBe(201)
+})
+
+test("DELETE /v1/groups/:groupId/invitations by EDITOR returns 403 and keeps tokens", async () => {
+  const ownerId = await seedUser("owner")
+  const editorId = await seedUser("editor")
+  const newcomerId = await seedUser("newcomer")
+  const groupId = await seedGroupWithMembership(ownerId)
+  await seedMembership(editorId, groupId, "EDITOR")
+  const created = await createInvitation(ownerId, groupId)
+
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const res = await app.request(`/v1/groups/${groupId}/invitations`, {
+    method: "DELETE",
+    headers: { authorization: await bearer(editorId) },
+  })
+  expect(res.status).toBe(403)
+
+  // 403 なので token は失効していない
+  const accept = await app.request(`/v1/invitations/${created.invitation.token}/accept`, {
+    method: "POST",
+    headers: { authorization: await bearer(newcomerId) },
+  })
+  expect(accept.status).toBe(201)
+})
+
+test("DELETE /v1/groups/:groupId/invitations with no outstanding tokens returns 204", async () => {
+  const ownerId = await seedUser("owner")
+  const groupId = await seedGroupWithMembership(ownerId)
+
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const res = await app.request(`/v1/groups/${groupId}/invitations`, {
+    method: "DELETE",
+    headers: { authorization: await bearer(ownerId) },
+  })
+  expect(res.status).toBe(204)
 })
 
 test("accept on non-existent token returns 404", async () => {

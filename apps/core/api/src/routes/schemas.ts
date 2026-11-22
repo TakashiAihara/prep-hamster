@@ -63,10 +63,13 @@ export const requireUpdatableField = <T extends z.ZodType<Record<string, unknown
     })
     .openapi({ minProperties: 1 })
 
+// role は「呼び出したユーザーの、その group での membership の role」。
+// group は member にしか返さないので常に値がある。
 export const groupDtoSchema = z
   .object({
     id: z.string().guid(),
     name: z.string(),
+    role: roleSchema,
     createdBy: z.string().guid(),
     createdAt: z.string().datetime({ offset: true }),
     updatedAt: z.string().datetime({ offset: true }),

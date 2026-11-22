@@ -36,7 +36,8 @@
 
 ## 招待 (D-13)
 
-- 発行: M-10 の「このグループに招待する」が `POST /v1/groups/{groupId}/invitations` を `role: "EDITOR"` (期限は API の既定の 7 日) で呼び、`Share.share` で招待コード (token) と使い方の 1 文を送る。OWNER 以外は API が 403 を返すので、その message を出す。役割の選択 (VIEWER) は付けない
-- 受諾: M-10 と「グループを作る」画面に「招待コードで参加」の入力を置く。貼られた文字列から UUID を取り出して (共有シートの本文をまるごと貼っても通るように) `POST /v1/invitations/{token}/accept` を呼ぶ。成功したら一覧を取り直し、参加したグループを選ぶ。失敗は API の `error.message` (日本語) を出す。UUID が見つからなければ API を呼ばずに「招待コードが見つかりません」
+- 発行: M-10 の「このグループに招待する」が `POST /v1/groups/{groupId}/invitations` を `role: "EDITOR"` (期限は API の既定の 7 日) で呼び、`Share.share` で招待コード (token) と使い方の 1 文を送る。ボタンは `GET /v1/groups` が返す自分の role が OWNER のときだけ出す (一覧の取得後に role が変わっていれば API が 403 を返し、その message を出す)。役割の選択 (VIEWER) は付けない
+- 受諾: M-10 と「グループを作る」画面に「招待コードで参加」の入力を置く。貼られた文字列から UUID を取り出して (共有シートの本文をまるごと貼っても通るように) `POST /v1/invitations/{token}/accept` を呼ぶ。成功したら一覧を取り直し、参加したグループを選ぶ。既に member のグループのコードなら 409 ALREADY_MEMBER の `details.groupId` でそのグループを選ぶ。その他の失敗は API の `error.message` (日本語) を出す。UUID が見つからなければ API を呼ばずに「招待コードが見つかりません」
+- 失効: `DELETE /v1/groups/{groupId}/invitations` でそのグループの未使用トークンをまとめて失効できる (OWNER のみ、使用済みは履歴として残る)。画面からの導線はまだ無い
 - 取り出しは純関数 `parseInviteCode(text)` に置いて unit で押さえる
 - 深リンク (`prep-hamster://invite/<token>`) は dev build / 本番 build を配るようになったら足す

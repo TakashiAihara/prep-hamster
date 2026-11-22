@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react"
 import { getApiClient } from "./api"
-import { apiErrorMessage } from "./api-error"
+import { apiErrorMessageFromBody, alreadyMemberGroupId } from "./api-error"
 import { useAuthStatus } from "./auth-status"
 import { pickCurrentGroup } from "./current-group-pick"
 import {
@@ -135,17 +135,30 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
       if (!token) throw new Error("招待コードが見つかりません")
       const startedIn = session.current
       const res = await getApiClient().v1.invitations[":token"].accept.$post({ param: { token } })
-      if (!res.ok) {
-        throw new Error(await apiErrorMessage(res, `参加できませんでした (HTTP ${res.status})`))
+
+      // 201 は参加した group、409 ALREADY_MEMBER は既に入っている group を選ぶ (details.groupId)
+      let groupId: string
+      if (res.ok) {
+        groupId = (await res.json()).membership.groupId
+      } else {
+        // 本文は 1 回しか読めないので、code/details と message の両方をここで取り出す
+        const body: unknown = await res.json().catch(() => null)
+        const alreadyGroupId = alreadyMemberGroupId(body)
+        if (alreadyGroupId === null) {
+          throw new Error(
+            apiErrorMessageFromBody(body, `参加できませんでした (HTTP ${res.status})`),
+          )
+        }
+        groupId = alreadyGroupId
       }
-      const { membership } = await res.json()
+
       // 待つ間にサインアウトしていたら、次のユーザーの端末の選択に混ぜない。
       // 画面はサインアウトで入口へ戻っているので、呼び出し側には閉じさせない ("recovering")
       if (startedIn !== session.current) return "recovering"
-      // 参加も選択の 1 つ。同時に走っている作成に、参加したグループの選択を奪わせない
+      // 参加 (と既参加 group の選び直し) も選択の 1 つ。同時に走っている作成に、選んだグループの選択を奪わせない
       selection.current += 1
       // reload() は状態を loading に戻し、開いている切替画面を入口へ飛ばしてしまう (onJoined の back と二重になる)。
-      // そこで一覧だけ取り直し、loading を挟まずに参加したグループを選ぶ。
+      // そこで一覧だけ取り直し、loading を挟まずに選んだグループを選ぶ。
       // 一覧が取れなければ (HTTP の失敗も通信の例外も)、選ぶ id だけ残して reload() に任せ、"recovering" で back を止める
       let groups: CurrentGroupGroup[] | null = null
       try {
@@ -156,13 +169,13 @@ export function CurrentGroupProvider({ children }: { children: ReactNode }) {
       }
       if (startedIn !== session.current) return "recovering"
       if (!groups) {
-        await AsyncStorage.setItem(STORED_ID_KEY, membership.groupId).catch(() => {})
+        await AsyncStorage.setItem(STORED_ID_KEY, groupId).catch(() => {})
         reload()
         return "recovering"
       }
-      setFetched(afterJoin(groups, membership.groupId))
+      setFetched(afterJoin(groups, groupId))
       // 残せなくても今のセッションでは選べているので、失敗は握る
-      await AsyncStorage.setItem(STORED_ID_KEY, membership.groupId).catch(() => {})
+      await AsyncStorage.setItem(STORED_ID_KEY, groupId).catch(() => {})
       return "joined"
     },
     [reload],

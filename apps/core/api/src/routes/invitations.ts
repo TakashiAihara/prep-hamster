@@ -80,6 +80,31 @@ const createInvitationRoute = createRoute({
   },
 })
 
+const deleteInvitationsRoute = createRoute({
+  method: "delete",
+  path: "/groups/{groupId}/invitations",
+  tags: ["invitations"],
+  summary: "group の未使用招待トークンをすべて失効 (OWNER のみ)",
+  middleware: [withGroupAccess({ in: "param", name: "groupId" }, "OWNER")] as const,
+  request: { params: GroupParamSchema },
+  responses: {
+    ...authErrorResponses,
+    204: { description: "失効成功 (対象が無くても成功)" },
+    401: {
+      description: "未認証",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    403: {
+      description: "OWNER でない / 未参加",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+    422: {
+      description: "パラメータ不正",
+      content: { "application/json": { schema: errorResponseSchema } },
+    },
+  },
+})
+
 const acceptInvitationRoute = createRoute({
   method: "post",
   path: "/invitations/{token}/accept",
@@ -146,6 +171,27 @@ export const invitationsRouter = new OpenAPIHono<AppEnv>()
 
     return c.json({ invitation: toInvitationDto(created) }, 201)
   })
+  .openapi(deleteInvitationsRoute, async (c) => {
+    const { groupId } = c.req.valid("param")
+    const db = c.get("db")
+    const now = new Date()
+
+    // 発行のたびに新しい token が増えるので「まとめて失効」にする。
+    // 使用済み (usedAt あり) は履歴として残し、未使用のものだけ soft delete する。
+    // 失効後の accept は deletedAt フィルタで 404 になる。
+    await db
+      .update(invitations)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(invitations.groupId, groupId),
+          isNull(invitations.usedAt),
+          isNull(invitations.deletedAt),
+        ),
+      )
+
+    return c.body(null, 204)
+  })
   .openapi(acceptInvitationRoute, async (c) => {
     const { token } = c.req.valid("param")
     const db = c.get("db")
@@ -195,6 +241,8 @@ export const invitationsRouter = new OpenAPIHono<AppEnv>()
           error: {
             code: "ALREADY_MEMBER",
             message: "既に当該 group の member です",
+            // 既に入っている group をそのまま選べるよう、client が switch 先を特定できるようにする
+            details: { groupId: invitation.groupId },
           },
         },
         409,

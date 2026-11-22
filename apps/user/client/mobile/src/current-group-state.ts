@@ -1,4 +1,11 @@
-export type CurrentGroupGroup = { id: string; name: string; createdAt: string }
+// role は API の group DTO が返す「自分の、その group での role」。
+// OWNER 判定 (招待ボタンの出し分け等) に使う。
+export type CurrentGroupGroup = {
+  id: string
+  name: string
+  role: "OWNER" | "EDITOR" | "VIEWER"
+  createdAt: string
+}
 
 export type Fetched =
   | { status: "loading" }
