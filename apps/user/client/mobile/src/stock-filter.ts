@@ -26,10 +26,17 @@ export function filterStockRows(rows: StockListItem[], filter: StockListFilter):
   })
 }
 
+// Hermes には Array#toSorted (ES2023) が無い。unicorn/no-array-sort は toSorted を要求するが
+// 実行環境が持たないので、コピーして sort するヘルパー 1 箇所に寄せる。
+function sortedCopy<T>(rows: readonly T[], compare: (a: T, b: T) => number): T[] {
+  // oxlint-disable-next-line unicorn/no-array-sort -- Hermes lacks Array#toSorted; the copy keeps the input untouched
+  return [...rows].sort(compare)
+}
+
 // 行に出している期限 (useByDate 優先、無ければ bestBeforeDate) の昇順。期限なしは末尾。
-// 同じ期限どうしは入力の順を保つ (toSorted は安定)。
+// 同じ期限どうしは入力の順を保つ (sort は安定)。
 export function sortStockRowsByExpiry(rows: StockListItem[]): StockListItem[] {
-  return rows.toSorted((a, b) => {
+  return sortedCopy(rows, (a, b) => {
     const da = a.useByDate ?? a.bestBeforeDate
     const db = b.useByDate ?? b.bestBeforeDate
     if (da === db) return 0
@@ -57,7 +64,13 @@ export function stockFilterOptions(rows: StockListItem[]): {
   }
   const byName = (a: StockFilterOption, b: StockFilterOption) => a.name.localeCompare(b.name, "ja")
   return {
-    categories: [...categories].map(([id, name]) => ({ id, name })).toSorted(byName),
-    locations: [...locations].map(([id, name]) => ({ id, name })).toSorted(byName),
+    categories: sortedCopy(
+      [...categories].map(([id, name]) => ({ id, name })),
+      byName,
+    ),
+    locations: sortedCopy(
+      [...locations].map(([id, name]) => ({ id, name })),
+      byName,
+    ),
   }
 }
