@@ -2,7 +2,7 @@
 
 ## JAN code structure
 
-Notes on how a JAN code is built. `isValidJan` validates a code and `computeJanCheckDigit` computes its check digit; both are exported from this package.
+Notes on how a JAN code is built. `isValidJan` and `computeJanCheckDigit` are exported from this package. `isValidJan` checks only the length (13 or 8), that every character is a digit, and the check digit. It does not check the 45 / 49 prefix or whether the prefix is lent to a company, so `0000000000000` is valid for it.
 
 Source: a 2023 note from the predecessor repo (preppy), checked against GS1 Japan's page on GS1 company prefixes and GTIN (https://www.gs1jp.org/code/jan/about_jan.html, read 2026-11-22). Points the GS1 Japan page does not cover are marked as from the original note.
 
@@ -68,9 +68,10 @@ The original note also says the short type is used only within Japan and that it
 
 ## Related: GTIN-14 (not a JAN code)
 
-- A product code for shipping boxes of grouped packaging
-- 14 digits
-- Contains the 12 digits of a GTIN-13 other than its check digit
-- The first digit is an indicator that expresses the packaging state
-- Companies may assign it freely
-- The check digit is recalculated
+GS1 Japan's page on GTIN for grouped packaging (https://www.gs1jp.org/code/jan/itf.html, read 2026-11-22) describes it as follows.
+
+- 14 digits: a 1-digit indicator, the first 12 digits of the GTIN-13 of the unit inside, and a recalculated check digit
+- Indicators 1 to 8 are for grouped packaging. They tell apart different packing forms, inner and outer boxes, and regular and promotional units, and are used in order from 1 each time a new grouping needs its own code
+- Indicator 9 is for variable-measure products and is not used for ordinary grouped packaging
+- Example from GS1 Japan: unit GTIN `4512345678906`, grouped packaging GTIN `14512345678903`
+- A leading 0 added to a GTIN-13 to make 14 digits for an ITF symbol is not an indicator, and the result is not a grouped packaging GTIN
