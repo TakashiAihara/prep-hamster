@@ -1,0 +1,114 @@
+model {
+  user = person 'Household member' {
+    description 'Manages stock (location, quantity, expiry) shared in a group'
+  }
+  operator = person 'Operator' {
+    description 'Runs the API, the migrations and the notification job'
+  }
+
+  prep = system 'prep-hamster' {
+    description 'Shared household stock management'
+
+    phone = host 'Android device' {
+      icon tech:android
+      mobile = process 'Mobile app' {
+        icon tech:react
+        description 'Expo (Managed) app: stock list, barcode scan, groups, locations'
+        router = module 'Expo Router screens' 'app/ (tabs, add, stocks, auth)'
+        query = module 'TanStack Query hooks' 'use-stocks, use-stock-actions, ...'
+        authClient = module 'Auth session' 'supabase.ts / auth.ts: Google sign-in, access token'
+        camera = module 'expo-camera' 'JAN (EAN-13) barcode reading'
+      }
+    }
+
+    pc = host 'Operator machine' {
+      icon tech:bun
+      cli = process 'user CLI' {
+        icon tech:bun
+        description 'apps/user/client/cli: login, stock add / list'
+      }
+      adminCli = process 'administrator CLI' {
+        description 'apps/administrator/client/cli'
+      }
+    }
+
+    coolify = host 'Coolify host' {
+      icon tech:docker
+      description 'Container host that runs the API image'
+      api = process 'Core API' {
+        icon tech:hono
+        description 'Hono on Bun, one container, GET /health probed'
+        authMw = module 'Auth middleware' 'Verifies the Supabase access token with JWKS, creates the users row on first request'
+        routes = module 'REST routes /v1' 'groups, locations, categories, items, stocks, push-tokens, memberships, invitations'
+        openapi = module 'Validation and OpenAPI' 'Zod request validation, 422 VALIDATION_ERROR'
+      }
+      expiryJob = process 'Expiry notification job' {
+        #job
+        description 'One-shot bun script (job:expiry-notify), run on a schedule'
+        selector = module 'Expiring stock selector' 'Per user: notification_settings (default 7 days before), one push per day'
+        sender = module 'Expo push sender' 'Sends batches, removes DeviceNotRegistered tokens'
+      }
+    }
+
+    lib = system 'Shared packages' {
+      schemaPkg = module '@prep-hamster/schema' 'Zod schemas and types, single source of truth'
+      dbPkg = module '@prep-hamster/db' 'Drizzle schema and migrations'
+      clientPkg = module '@prep-hamster/api-client' 'Typed Hono hc client shared by mobile and CLI'
+      janPkg = module '@prep-hamster/jan-api' 'JAN lookup: Yahoo provider, stub provider'
+      syncPkg = module '@prep-hamster/sync' 'Offline sync and conflict resolution' { #planned }
+    }
+
+    adminWeb = process 'Administrator web' {
+      #planned
+      description 'TanStack Start + shadcn/ui, not implemented yet'
+    }
+  }
+
+  supabase = external 'Supabase (Tokyo region)' {
+    icon tech:supabase
+    description 'Managed service'
+    auth = module 'Supabase Auth' 'OAuth only (Google), issues ES256 / RS256 access tokens, publishes JWKS'
+    pg = store 'Postgres' 'users, groups, memberships, locations, items, stocks, push_tokens, notification_settings, ...'
+  }
+  google = external 'Google OAuth' 'Sign-in identity provider'
+  yahoo = external 'Yahoo! Shopping API' 'Product search used to resolve a JAN code'
+  expoPush = external 'Expo push service' {
+    description 'Relays notifications to FCM'
+  }
+  fcm = external 'FCM' 'Delivers the push to the device'
+
+  user -> prep.phone.mobile 'Uses'
+  user -> prep.pc.cli 'Scripts'
+  operator -> prep.pc.adminCli 'Operates'
+  operator -> prep.coolify.expiryJob 'Schedules'
+
+  prep.phone.mobile.router -> prep.phone.mobile.query 'Reads and mutates'
+  prep.phone.mobile.router -> prep.phone.mobile.camera 'Scans barcode'
+  prep.phone.mobile.query -> prep.phone.mobile.authClient 'Gets access token'
+  prep.phone.mobile.query -> prep.lib.clientPkg 'Calls API with'
+  prep.pc.cli -> prep.lib.clientPkg 'Calls API with'
+  prep.pc.adminCli -> prep.lib.clientPkg 'Calls API with'
+
+  prep.phone.mobile.authClient -> supabase.auth 'Signs in' 'HTTPS'
+  supabase.auth -> google 'Delegates identity' 'OAuth'
+
+  prep.phone.mobile -> prep.coolify.api 'REST + Bearer token, push token registration' 'HTTPS'
+  prep.pc.cli -> prep.coolify.api 'REST + Bearer token' 'HTTPS'
+  prep.pc.adminCli -> prep.coolify.api 'REST + Bearer token' 'HTTPS'
+
+  prep.coolify.api.authMw -> prep.coolify.api.routes 'Passes current user'
+  prep.coolify.api.routes -> prep.coolify.api.openapi 'Validates with'
+  prep.coolify.api.authMw -> supabase.auth 'Fetches JWKS (cached 10 min)' 'HTTPS'
+  prep.coolify.api.routes -> supabase.pg 'Drizzle queries' 'SQL'
+  prep.coolify.api.routes -> yahoo 'Resolves JAN (barcode lookup)' 'HTTPS'
+  prep.coolify.api.routes -> prep.lib.janPkg 'Uses'
+  prep.coolify.api.routes -> prep.lib.dbPkg 'Uses'
+  prep.coolify.api.openapi -> prep.lib.schemaPkg 'Uses'
+  prep.lib.dbPkg -> prep.lib.schemaPkg 'Types tied to'
+
+  prep.coolify.expiryJob.selector -> supabase.pg 'Reads stocks and settings, removes dead tokens' 'SQL'
+  prep.coolify.expiryJob.selector -> prep.coolify.expiryJob.sender 'Messages'
+  prep.coolify.expiryJob.sender -> expoPush 'Sends push (batched)' 'HTTPS'
+  expoPush -> fcm 'Relays'
+  fcm -> prep.phone.mobile 'Delivers notification'
+}

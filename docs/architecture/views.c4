@@ -1,0 +1,47 @@
+views {
+  view landscape {
+    title 'System landscape'
+    include user, operator, supabase, google, yahoo, expoPush, fcm
+    include prep.phone, prep.pc, prep.coolify, prep.adminWeb
+    style element.tag = #planned {
+      opacity 40%
+      border dashed
+    }
+    autoLayout LeftRight
+  }
+
+  view api of prep.coolify.api {
+    title 'Core API'
+    include *
+    include prep.phone.mobile, prep.pc.cli, prep.pc.adminCli
+    include prep.lib.*
+    include supabase.auth, supabase.pg, yahoo
+    style element.tag = #planned {
+      opacity 40%
+      border dashed
+    }
+    autoLayout LeftRight
+  }
+
+  view mobile of prep.phone.mobile {
+    title 'Mobile app'
+    include *
+    include prep.coolify.api, supabase.auth, google, user
+    style element.tag = #planned {
+      opacity 40%
+      border dashed
+    }
+    autoLayout LeftRight
+  }
+
+  view notification {
+    title 'Expiry notification and data'
+    include prep.coolify.expiryJob, prep.coolify.expiryJob.*
+    include supabase.pg, expoPush, fcm, prep.phone.mobile, operator
+    style element.tag = #planned {
+      opacity 40%
+      border dashed
+    }
+    autoLayout LeftRight
+  }
+}
