@@ -1,6 +1,6 @@
 # Tags as a second axis to categories (#210)
 
-Status: proposal. Names of tables, columns, routes, request keys and error codes below are proposals; each is listed under "Open decisions" and none is final.
+Status: decided on 2026-11-22. Every open decision below was decided as the recommended option, with tags attached to the item; the options and reasons are kept as the record.
 
 ## To-Be
 
@@ -128,6 +128,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
   2. Stock. Matches the issue title "tags on stocks". Tags like "opened" or "for the trip" are lot-level. Every purchase and every split needs retagging
 - Recommendation: item
 - Reason: the issue body says "second axis to categories" and the old requirement says "tag a product". Categories live on items. Lot-level state is better served by existing fields (`opened_at`, `note`). The issue title wording differs, so this needs the user's confirmation
+- Decided: item (2026-11-22)
 
 ### D-tag-scope. Whether to build tags before the category UI
 
@@ -137,6 +138,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
   2. Build the category UI first and see whether categories alone suffice, as the issue asks ("decide whether categories are enough")
 - Recommendation: build tags now
 - Reason: the issue question cannot be answered from use, because categories are not usable in the app today; a single-valued axis is known to be insufficient for the old requirement 1
+- Decided: build tags now (2026-11-22)
 
 ### D-tag-table-names. Table names
 
@@ -144,6 +146,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: `tags` and `item_tags`; `labels` and `item_labels`; `item_tag_assignments`
 - Recommendation: `tags` and `item_tags`
 - Reason: the requirement and the issue use the word tag, and the join name states what it joins
+- Decided: `tags` and `item_tags` (2026-11-22)
 
 ### D-tag-route-names. Route and field names
 
@@ -151,6 +154,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: `/tags` with `PUT /items/{id}/tags` and `tagIds`; `/tags` with add and remove sub-routes (`POST` and `DELETE /items/{id}/tags/{tagId}`)
 - Recommendation: the first (full-set replace, key `tagIds`)
 - Reason: idempotent retries and one request from mobile
+- Decided: the first (full-set replace, key `tagIds`) (2026-11-22)
 
 ### D-tag-put-conflict. Stale tag sets in a full-set PUT (new)
 
@@ -161,6 +165,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
   3. Add and remove sub-routes instead of a full-set PUT (the second option of D-tag-route-names), so concurrent changes to different tags both survive
 - Recommendation: option 1
 - Reason: two members editing the tags of the same product at the same moment is rare in a household, and option 2 adds a column and a client retry path for it. If that case matters, option 3 is the cleaner change and also removes the lost-update on a retried PUT, at the price of two requests when the user changes several tags in one edit. The alternative stays open in D-tag-route-names
+- Decided: option 1 (2026-11-22)
 
 ### D-tag-error-codes. Error code names
 
@@ -168,6 +173,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: `TAG_NAME_DUPLICATE`, `TAG_GROUP_MISMATCH`, `TAG_LIMIT_EXCEEDED`; or reuse `ITEM_BARCODE_DUPLICATE`-style naming with a `_CONFLICT` suffix
 - Recommendation: the first set
 - Reason: it mirrors the existing `ITEM_BARCODE_DUPLICATE` and `CATEGORY_GROUP_MISMATCH`
+- Decided: the first set (2026-11-22)
 
 ### D-tag-uniqueness. What counts as the same tag name
 
@@ -175,6 +181,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: exact string; trimmed and case-insensitive; trimmed, NFKC-normalized and lower-cased in application code (stored in a plain `normalized_name` column, name kept as typed)
 - Recommendation: trimmed, NFKC-normalized, lower-cased in application code
 - Reason: Japanese input mixes full-width and half-width forms, so "ＰＥＴ" and "pet" would otherwise be two tags. Full Unicode case folding is not required for a household tag list; the helper lives in the API so the client and the API share one implementation (changed from the first revision, which proposed a generated column; the earlier statement that Postgres has no NFKC was wrong and is corrected in the data model section)
+- Decided: trimmed, NFKC-normalized, lower-cased in application code (2026-11-22) (the implementation trims after NFKC, so a space produced by NFKC is also removed)
 
 ### D-tag-delete. Delete semantics
 
@@ -182,6 +189,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: soft-delete the tag and physically delete its `item_tags` rows; physically delete both; soft-delete the tag and keep `item_tags` rows hidden by the join
 - Recommendation: soft-delete the tag, physically delete the join rows
 - Reason: consistent with the 90 day policy for entities, and a restored tag (future trash UI) starts empty, matching "also removes the tag from related products"
+- Decided: soft-delete the tag, physically delete the join rows (2026-11-22)
 
 ### D-tag-filter. Match rule for several selected tags
 
@@ -189,6 +197,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: any (OR); all (AND); both with a switch
 - Recommendation: any (OR), single-select in the first version
 - Reason: single select satisfies the old requirement 2 and avoids a UI switch; multi-select can be added without an API break if `tagId` becomes repeatable
+- Decided: any (OR), single-select in the first version (2026-11-22)
 
 ### D-tag-caps. Length and count caps
 
@@ -196,6 +205,7 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: 50 characters and 20 tags; 100 characters (same as location and category names) and 10 tags; no tag cap
 - Recommendation: 50 characters and 20 tags
 - Reason: tags are chip labels; location and category names allow 100 but are single labels, and a cap keeps `tagIds` in `itemDtoSchema` small
+- Decided: 50 characters and 20 tags (2026-11-22)
 
 ### D-tag-order. Usage-frequency computation
 
@@ -203,3 +213,4 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 - Options: computed with a join on each list; stored counter column on `tags`
 - Recommendation: computed on read
 - Reason: a counter drifts under concurrent PUT and delete; a group has tens of tags, not thousands
+- Decided: computed on read (2026-11-22)
