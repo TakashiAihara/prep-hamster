@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
-import { and, eq, isNull } from "drizzle-orm"
+import { and, eq, inArray, isNull } from "drizzle-orm"
 import { itemTags, items, tags } from "@prep-hamster/db"
 import { TAGS_PER_ITEM_MAX } from "@prep-hamster/schema"
 import type { AppEnv } from "../app"
@@ -127,20 +127,27 @@ export const itemTagsRouter = new OpenAPIHono<AppEnv>().openapi(putItemTagsRoute
         if (!tag || tag.groupId !== existing.groupId) throw new TagMismatch()
       }
 
-      // 応答の tag 一覧もここで確定する。tag は FOR SHARE で押さえてあるので、commit までに消えない
-      const applied = await listTagsWithCount(tx, existing.groupId, tagIds)
-
       const current = await tx
         .select({ tagId: itemTags.tagId })
         .from(itemTags)
         .where(eq(itemTags.itemId, id))
       const currentIds = current.map((r) => r.tagId).toSorted()
       // 同じ集合の PUT (再送) は書かない。item_tags.created_at と items.updatedAt を動かさない
-      if (currentIds.join() === tagIds.join()) return { saved: lockedItem, applied }
+      if (currentIds.join() === tagIds.join()) {
+        return { saved: lockedItem, applied: await listTagsWithCount(tx, existing.groupId, tagIds) }
+      }
 
-      await tx.delete(itemTags).where(eq(itemTags.itemId, id))
-      if (tagIds.length > 0) {
-        await tx.insert(itemTags).values(tagIds.map((tagId) => ({ itemId: id, tagId })))
+      // 外す分と足す分だけ書く。残る tag の行 (created_at) は動かさない
+      const keep = new Set(tagIds)
+      const toRemove = currentIds.filter((t) => !keep.has(t))
+      const toAdd = tagIds.filter((t) => !currentIds.includes(t))
+      if (toRemove.length > 0) {
+        await tx
+          .delete(itemTags)
+          .where(and(eq(itemTags.itemId, id), inArray(itemTags.tagId, toRemove)))
+      }
+      if (toAdd.length > 0) {
+        await tx.insert(itemTags).values(toAdd.map((tagId) => ({ itemId: id, tagId })))
       }
       // tagIds は item の表現に含まれるので、updatedAt を見て差分を取るクライアントが変更に気づけるよう touch する。
       // 応答は行を押さえたこの transaction の値から作る (削除済みの item を 200 で返さない)
@@ -150,7 +157,9 @@ export const itemTagsRouter = new OpenAPIHono<AppEnv>().openapi(putItemTagsRoute
         .where(eq(items.id, id))
         .returning()
       if (!touched) throw new Error("item update returned no row")
-      return { saved: touched, applied }
+      // 応答の tag 一覧は書いた後に数える (付けたばかりの tag の itemCount にこの item を含める)。
+      // tag は FOR SHARE で押さえてあるので、commit までに消えない
+      return { saved: touched, applied: await listTagsWithCount(tx, existing.groupId, tagIds) }
     })
   } catch (err) {
     if (err instanceof ItemGone) return c.json(ITEM_NOT_FOUND, 404)

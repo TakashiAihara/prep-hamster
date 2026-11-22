@@ -521,3 +521,79 @@ test("PATCH rename answers from the renamed row with its item count", async () =
   const body = (await res.json()) as { tag: TagBody & { deletedAt: string | null } }
   expect([body.tag.name, body.tag.itemCount, body.tag.deletedAt]).toEqual(["after", 2, null])
 })
+
+test("PUT response tags carry the item count after this write", async () => {
+  const { putTags, groupId } = await setup()
+  const other = await seedItem(groupId, "other")
+  const itemId = await seedItem(groupId, "water")
+  const kept = await seedTag(groupId, "kept")
+  const added = await seedTag(groupId, "added")
+  await putTags(other, [kept])
+  await putTags(itemId, [kept])
+
+  const res = await putTags(itemId, [kept, added])
+
+  const body = (await res.json()) as { tags: { id: string; itemCount: number }[] }
+  const counts = Object.fromEntries(body.tags.map((t) => [t.id, t.itemCount]))
+  // kept は other と itemId の 2 件、added は新しく付いた 1 件
+  expect(counts).toEqual({ [kept]: 2, [added]: 1 })
+  // 同じ集合の再送 (書かない経路) でも同じ数
+  const again = await putTags(itemId, [kept, added])
+  const againBody = (await again.json()) as { tags: { id: string; itemCount: number }[] }
+  expect(Object.fromEntries(againBody.tags.map((t) => [t.id, t.itemCount]))).toEqual(counts)
+})
+
+test("PUT keeps the rows of retained tags and only writes the difference", async () => {
+  const { putTags, groupId } = await setup()
+  const itemId = await seedItem(groupId, "water")
+  const a = await seedTag(groupId, "a")
+  const b = await seedTag(groupId, "b")
+  const c = await seedTag(groupId, "c")
+  await putTags(itemId, [a, b])
+  const stamps = async () =>
+    Object.fromEntries(
+      (await testDb.select().from(itemTags).where(eq(itemTags.itemId, itemId))).map((r) => [
+        r.tagId,
+        r.createdAt.getTime(),
+      ]),
+    )
+  const before = await stamps()
+  await sleep()
+
+  await putTags(itemId, [b, c])
+
+  const after = await stamps()
+  expect(Object.keys(after).toSorted()).toEqual([b, c].toSorted())
+  expect(after[b]).toBe(before[b] ?? -1)
+  expect(after[c]).toBeGreaterThan(before[b] ?? 0)
+})
+
+test("PATCH /v1/tags/:id rejects empty, whitespace and over-long names", async () => {
+  const { call, groupId } = await setup()
+  const id = await seedTag(groupId, "keep")
+
+  for (const name of ["", "   ", "a".repeat(51)]) {
+    // oxlint-disable-next-line no-await-in-loop
+    const res = await call("PATCH", `/v1/tags/${id}`, { name })
+    expect(res.status).toBe(422)
+    // oxlint-disable-next-line no-await-in-loop
+    expect(((await res.json()) as ApiErr).error.code).toBe("VALIDATION_ERROR")
+  }
+  const ok = await call("PATCH", `/v1/tags/${id}`, { name: "a".repeat(50) })
+  expect(ok.status).toBe(200)
+})
+
+test("PUT rejects more than 100 tag ids with VALIDATION_ERROR, 100 reaches the cap check", async () => {
+  const { putTags, groupId } = await setup()
+  const itemId = await seedItem(groupId, "water")
+  const ids = Array.from({ length: 101 }, () => crypto.randomUUID())
+
+  const over = await putTags(itemId, ids)
+  const at = await putTags(itemId, ids.slice(0, 100))
+
+  expect(over.status).toBe(422)
+  expect(((await over.json()) as ApiErr).error.code).toBe("VALIDATION_ERROR")
+  // 100 件までは schema を通り、上限 (20) の検査で TAG_LIMIT_EXCEEDED になる
+  expect(at.status).toBe(422)
+  expect(((await at.json()) as ApiErr).error.code).toBe("TAG_LIMIT_EXCEEDED")
+})
