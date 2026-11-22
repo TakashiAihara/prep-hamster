@@ -26,6 +26,10 @@ beforeEach(async () => {
 type TagBody = { id: string; name: string; itemCount: number }
 type ApiErr = { error: { code: string; message: string } }
 const sleep = () => new Promise((r) => setTimeout(r, 15))
+const stamp = async (id: string) => {
+  const [row] = await testDb.select().from(items).where(eq(items.id, id))
+  return row?.updatedAt.getTime() ?? -1
+}
 
 async function setup() {
   const userId = await seedUser()
@@ -457,4 +461,63 @@ test("PUT bumps items.updatedAt only when the set changes", async () => {
   await sleep()
   await putTags(itemId, [a, b])
   expect((await read()).updatedAt).toBeGreaterThan(first.updatedAt ?? 0)
+})
+
+test("PATCH and DELETE /v1/tags/:id by VIEWER return 403 and change nothing", async () => {
+  const { groupId, app } = await setup()
+  const viewerId = await seedUser("Viewer")
+  await seedMembership(viewerId, groupId, "VIEWER")
+  const tagId = await seedTag(groupId, "keep")
+  const viewer = await bearer(viewerId)
+  const send = (method: string, body?: unknown) =>
+    app.request(`/v1/tags/${tagId}`, {
+      method,
+      headers: { "content-type": "application/json", authorization: viewer },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+
+  const patch = await send("PATCH", { name: "renamed" })
+  const del = await send("DELETE")
+
+  expect(patch.status).toBe(403)
+  expect(del.status).toBe(403)
+  const [row] = await testDb.select().from(tags).where(eq(tags.id, tagId))
+  expect([row?.name, row?.deletedAt]).toEqual(["keep", null])
+})
+
+test("DELETE tag bumps updatedAt of exactly the items that lose it", async () => {
+  const { call, groupId, putTags } = await setup()
+  const attached1 = await seedItem(groupId, "attached-1")
+  const attached2 = await seedItem(groupId, "attached-2")
+  const other = await seedItem(groupId, "other")
+  const t = await seedTag(groupId, "doomed")
+  const keep = await seedTag(groupId, "keep")
+  await putTags(attached1, [t, keep])
+  await putTags(attached2, [t])
+  await putTags(other, [keep])
+  const before = [await stamp(attached1), await stamp(attached2), await stamp(other)]
+  await sleep()
+
+  expect((await call("DELETE", `/v1/tags/${t}`)).status).toBe(204)
+
+  expect(await stamp(attached1)).toBeGreaterThan(before[0] ?? 0)
+  expect(await stamp(attached2)).toBeGreaterThan(before[1] ?? 0)
+  expect(await stamp(other)).toBe(before[2] ?? -1)
+  // 残る tag は付いたまま
+  expect(await attachedTagIds(attached1)).toEqual([keep])
+})
+
+test("PATCH rename answers from the renamed row with its item count", async () => {
+  const { call, groupId, putTags } = await setup()
+  const i1 = await seedItem(groupId, "i1")
+  const i2 = await seedItem(groupId, "i2")
+  const t = await seedTag(groupId, "before")
+  await putTags(i1, [t])
+  await putTags(i2, [t])
+
+  const res = await call("PATCH", `/v1/tags/${t}`, { name: "after" })
+
+  expect(res.status).toBe(200)
+  const body = (await res.json()) as { tag: TagBody & { deletedAt: string | null } }
+  expect([body.tag.name, body.tag.itemCount, body.tag.deletedAt]).toEqual(["after", 2, null])
 })

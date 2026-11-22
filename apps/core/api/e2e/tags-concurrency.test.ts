@@ -147,3 +147,37 @@ test("two creates of the same name: one 201, one TAG_NAME_DUPLICATE", async () =
     expect([a.status, b.status].toSorted()).toEqual([201, 422])
   }
 })
+
+test("tag delete against PUTs on its attached and new items never deadlocks or leaves stray rows", async () => {
+  const { groupId, call } = await setup()
+
+  for (let i = 0; i < ROUNDS; i++) {
+    // oxlint-disable-next-line no-await-in-loop
+    const tagId = await seedTag(groupId, `tag-${i}`)
+    // oxlint-disable-next-line no-await-in-loop
+    const a = await seedItem(groupId, `a-${i}`)
+    // oxlint-disable-next-line no-await-in-loop
+    const b = await seedItem(groupId, `b-${i}`)
+    // oxlint-disable-next-line no-await-in-loop
+    const c = await seedItem(groupId, `c-${i}`)
+    // oxlint-disable-next-line no-await-in-loop
+    await attachTags(a, [tagId])
+    // oxlint-disable-next-line no-await-in-loop
+    await attachTags(b, [tagId])
+
+    // 付いている item の外し (a) と、新しく付ける (c) を、削除と同時に流す
+    // oxlint-disable-next-line no-await-in-loop
+    const res = await Promise.all([
+      call("DELETE", `/v1/tags/${tagId}`),
+      call("PUT", `/v1/items/${a}/tags`, { tagIds: [] }),
+      call("PUT", `/v1/items/${c}/tags`, { tagIds: [tagId] }),
+    ])
+
+    expect(res[0].status).toBe(204)
+    expect([200]).toContain(res[1].status)
+    expect([200, 422]).toContain(res[2].status)
+    // oxlint-disable-next-line no-await-in-loop
+    const rows = await testDb.select().from(itemTags).where(eq(itemTags.tagId, tagId))
+    expect(rows).toEqual([])
+  }
+})

@@ -5,6 +5,8 @@ import type { z } from "@hono/zod-openapi"
 import type { tagDtoSchema } from "./schemas"
 
 type Db = AppEnv["Variables"]["db"]
+// transaction の handle でも読めるよう、select だけを要求する
+type Reader = Pick<Db, "select">
 
 export type TagWithCount = typeof tags.$inferSelect & { itemCount: number }
 
@@ -21,7 +23,7 @@ export const toTagDto = (row: TagWithCount): z.infer<typeof tagDtoSchema> => ({
 // active なタグを、紐づく active な item の数 (多い順、同数は名前順) で返す。
 // 件数は保存せず読むたびに数える (PUT / 削除と並行しても食い違う別の正本を持たない)。
 export async function listTagsWithCount(
-  db: Db,
+  db: Reader,
   groupId: string,
   onlyIds?: string[],
 ): Promise<TagWithCount[]> {

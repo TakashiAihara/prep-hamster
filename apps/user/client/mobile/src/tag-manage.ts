@@ -148,7 +148,9 @@ export async function addTagToItem(
   const parsed = parseTagName(args.name)
   if (!parsed.ok) return parsed
 
-  let tagId = findTagByName(args.knownTags, parsed.value)?.id ?? null
+  // 重複の回復で読み直した一覧があれば、そちらを以降の DTO の出所にする (古い knownTags には勝った側の tag が無い)
+  let source = args.knownTags
+  let tagId = findTagByName(source, parsed.value)?.id ?? null
   if (!tagId) {
     try {
       const res = await client.v1.tags.$post({
@@ -161,6 +163,7 @@ export async function addTagToItem(
         if (err.code !== TAG_NAME_DUPLICATE_CODE) return { ok: false, message: err.message }
         const reread = await listTags(client, args.groupId)
         if (!reread.ok) return reread
+        source = reread.tags
         tagId = findTagByName(reread.tags, parsed.value)?.id ?? null
         if (!tagId) return { ok: false, message: err.message }
       }
@@ -170,7 +173,7 @@ export async function addTagToItem(
   }
 
   if (args.currentTagIds.includes(tagId)) {
-    const existing = args.knownTags.filter((t) => args.currentTagIds.includes(t.id))
+    const existing = source.filter((t) => args.currentTagIds.includes(t.id))
     return { ok: true, tagIds: args.currentTagIds, tags: existing, tagId }
   }
   const put = await putItemTags(client, args.itemId, [...args.currentTagIds, tagId])

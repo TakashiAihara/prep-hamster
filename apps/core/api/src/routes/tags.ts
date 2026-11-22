@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
-import { and, eq, isNull } from "drizzle-orm"
-import { itemTags, tags } from "@prep-hamster/db"
+import { and, eq, inArray, isNull } from "drizzle-orm"
+import { itemTags, items, tags } from "@prep-hamster/db"
 import { normalizeTagName } from "@prep-hamster/schema"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
@@ -131,6 +131,9 @@ async function loadActiveTag(db: Db, id: string) {
 }
 
 class TagNotApplied extends Error {}
+class RetryDelete extends Error {}
+
+const DELETE_ATTEMPTS = 5
 
 export const tagsRouter = new OpenAPIHono<AppEnv>()
   .openapi(listTagsRoute, async (c) => {
@@ -185,7 +188,7 @@ export const tagsRouter = new OpenAPIHono<AppEnv>()
     try {
       // 行を FOR NO KEY UPDATE で押さえてから書く。並行する DELETE に負けた rename は
       // 削除済みの行を見て 404 になり、消えた tag を書き戻さない。
-      const updated = await db.transaction(async (tx) => {
+      const renamed = await db.transaction(async (tx) => {
         const [locked] = await tx
           .select()
           .from(tags)
@@ -202,10 +205,13 @@ export const tagsRouter = new OpenAPIHono<AppEnv>()
           .where(eq(tags.id, id))
           .returning()
         if (!row) throw new Error("tag update returned no row")
-        return row
+        // 応答は行を押さえたこの transaction の値から作る (commit 後に読み直すと、並行する DELETE の後の
+        // 状態を deletedAt: null のまま返すことになる)
+        const [withCount] = await listTagsWithCount(tx, row.groupId, [id])
+        if (!withCount) throw new Error("renamed tag is missing from its own transaction")
+        return withCount
       })
-      const [withCount] = await listTagsWithCount(db, updated.groupId, [id])
-      return c.json({ tag: toTagDto(withCount ?? { ...updated, itemCount: 0 }) }, 200)
+      return c.json({ tag: toTagDto(renamed) }, 200)
     } catch (err) {
       if (err instanceof TagNotApplied) {
         return c.json(NOT_FOUND, 404)
@@ -229,26 +235,72 @@ export const tagsRouter = new OpenAPIHono<AppEnv>()
       return c.json(access.body, access.status)
     }
 
-    try {
-      // 並行する PUT の FOR SHARE と衝突するので、PUT が先なら下の delete が片付け、
-      // 後なら PUT が削除済みを見て TAG_GROUP_MISMATCH を返す。
-      await db.transaction(async (tx) => {
-        const [locked] = await tx
-          .select({ id: tags.id })
-          .from(tags)
-          .where(and(eq(tags.id, id), isNull(tags.deletedAt)))
-          .for("no key update")
-        if (!locked) throw new TagNotApplied()
-        const now = new Date()
-        await tx.update(tags).set({ deletedAt: now, updatedAt: now }).where(eq(tags.id, id))
-        await tx.delete(itemTags).where(eq(itemTags.tagId, id))
-      })
-    } catch (err) {
-      if (err instanceof TagNotApplied) {
-        return c.json(NOT_FOUND, 404)
-      }
-      throw err
-    }
+    // item → tag の順を守るため、付いている item を先に読んで昇順に押さえてから tag を押さえる。
+    // tag を押さえた後に付いている item が増えていたら、それは先に tag を FOR SHARE して commit した PUT の分で、
+    // その item はまだ押さえていない (tag を押さえた後に item を取ると、item を持って tag を待つ PUT と輪になる)。
+    // その場合は全部やり直す。連続して増え続けることはまず無いので、上限を超えたら 500 で止める。
+    for (let attempt = 0; attempt < DELETE_ATTEMPTS; attempt++) {
+      try {
+        // PUT と衝突するので、PUT が先なら下の delete が片付け、後なら PUT が削除済みを見て
+        // TAG_GROUP_MISMATCH を返す。
+        // oxlint-disable-next-line no-await-in-loop
+        await db.transaction(async (tx) => {
+          const attached = async () =>
+            (
+              await tx
+                .select({ itemId: itemTags.itemId })
+                .from(itemTags)
+                .where(eq(itemTags.tagId, id))
+            )
+              .map((r) => r.itemId)
+              .toSorted()
 
-    return c.body(null, 204)
+          const itemIds = await attached()
+          for (const itemId of itemIds) {
+            // oxlint-disable-next-line no-await-in-loop
+            await tx
+              .select({ id: items.id })
+              .from(items)
+              .where(eq(items.id, itemId))
+              .for("no key update")
+          }
+
+          const [locked] = await tx
+            .select({ id: tags.id })
+            .from(tags)
+            .where(and(eq(tags.id, id), isNull(tags.deletedAt)))
+            .for("no key update")
+          if (!locked) throw new TagNotApplied()
+
+          const lockedSet = new Set(itemIds)
+          if ((await attached()).some((itemId) => !lockedSet.has(itemId))) throw new RetryDelete()
+
+          const now = new Date()
+          await tx.update(tags).set({ deletedAt: now, updatedAt: now }).where(eq(tags.id, id))
+          const removed = await tx
+            .delete(itemTags)
+            .where(eq(itemTags.tagId, id))
+            .returning({ itemId: itemTags.itemId })
+          // tagIds が変わった item だけ updatedAt を動かす (PUT と同じ。差分を取るクライアントが detach に気づける)
+          if (removed.length > 0) {
+            await tx
+              .update(items)
+              .set({ updatedAt: now })
+              .where(
+                inArray(
+                  items.id,
+                  removed.map((r) => r.itemId),
+                ),
+              )
+          }
+        })
+        return c.body(null, 204)
+      } catch (err) {
+        if (err instanceof TagNotApplied) {
+          return c.json(NOT_FOUND, 404)
+        }
+        if (!(err instanceof RetryDelete)) throw err
+      }
+    }
+    throw new Error("tag delete kept racing with new attachments")
   })

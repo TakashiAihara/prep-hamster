@@ -101,9 +101,12 @@ export const itemTagsRouter = new OpenAPIHono<AppEnv>().openapi(putItemTagsRoute
   // ロックは常に昇順にそろえて、同じ tag を取り合う別の PUT と待ち合いの輪を作らない
   const tagIds = [...new Set(body.tagIds.map((t) => t.toLowerCase()))].toSorted()
 
-  let saved: typeof items.$inferSelect
+  let result: {
+    saved: typeof items.$inferSelect
+    applied: Awaited<ReturnType<typeof listTagsWithCount>>
+  }
   try {
-    saved = await db.transaction(async (tx) => {
+    result = await db.transaction(async (tx) => {
       const [lockedItem] = await tx
         .select()
         .from(items)
@@ -124,13 +127,16 @@ export const itemTagsRouter = new OpenAPIHono<AppEnv>().openapi(putItemTagsRoute
         if (!tag || tag.groupId !== existing.groupId) throw new TagMismatch()
       }
 
+      // 応答の tag 一覧もここで確定する。tag は FOR SHARE で押さえてあるので、commit までに消えない
+      const applied = await listTagsWithCount(tx, existing.groupId, tagIds)
+
       const current = await tx
         .select({ tagId: itemTags.tagId })
         .from(itemTags)
         .where(eq(itemTags.itemId, id))
       const currentIds = current.map((r) => r.tagId).toSorted()
       // 同じ集合の PUT (再送) は書かない。item_tags.created_at と items.updatedAt を動かさない
-      if (currentIds.join() === tagIds.join()) return lockedItem
+      if (currentIds.join() === tagIds.join()) return { saved: lockedItem, applied }
 
       await tx.delete(itemTags).where(eq(itemTags.itemId, id))
       if (tagIds.length > 0) {
@@ -144,7 +150,7 @@ export const itemTagsRouter = new OpenAPIHono<AppEnv>().openapi(putItemTagsRoute
         .where(eq(items.id, id))
         .returning()
       if (!touched) throw new Error("item update returned no row")
-      return touched
+      return { saved: touched, applied }
     })
   } catch (err) {
     if (err instanceof ItemGone) return c.json(ITEM_NOT_FOUND, 404)
@@ -153,7 +159,7 @@ export const itemTagsRouter = new OpenAPIHono<AppEnv>().openapi(putItemTagsRoute
     throw err
   }
 
-  const applied = await listTagsWithCount(db, existing.groupId, tagIds)
+  const { saved, applied } = result
   return c.json(
     {
       item: toItemDto(saved, applied.map((t) => t.id).toSorted()),

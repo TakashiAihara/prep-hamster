@@ -152,6 +152,22 @@ test("addTagToItem returns the API message for other POST failures and does not 
   expect(calls.put).toEqual([])
 })
 
+test("addTagToItem after a duplicate recovery returns the re-read tag when it is already applied", async () => {
+  const { client, calls } = fakeClient({
+    post: () => json({ error: { code: "TAG_NAME_DUPLICATE", message: "dup" } }, 422),
+    get: () => json({ tags: [tagDto(T1, "Winner")] }),
+  })
+  const res = await addTagToItem(client, {
+    groupId: GROUP,
+    itemId: ITEM,
+    currentTagIds: [T1],
+    knownTags: [],
+    name: "winner",
+  })
+  expect(res).toEqual({ ok: true, tagIds: [T1], tags: [tagDto(T1, "Winner")], tagId: T1 })
+  expect(calls.put).toEqual([])
+})
+
 test("addTagToItem skips the PUT when the item already has the tag", async () => {
   const { client, calls } = fakeClient({})
   const res = await addTagToItem(client, {
