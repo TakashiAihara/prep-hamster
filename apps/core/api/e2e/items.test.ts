@@ -110,6 +110,43 @@ test("POST /v1/items with duplicate (groupId, barcode) returns 422 ITEM_BARCODE_
   expect(body.error.code).toBe("ITEM_BARCODE_DUPLICATE")
 })
 
+test("POST /v1/items reuses the barcode of a soft-deleted manual item and keeps the old row", async () => {
+  const userId = await seedUser()
+  const groupId = await seedGroupWithMembership(userId, "Home")
+  const app = createApp({ db: testDb, auth: e2eAuth })
+  const headers = { "content-type": "application/json", authorization: await bearer(userId) }
+
+  const first = await app.request("/v1/items", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ groupId, name: "First", barcode: "4901234567890" }),
+  })
+  expect(first.status).toBe(201)
+  const { item: firstItem } = (await first.json()) as { item: { id: string } }
+
+  const del = await app.request(`/v1/items/${firstItem.id}`, { method: "DELETE", headers })
+  expect(del.status).toBe(204)
+
+  const second = await app.request("/v1/items", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ groupId, name: "Second", barcode: "4901234567890" }),
+  })
+  expect(second.status).toBe(201)
+  const { item: secondItem } = (await second.json()) as { item: { id: string } }
+  expect(secondItem.id).not.toBe(firstItem.id)
+
+  const [oldRow] = await testDb.select().from(items).where(eq(items.id, firstItem.id))
+  expect(oldRow?.deletedAt).not.toBeNull()
+
+  const third = await app.request("/v1/items", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ groupId, name: "Third", barcode: "4901234567890" }),
+  })
+  expect(third.status).toBe(422)
+})
+
 test("GET /v1/items?groupId=X returns active items only", async () => {
   const userId = await seedUser()
   const groupId = await seedGroupWithMembership(userId, "Home")

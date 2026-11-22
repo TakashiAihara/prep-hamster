@@ -188,7 +188,9 @@ export const items = pgTable(
       .where(sql`${t.productMasterId} IS NOT NULL`),
     uniqueIndex("items_group_barcode_idx")
       .on(t.groupId, t.barcode)
-      .where(sql`${t.productMasterId} IS NULL AND ${t.barcode} IS NOT NULL`),
+      .where(
+        sql`${t.productMasterId} IS NULL AND ${t.barcode} IS NOT NULL AND ${t.deletedAt} IS NULL`,
+      ),
   ],
 )
 
