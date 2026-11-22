@@ -4,6 +4,16 @@ import { fileStorage, readConnection, sessionFilePath, type Connection } from ".
 
 export const sessionFile = (): string => sessionFilePath(process.env)
 
+// sessionFilePath の throw を CLI のエラー表示に変える (citty の stack trace にしない)
+export function sessionFileOrExit(exitCode: number): string {
+  try {
+    return sessionFile()
+  } catch (e) {
+    console.error(`Error: ${e instanceof Error ? e.message : String(e)}`)
+    process.exit(exitCode)
+  }
+}
+
 type Env = Record<string, string | undefined>
 
 // 接続先は env が優先で、無ければ前回 login したときのもの。
@@ -23,12 +33,14 @@ export function pickConnection(env: Env, stored: Connection | null): Connection 
 export const currentConnection = (): Connection | null =>
   pickConnection(process.env, readConnection(sessionFile()))
 
-export function createAuthClient(): SupabaseClient | null {
+export function createAuthClient(
+  storage: ReturnType<typeof fileStorage> = fileStorage(sessionFile()),
+): SupabaseClient | null {
   const connection = currentConnection()
   if (!connection) return null
   return createClient(connection.url, connection.key, {
     auth: {
-      storage: fileStorage(sessionFile()),
+      storage,
       flowType: "pkce",
       // 1 回のコマンドで終わるので、裏での定期更新は要らない。期限切れは getSession が更新して保存する
       autoRefreshToken: false,
