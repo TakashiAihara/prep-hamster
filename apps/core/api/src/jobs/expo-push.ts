@@ -23,6 +23,8 @@ export function createExpoPushSender(
     maxAttempts?: number
     baseDelayMs?: number
     timeoutMs?: number
+    // Expo 側で push の保護を有効にした project では access token が必須。未設定なら Authorization を付けない。
+    accessToken?: string | undefined
   } = {},
 ): PushSender {
   const doFetch = opts.fetch ?? fetch
@@ -30,6 +32,7 @@ export function createExpoPushSender(
   const maxAttempts = opts.maxAttempts ?? MAX_ATTEMPTS
   const baseDelayMs = opts.baseDelayMs ?? BASE_DELAY_MS
   const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS
+  const accessToken = opts.accessToken
 
   // 1 チャンクを送り、失敗した宛先を返す。チケットは data[] が送った順に対応する。
   // 5xx や打ち切りの後の再試行は、初回が Expo 側で受理済みなら同じ通知を二重に送りうる (レシート未確認のため)。
@@ -42,7 +45,11 @@ export function createExpoPushSender(
         // oxlint-disable-next-line no-await-in-loop
         res = await doFetch(EXPO_PUSH_URL, {
           method: "POST",
-          headers: { accept: "application/json", "content-type": "application/json" },
+          headers: {
+            accept: "application/json",
+            "content-type": "application/json",
+            ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+          },
           body: JSON.stringify(chunk),
           signal: AbortSignal.timeout(timeoutMs),
         })

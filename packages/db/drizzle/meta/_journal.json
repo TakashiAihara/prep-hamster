@@ -43,6 +43,13 @@
       "when": 1795324541313,
       "tag": "0005_item_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795336809294,
+      "tag": "0006_smart_forgotten_one",
+      "breakpoints": true
     }
   ]
 }

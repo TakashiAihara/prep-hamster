@@ -177,6 +177,16 @@ const seedDueUser = async (name: string, tokens: string[], bestBeforeDate = "202
   return u
 }
 
+test("writes the year in the body when the deadline falls in a different year", async () => {
+  await seedDueUser("u", ["ExponentPushToken[new-year]"], "2027-01-03")
+  const { sender, calls } = fakeSender()
+
+  const result = await runExpiryNotify({ db: testDb, sender, today: "2026-12-28" })
+
+  expect(result.messages).toBe(1)
+  expect(calls[0]?.[0]?.body).toBe("Canned Tomato 2027/01/03")
+})
+
 test("a second run on the same JST day sends nothing, the next day sends again", async () => {
   const u = await seedDueUser("u", ["ExponentPushToken[once]"])
   const { sender, calls } = fakeSender()
