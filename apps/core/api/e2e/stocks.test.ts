@@ -79,12 +79,12 @@ test("GET /v1/stocks returns empty list for empty group", async () => {
   expect(body.stocks).toEqual([])
 })
 
-const createStockBody = (groupId: string, itemId: string, locationId: string) =>
+const createStockBody = (groupId: string, itemId: string, locationId: string, quantity = 1) =>
   JSON.stringify({
     groupId,
     itemId,
     locationId,
-    quantity: 1,
+    quantity,
     unit: "個",
     useByDate: null,
     bestBeforeDate: null,
@@ -226,4 +226,50 @@ test("POST /v1/stocks by a non-member returns 403 FORBIDDEN_GROUP_ACCESS", async
   expect(res.status).toBe(403)
   const body = (await res.json()) as { error: { code: string } }
   expect(body.error.code).toBe("FORBIDDEN_GROUP_ACCESS")
+})
+
+// 数量 0 の在庫は既定の一覧 (includeEmpty なし) に出ないので、作成の時点で弾く
+test("POST /v1/stocks with zero quantity returns 422 VALIDATION_ERROR", async () => {
+  const { userId, groupId, itemId, locationId } = await seedBaseFixture()
+  const app = createApp({ db: testDb, auth: e2eAuth })
+
+  const res = await app.request("/v1/stocks", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
+    body: createStockBody(groupId, itemId, locationId, 0),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("VALIDATION_ERROR")
+})
+
+test("POST /v1/stocks with negative quantity returns 422 VALIDATION_ERROR", async () => {
+  const { userId, groupId, itemId, locationId } = await seedBaseFixture()
+  const app = createApp({ db: testDb, auth: e2eAuth })
+
+  const res = await app.request("/v1/stocks", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
+    body: createStockBody(groupId, itemId, locationId, -1),
+  })
+
+  expect(res.status).toBe(422)
+  const body = (await res.json()) as { error: { code: string } }
+  expect(body.error.code).toBe("VALIDATION_ERROR")
+})
+
+test("POST /v1/stocks accepts a positive fractional quantity", async () => {
+  const { userId, groupId, itemId, locationId } = await seedBaseFixture()
+  const app = createApp({ db: testDb, auth: e2eAuth })
+
+  const res = await app.request("/v1/stocks", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: await bearer(userId) },
+    body: createStockBody(groupId, itemId, locationId, 0.5),
+  })
+
+  expect(res.status).toBe(201)
+  const body = (await res.json()) as { stock: { quantity: number } }
+  expect(body.stock.quantity).toBe(0.5)
 })

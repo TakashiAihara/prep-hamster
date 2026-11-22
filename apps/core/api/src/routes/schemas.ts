@@ -285,7 +285,8 @@ export const createStockBodyDtoSchema = z
     groupId: z.string().guid(),
     itemId: z.string().guid(),
     locationId: z.string().guid(),
-    quantity: z.number().nonnegative(),
+    // 作成直後から既定の一覧に出るよう正の数だけを受け付ける (0 は includeEmpty なしでは見えない)
+    quantity: z.number().positive(),
     unit: z.string().min(1),
     useByDate: z.string().date().nullable(),
     bestBeforeDate: z.string().date().nullable(),
