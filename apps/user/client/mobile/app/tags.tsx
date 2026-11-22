@@ -18,6 +18,8 @@ import {
   applyRenamedTag,
   deleteTag,
   deleteTagDetail,
+  deleteTagLabel,
+  editTagLabel,
   listTags,
   parseTagName,
   removeTag,
@@ -224,6 +226,7 @@ function TagsBody({ groupId }: { groupId: string }) {
                 <Pressable
                   testID={`tag-edit-${tag.id}`}
                   accessibilityRole="button"
+                  accessibilityLabel={editTagLabel(tag.name)}
                   style={[styles.action, pending !== null && styles.disabled]}
                   onPress={() => {
                     setEditingId(tag.id)
@@ -237,6 +240,7 @@ function TagsBody({ groupId }: { groupId: string }) {
                 <Pressable
                   testID={`tag-delete-${tag.id}`}
                   accessibilityRole="button"
+                  accessibilityLabel={deleteTagLabel(tag.name)}
                   style={[styles.action, pending !== null && styles.disabled]}
                   onPress={() => confirmDelete(tag)}
                   disabled={pending !== null}

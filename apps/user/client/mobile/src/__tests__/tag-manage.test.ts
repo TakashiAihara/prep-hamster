@@ -5,6 +5,8 @@ import {
   applyRenamedTag,
   createRefetchGuard,
   deleteTagDetail,
+  deleteTagLabel,
+  editTagLabel,
   findTagByName,
   mergeTags,
   parseTagName,
@@ -242,4 +244,9 @@ test("createRefetchGuard rejects a refetch that overlapped a tag operation", () 
   guard.bump()
   expect(after()).toBe(false)
   expect(untouched()).toBe(false)
+})
+
+test("edit and delete labels carry the tag name (maestro/tag-attach.yaml taps by this text)", () => {
+  expect(editTagLabel("tg-1")).toBe("タグ tg-1 を編集")
+  expect(deleteTagLabel("tg-1")).toBe("タグ tg-1 を削除")
 })

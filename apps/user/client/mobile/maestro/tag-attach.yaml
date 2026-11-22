@@ -70,13 +70,11 @@ appId: com.example.prephamster
     text: ${output.tag}
 - assertVisible:
     text: "1 件"
-# 今回作ったタグの行の編集ボタンだけを押す (他のタグが残っていても取り違えない)
+# 今回作ったタグの編集ボタンだけを押す (他のタグが残っていても取り違えない)。ボタンの accessibilityLabel
+# (Android では content-description。Maestro の text は contentDescription にも当たる) にタグ名が入っている。
+# 行の View は accessibility の階層に出ず、入れ子 (childOf) では指せなかった (CI run 44999401796)
 - tapOn:
-    id: "tag-edit-[0-9a-f-]{36}"
-    childOf:
-      id: "tag-row-[0-9a-f-]{36}"
-      containsDescendants:
-        - text: ${output.tag}
+    text: "タグ ${output.tag} を編集"
 # 編集欄は autoFocus で、カーソルは文字列の末尾にある。ここで欄を押し直すと押した位置にカーソルが移り、
 # eraseText はカーソルより前だけを消して後ろの文字が残る (旧名の末尾が新名の後ろに付いた)
 - assertVisible:

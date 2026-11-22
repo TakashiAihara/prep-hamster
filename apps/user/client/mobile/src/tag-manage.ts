@@ -91,6 +91,12 @@ export async function deleteTag(client: ApiClient, tagId: string): Promise<TagRe
   }
 }
 
+// 管理画面の編集・削除ボタンの accessibilityLabel (Android では content-description)。
+// 行の View は accessibility の階層に出ないことがあり、Maestro の flow が「このタグの行」を入れ子で指せないので、
+// ボタン自身にタグ名を持たせて text で押せるようにする (maestro/tag-attach.yaml がこの形に依存する)
+export const editTagLabel = (name: string): string => `タグ ${name} を編集`
+export const deleteTagLabel = (name: string): string => `タグ ${name} を削除`
+
 // 削除の確認文。何件の商品からタグが外れるかを伝える
 export function deleteTagDetail(tag: TagDto): { title: string; detail: string } {
   return {
