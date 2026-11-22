@@ -1,8 +1,10 @@
 views {
   view landscape {
     title 'System landscape'
-    include user, operator, supabase, google, yahoo, expoPush, fcm
-    include prep.phone, prep.pc, prep.coolify, prep.adminWeb
+    include user, operator
+    include userPhone, userPhone.mobile, userPc, userPc.userCli, opPc, opPc.adminCli
+    include coolify, coolify.api, expiryJob, adminWeb
+    include supabase.auth, supabase.pg, google, expoPush, fcm
     style element.tag = #planned {
       opacity 40%
       border dashed
@@ -10,38 +12,32 @@ views {
     autoLayout LeftRight
   }
 
-  view api of prep.coolify.api {
-    title 'Core API'
-    include *
-    include prep.phone.mobile, prep.pc.cli, prep.pc.adminCli
-    include prep.lib.*
+  view clients of coolify.api {
+    title 'Clients and sign-in'
+    include userPhone.mobile, userPc.userCli, opPc.adminCli
+    include coolify.api, supabase.auth, google
+    autoLayout LeftRight
+  }
+
+  view api of coolify.api {
+    title 'Core API internals'
+    include coolify.api.*
+    include lib.schemaPkg, lib.dbPkg, lib.janPkg
     include supabase.auth, supabase.pg, yahoo
-    style element.tag = #planned {
-      opacity 40%
-      border dashed
-    }
     autoLayout LeftRight
   }
 
-  view mobile of prep.phone.mobile {
+  view mobile of userPhone.mobile {
     title 'Mobile app'
-    include *
-    include prep.coolify.api, supabase.auth, google, user
-    style element.tag = #planned {
-      opacity 40%
-      border dashed
-    }
+    include userPhone.mobile.*
+    include coolify.api, supabase.auth, google
     autoLayout LeftRight
   }
 
   view notification {
-    title 'Expiry notification and data'
-    include prep.coolify.expiryJob, prep.coolify.expiryJob.*
-    include supabase.pg, expoPush, fcm, prep.phone.mobile, operator
-    style element.tag = #planned {
-      opacity 40%
-      border dashed
-    }
+    title 'Expiry notification'
+    include expiryJob, expiryJob.*
+    include supabase.pg, expoPush, fcm, userPhone.mobile
     autoLayout LeftRight
   }
 }
