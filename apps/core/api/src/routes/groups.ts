@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
-import { and, eq, inArray, isNull } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 import { groups, memberships } from "@prep-hamster/db"
 import type { AppEnv } from "../app"
 import { withGroupAccess } from "../middleware/group-access"
@@ -10,6 +10,7 @@ import {
   jsonBodyErrorResponses,
   groupDtoSchema,
   membershipDtoSchema,
+  roleSchema,
   updateGroupBodyDtoSchema,
 } from "./schemas"
 
@@ -20,9 +21,13 @@ const IdParamSchema = z.object({
     .openapi({ param: { name: "id", in: "path" } }),
 })
 
-const toGroupDto = (row: typeof groups.$inferSelect): z.infer<typeof groupDtoSchema> => ({
+const toGroupDto = (
+  row: typeof groups.$inferSelect,
+  role: z.infer<typeof roleSchema>,
+): z.infer<typeof groupDtoSchema> => ({
   id: row.id,
   name: row.name,
+  role,
   createdBy: row.createdBy,
   createdAt: row.createdAt.toISOString(),
   updatedAt: row.updatedAt.toISOString(),
@@ -191,29 +196,22 @@ export const groupsRouter = new OpenAPIHono<AppEnv>()
     const db = c.get("db")
     const userId = c.get("userId")
 
-    const memberRows = await db
-      .select({ groupId: memberships.groupId })
-      .from(memberships)
-      .where(and(eq(memberships.userId, userId), isNull(memberships.deletedAt)))
-
-    if (memberRows.length === 0) {
-      return c.json({ groups: [] }, 200)
-    }
-
+    // memberships を JOIN して呼び出しユーザーの role も一緒に取る
+    // (group DTO の role は「自分の、その group での role」)。
     const rows = await db
-      .select()
+      .select({ group: groups, role: memberships.role })
       .from(groups)
-      .where(
+      .innerJoin(
+        memberships,
         and(
-          inArray(
-            groups.id,
-            memberRows.map((m) => m.groupId),
-          ),
-          isNull(groups.deletedAt),
+          eq(memberships.groupId, groups.id),
+          eq(memberships.userId, userId),
+          isNull(memberships.deletedAt),
         ),
       )
+      .where(isNull(groups.deletedAt))
 
-    return c.json({ groups: rows.map(toGroupDto) }, 200)
+    return c.json({ groups: rows.map((r) => toGroupDto(r.group, r.role)) }, 200)
   })
   .openapi(createGroupRoute, async (c) => {
     const body = c.req.valid("json")
@@ -253,7 +251,7 @@ export const groupsRouter = new OpenAPIHono<AppEnv>()
 
     return c.json(
       {
-        group: toGroupDto(result.group),
+        group: toGroupDto(result.group, result.membership.role),
         membership: toMembershipDto(result.membership),
       },
       201,
@@ -273,7 +271,7 @@ export const groupsRouter = new OpenAPIHono<AppEnv>()
       return c.json({ error: { code: "NOT_FOUND", message: "group が見つかりません" } }, 404)
     }
 
-    return c.json({ group: toGroupDto(row) }, 200)
+    return c.json({ group: toGroupDto(row, c.get("membership").role) }, 200)
   })
   .openapi(patchGroupRoute, async (c) => {
     const { id } = c.req.valid("param")
@@ -290,5 +288,5 @@ export const groupsRouter = new OpenAPIHono<AppEnv>()
       return c.json({ error: { code: "NOT_FOUND", message: "group が見つかりません" } }, 404)
     }
 
-    return c.json({ group: toGroupDto(row) }, 200)
+    return c.json({ group: toGroupDto(row, c.get("membership").role) }, 200)
   })

@@ -13,6 +13,7 @@ import {
 const g = (id: string, name: string): CurrentGroupGroup => ({
   id,
   name,
+  role: "OWNER",
   createdAt: "2026-01-01T00:00:00.000Z",
 })
 

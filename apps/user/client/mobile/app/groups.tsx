@@ -10,7 +10,8 @@ import { inviteMessage } from "@/invite-code"
 import { JoinInviteForm } from "@/join-invite-form"
 import { KeyboardScrollView } from "@/keyboard-scroll-view"
 
-// OWNER 以外は API が 403 を返すので、その message をそのまま出す。成功なら null
+// OWNER だけが押せるボタンだが、一覧の取得後に role が変わっていると API が 403 を返す。
+// その message をそのまま出す。成功なら null
 async function shareInvitation(groupId: string, groupName: string): Promise<string | null> {
   const res = await getApiClient().v1.groups[":groupId"].invitations.$post({
     param: { groupId },
@@ -53,24 +54,29 @@ export default function GroupsScreen() {
 
       {group ? (
         <View style={styles.section}>
-          <Pressable
-            style={[styles.secondary, inviting && styles.disabled]}
-            disabled={inviting}
-            onPress={async () => {
-              setInviting(true)
-              setInviteError(null)
-              try {
-                setInviteError(await shareInvitation(group.id, group.name))
-              } catch (err) {
-                setInviteError(err instanceof Error ? err.message : "unknown")
-              } finally {
-                setInviting(false)
-              }
-            }}
-          >
-            <Text style={styles.secondaryLabel}>このグループに招待する</Text>
-          </Pressable>
-          {inviteError ? <Text style={styles.error}>{inviteError}</Text> : null}
+          {/* 招待の発行は OWNER のみ。非 OWNER には出さない (押しても 403 になるだけ) */}
+          {group.role === "OWNER" ? (
+            <>
+              <Pressable
+                style={[styles.secondary, inviting && styles.disabled]}
+                disabled={inviting}
+                onPress={async () => {
+                  setInviting(true)
+                  setInviteError(null)
+                  try {
+                    setInviteError(await shareInvitation(group.id, group.name))
+                  } catch (err) {
+                    setInviteError(err instanceof Error ? err.message : "unknown")
+                  } finally {
+                    setInviting(false)
+                  }
+                }}
+              >
+                <Text style={styles.secondaryLabel}>このグループに招待する</Text>
+              </Pressable>
+              {inviteError ? <Text style={styles.error}>{inviteError}</Text> : null}
+            </>
+          ) : null}
           {/* .expo/types の型付きルートは expo start が作り直すまで古いので as never で通す ((tabs)/_layout.tsx と同じ) */}
           <Pressable style={styles.row} onPress={() => router.push("/locations" as never)}>
             <Text style={styles.name}>保管場所を管理</Text>
