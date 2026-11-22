@@ -70,7 +70,9 @@ Proposed routes (names pending), under `/v1`, group access via `checkGroupAccess
 | GET `/items/photos?groupId=` | one cover photo per item of the group, for list rows | 200 `{ covers: [{ itemId, url }] }` |
 | DELETE `/items/{id}/photos/{photoId}` | delete a photo; the photo must belong to item `{id}` (otherwise 404) | 204 |
 
-- List rows would otherwise need one request per item. The batch route returns the cover (first by `created_at`, then `id`) of every item that has one, in one query, and signs all paths in one call: `createSignedUrls(paths, expiresIn)` ("Creates multiple signed URLs", Supabase JS reference; the page documents no limit on the number of paths, so the number per call is to be checked at implementation, with chunking if there is a limit). Signing cost is paid per list refresh, once per group, not per row. Whether it is a separate route or part of `GET /items` is a decision below
+- List rows would otherwise need one request per item. The batch route returns the cover (first by `created_at`, then `id`) of every active item that has an active photo, in one query, and signs all paths in one call: `createSignedUrls(paths, expiresIn)` ("Creates multiple signed URLs", Supabase JS reference; the page documents no limit on the number of paths, so the number per call is to be checked at implementation, with chunking if there is a limit). Soft-deleted items and soft-deleted photos are never signed. Signing cost is paid per list refresh, once per group, not per row. Whether it is a separate route or part of `GET /items` is a decision below
+- Routing: `GET /items/photos` and `GET /items/{id}` share a path shape, and `photos` is not a UUID, so the static route must be registered before the parameter route or the batch route answers 422 for the id. A test calls the batch route and expects covers, not a validation error
+- Signed URLs carry a per-signature token, so a client that caches by URL downloads every photo again after each refresh. The mobile list therefore caches images under a key made from the photo id, not the URL (expo-image's `cacheKey`: "The cache key used to query and store this specific image. If not provided, the `uri` is used also as the cache key", Expo SDK reference), and `cachePolicy` `'disk'`. Without it, 20 rows of 300 KB are 6 MB per refresh, which is the egress risk; with it, each photo is fetched once per device. `expo-image` is not a dependency of the app today and is added with the capture libraries
 
 - Access model (proposal): the bucket is private and holds no policies for `anon` or `authenticated`, so those roles can neither read nor write objects (default deny from the access control page quote). All access goes through the API, which authorizes by group membership exactly as for every other resource and talks to Storage with the Supabase secret key (`PREP_HAMSTER_SUPABASE_SECRET_KEY`, already in Infisical; the API would need it as a new runtime env on Coolify)
 - Why not direct upload from the app with the user's JWT: every policy would have to answer "is this user a member of the group in the path" inside `storage.objects` RLS. `anon` and `authenticated` have all privileges on public tables revoked (migration 0003), so the policy needs a SECURITY DEFINER function that `authenticated` may execute, which is a second authorization implementation next to `checkGroupAccess`, tested separately, and the pitfall memory (`reference_supabase_expo_pitfalls`) says a new function needs its EXECUTE revoked from anon and authenticated, which is the opposite of what such a policy function needs
@@ -88,12 +90,13 @@ Proposed routes (names pending), under `/v1`, group access via `checkGroupAccess
 | 422 | IDEMPOTENCY_KEY_REUSED (existing) | `photoId` exists but for another item, another group or another size |
 | 422 | PHOTO_TYPE_UNSUPPORTED | not image/jpeg, or the bytes are not a JPEG |
 | 422 | PHOTO_LIMIT_EXCEEDED | the item already has the maximum number of photos |
+| 409 | CONFLICT_RETRY (proposed, shared with `stock-split.md`) | the object for this `photoId` already exists but its row is not committed yet; retry with the same id |
 | 502 | STORAGE_UNAVAILABLE | Storage rejected or failed; nothing is attached |
 
 ## Mobile screens touched
 
 - `app/stocks/[id].tsx`: photo strip, "add photo" action sheet (camera or library), full-screen viewer with delete
-- Stock list rows: thumbnail from the cover photo (batch route), else the product master image
+- Stock list rows: thumbnail from the cover photo (batch route, cached by photo id, see API section), else the product master image
 - Upload generates `photoId` once per attempt and reuses it on retry, like `newStockId` in the split design
 - Pure module `src/photo-upload.ts`: validation, resize plan, multipart building, error-message mapping; tested without rendering like `location-manage.ts`
 - New dependencies for capture and resize (to be installed with `expo install` so SDK 58 compatible versions are chosen; versions not verified here): `expo-image-picker` and `expo-image-manipulator`. `expo-camera` is already installed but is a live-preview component for barcode scanning; `expo-image-picker` gives camera and library in one call
@@ -103,13 +106,15 @@ Proposed routes (names pending), under `/v1`, group access via `checkGroupAccess
 ## Migration and RLS
 
 - One drizzle migration creates `item_photos` and runs `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` for it in the same migration (0003 only covered tables that existed then; the every-table-has-RLS e2e check fails otherwise)
-- The bucket itself is not a public-schema table. It must be created private with a size cap and the `image/jpeg` content type restriction. Local development: `[storage.buckets.<name>]` in `supabase/config.toml` (the file's own commented example shows `public`, `file_size_limit` and `allowed_mime_types`). Hosted project: the Supabase "Creating buckets" page shows an SQL example ("-- Use Postgres to create a bucket." with `insert into storage.buckets`) but says nothing about which role may run it or about policies on `storage.buckets`, so whether the role the drizzle migration connects as may insert there is unverified. If it may not, the migration fails as a whole, and since the guard only checks that the storage schema exists, it would not help. The recommendation therefore provisions the hosted bucket through the Storage API with the secret key as a deploy step, not in a migration. The plain Postgres used by the API e2e has no storage schema either, which is a second reason to keep bucket creation out of the migration. The way to provision it is a decision below
+- The bucket itself is not a public-schema table. It must be created private with `file_size_limit` equal to the 2 MiB file cap (the global Free limit of 50 MB is never the binding one) and the `image/jpeg` content type restriction. The name, the size limit and the MIME type live in one small shared module of the API package; the deploy script that creates or updates the hosted bucket (idempotent, secret key from Infisical, kept in the repo and written down as a runbook step) and a test that parses `supabase/config.toml` both compare against it, so local and hosted cannot drift apart unnoticed. Local development: `[storage.buckets.<name>]` in `supabase/config.toml` (the file's own commented example shows `public`, `file_size_limit` and `allowed_mime_types`). Hosted project: the Supabase "Creating buckets" page shows an SQL example ("-- Use Postgres to create a bucket." with `insert into storage.buckets`) but says nothing about which role may run it or about policies on `storage.buckets`, so whether the role the drizzle migration connects as may insert there is unverified. If it may not, the migration fails as a whole, and since the guard only checks that the storage schema exists, it would not help. The recommendation therefore provisions the hosted bucket through the Storage API with the secret key as a deploy step, not in a migration. The plain Postgres used by the API e2e has no storage schema either, which is a second reason to keep bucket creation out of the migration. The way to provision it is a decision below
 - `storage.objects` already has RLS enabled by Supabase; this design adds no policy for `anon` or `authenticated`. Tests (see Tests) check denial of writes and of reads, and that the bucket is not public
 - Existing rows: none
 
 ## Concurrency
 
-Pattern from #192 and PR #219: decisions on locked rows inside the transaction. Global lock order for features that touch items, stocks, locations and tags (the same text is in the other three docs): item rows (ascending id), then stock rows, then location rows, then tag rows (ascending id). Photo rows are locked after their item.
+Pattern from #192 and PR #219: decisions on locked rows inside the transaction.
+
+Lock order shared by the four designs (item, stock, location, photo and tag rows): item rows (ascending id), then stock rows, then location rows, then photo rows, then tag rows (ascending id). A transaction takes only the kinds it needs, in this order, and never returns to an earlier kind. Several rows of one kind are locked with one `SELECT ... FOR ...` statement per row after sorting the ids in application code. The one exception is a single `UPDATE` that touches many rows of one kind (merge's repoint of stocks and of photos). It is safe because no other transaction locks more than one row of that kind at a time (consume, discard, move, split and photo delete each lock one row), and two merges that could touch the same rows are serialized by the item locks. Writing to an item row that the transaction already holds the lock on is not a new lock.
 
 No database transaction, connection or row lock is held across a call to Storage. A transaction that waited on an external HTTP upload would keep a pooled connection and the item row lock for as long as the upload takes, which stalls every other writer of that item (tag PUT, stock create, split, merge) and can exhaust the connection pool when Storage is slow. The upload therefore happens first, outside any transaction, and the row is written afterwards under a short lock.
 
@@ -121,42 +126,56 @@ sequenceDiagram
   participant S as Storage
   C->>A: POST photo (multipart, photoId)
   A->>A: validate type, size, JPEG signature
-  A->>D: replay probe: photo with id = photoId?
-  alt exists
-    A-->>C: 200 recorded photo, or 422 IDEMPOTENCY_KEY_REUSED
-  end
-  A->>D: read item and count photos (no lock, fast failure)
-  alt item missing or soft deleted
+  A->>D: read item incl. soft deleted (no lock)
+  alt no row
     A-->>C: 404
   end
+  A->>D: access check on the item's group (EDITOR)
+  A->>D: replay probe: photo with id = photoId in that group?
+  alt exists
+    A-->>C: 200 recorded photo (active, same item and size), else 422 IDEMPOTENCY_KEY_REUSED
+  end
+  alt item soft deleted
+    A-->>C: 404
+  end
+  A->>D: count active photos (no lock, fast failure)
   alt at the cap
     A-->>C: 422 PHOTO_LIMIT_EXCEEDED
   end
-  A->>S: upload object (no transaction open)
+  A->>S: upload object, upsert false (no transaction open)
+  alt object already exists
+    A->>D: probe again
+    alt row exists
+      A-->>C: 200 recorded photo
+    else no row yet
+      A-->>C: 409 retry (the existing object is not touched)
+    end
+  end
   alt upload fails
     A-->>C: 502 STORAGE_UNAVAILABLE
   end
   A->>D: BEGIN, lock item FOR NO KEY UPDATE
-  A->>D: item still active? count still below the cap?
-  alt no
+  A->>D: probe by photoId, item still active, count still below the cap
+  alt a check fails
     A->>D: ROLLBACK
-    A->>S: delete the object (best effort)
-    A-->>C: 404 or 422
+    A->>S: delete the object we uploaded unless a row with this photoId exists
+    A-->>C: 200 replay, 404 or 422
   end
   A->>D: insert item_photos row, COMMIT
   alt commit or insert fails
-    A->>S: delete the object (best effort)
+    A->>S: delete the object unless the failure is a conflict on photoId
     A-->>C: error
   end
   A-->>C: 201
 ```
 
-- The count and the insert run under the item row lock, so two concurrent uploads at one below the cap cannot both pass; the loser has already uploaded and deletes its object. The earlier count outside the lock only avoids uploading when the item is clearly full or gone
+- The count and the insert run under the item row lock, so two concurrent uploads at one below the cap cannot both pass; the loser has already uploaded and deletes its own object. The earlier count outside the lock only avoids uploading when the item is clearly full or gone
 - Atomicity is not claimed. If the upload succeeded and the later step fails, the compensating delete removes the object; if that delete also fails (or the API process dies in between), an orphan object remains. The first version accepts that gap: orphans are logged, and a periodic sweep that lists objects without a row older than one hour is a follow-up. The old statement that the row and the object succeed or fail together was wrong for this reason
-- Idempotency: `photoId` is the row's primary key and the object's name. A retry after a timeout hits the replay probe (or the primary key as the backstop for two simultaneous retries) and returns the recorded photo with a fresh signed URL instead of a second photo that would use up the cap. The probe compares item id, group id and byte size; a different item, group or size is 422 IDEMPOTENCY_KEY_REUSED, which is also the answer when the id exists in another group
-- Delete: in a short transaction lock the photo row `FOR NO KEY UPDATE`, check it belongs to the item in the path, set `deleted_at`, commit; the object is removed after the commit. A failed removal leaves an orphan handled the same way
+- Idempotency: `photoId` is the row's primary key and the object's name (`<group_id>/<photo_id>.jpg`), so the object path is shared by every request that carries the same `photoId`. Therefore a request may delete an object only if it uploaded it itself and no row with that `photoId` exists; deleting on any failure would remove the object that a concurrent identical request's committed row points to. Concretely: the upload is sent with `upsert` false (the Supabase JS reference lists `upsert` as an option and shows `upsert: false`, but states no default, so the design sets it explicitly) so a second upload of the same path fails instead of overwriting; a duplicate-object failure re-runs the probe and answers 200 if the winner's row is there, or 409 (a retryable answer, the code is the shared one in the decisions) if it is not there yet; the item lock serializes identical retries for the same item, and the probe under the lock turns the loser into a 200 replay. If the client keeps the same `photoId` after an orphan was left under that id, the 409 repeats; the client asks the user to retry, which generates a new id, and the sweep removes the orphan
+- The probe is scoped to the item's group, which is read (including a soft-deleted item) and access-checked first, so a `photoId` that exists in another group looks like any other taken id: 422 IDEMPOTENCY_KEY_REUSED. A `photoId` whose row was soft deleted by the user also returns 422 IDEMPOTENCY_KEY_REUSED (the key was used and the photo is gone; the client must use a new id). Never 500 from a primary key violation and never a 200 with a signed URL to an object that was deleted. The probe compares item id, group id and byte size: an upload is identified by its item and size, and the bytes are not compared (an honest client sends the same bytes for the same id; a client-sent checksum column was considered and left out as a name and a column for a case only a dishonest client can produce)
+- Delete: in a short transaction lock the photo row `FOR NO KEY UPDATE`, check it belongs to the item in the path (a photo of another item is 404 and stays untouched), set `deleted_at`, commit; the object is removed after the commit. A failed removal leaves an orphan handled the same way. Signed read URLs issued before the delete stay valid until their expiry (one hour in the proposal); the object itself is gone after the removal, so they fail once the object is deleted, but a client that cached the bytes keeps them
 - Merge (#212) and photo upload both lock the item row first, so they serialize; an upload against a merged-away item gets 404 at the locked re-check and deletes its object
-- Item delete currently checks stock references outside a transaction (same shape as #220). Item delete should also refuse or cascade for photos; proposal is to soft-delete the photos together with the item in the same transaction, then remove the objects
+- Item delete: the photos of the item are soft-deleted in the same transaction as the item (their objects are removed after the commit), so a deleted item does not keep reachable photos. Item delete currently checks stock references outside a transaction (same shape as #220); this design changes only the photo part (decision below)
 
 ## Tests
 
@@ -168,10 +187,12 @@ sequenceDiagram
   5. Storage failure leaves no `item_photos` row; a failing commit after a successful upload makes the API delete the object
   6. replay: the same `photoId` and body again returns 200 with one row; the same id with a different size or for another item returns 422
   7. no connection is held across the upload: the fake Storage blocks until released while the test starts a tag PUT and a stock create on the same item, and both finish before the upload is released
-  8. the batch route returns the cover (earliest `created_at`, ties by id) of each item and nothing for items without photos; DELETE with a photo id that belongs to another item returns 404
+  8. the batch route returns the cover of each item and nothing for items without photos; two photos of one item share the same `created_at` in the fixture so the tie goes to the smaller id (a missing `ORDER BY id` fails); soft-deleted photos and items are not returned; DELETE with a photo id that belongs to another item returns 404 and a follow-up read shows that photo still active (a 404 from a lookup that ignored the item would not prove scoping)
+  10. concurrent identical uploads (same `photoId`, same item): one row, one object, both requests answer 200 or 201 or the 409 retry, and the object is still present afterwards (a loser that deleted the shared object fails this); a retry after the user deleted the photo returns 422 IDEMPOTENCY_KEY_REUSED, not 500
+  11. a `photoId` from another group returns the same 422 body as an unrelated taken id
   9. what the fake records is asserted, not only the response: bucket name, object path (`<group_id>/<photo_id>.jpg`), content type, and that read URLs come from a signing call with an expiry
 - Denial tests: every new table is checked for denial as the `anon` and `authenticated` roles (explicit skip when those roles are missing, never a silent pass). Against a real local Supabase Storage (needs the storage-api container, run on demand, not part of the DB-only e2e): an upload with the publishable key is rejected, an anonymous GET of an existing object path is rejected, and the bucket's `public` flag is false (a write rejection alone would pass even if the bucket had been created public)
-- Provisioning check: a unit test parses `supabase/config.toml` and asserts the bucket is non-public with the size cap and the `image/jpeg` restriction; the same values are what the deploy step creates on the hosted project
+- Provisioning check: a unit test parses `supabase/config.toml` and asserts the bucket is non-public with the 2 MiB `file_size_limit` and the `image/jpeg` restriction, comparing with the shared module; a second test runs the deploy script against the local Supabase Storage (on demand, with the storage-api container) and reads the bucket back, so the hosted path is exercised by the same code and not only the local file
 - Unit: `photo-upload.ts` validation and error mapping; the fallback order (own photo, then product master image, then none)
 - Maestro: the camera and the system photo picker cannot be driven reliably in the emulator flow. The flow asserts only that the "add photo" entry and the picker open; the capture itself is verified by hand on a device and recorded as such, not claimed as automated
 - Negative control per branch (type check, cap, lock, rollback on failure, preference order)
@@ -206,7 +227,7 @@ sequenceDiagram
 - Question: does the app upload directly with the user's JWT under `storage.objects` policies, or through the API?
 - Options: through the API (private bucket, no policies for anon or authenticated, secret key in the API); direct upload with membership policies using a SECURITY DEFINER function; public bucket with unguessable paths
 - Recommendation: through the API
-- Reason: one authorization implementation (`checkGroupAccess`), consistent with the rest of the API and with the revoked table privileges; a public bucket makes every photo of every household readable by anyone with a link
+- Reason: one authorization implementation (`checkGroupAccess`), consistent with the rest of the API and with the revoked table privileges; a public bucket makes every photo of every household readable by anyone with a link. Accepted cost (changed: recorded after review): the API then holds the Supabase secret key (`PREP_HAMSTER_SUPABASE_SECRET_KEY`), which is a project-level admin credential that bypasses RLS for Storage, Auth and the Data API. The API already connects to the database as the table owner, so the added database exposure is small, but a leak of that key now also exposes Auth administration. The key is a runtime env on Coolify only, never in the app, and is used by the API only for Storage calls
 
 ### D-photo-upload-path. One-step proxy or signed upload URL
 
@@ -219,8 +240,8 @@ sequenceDiagram
 
 - Question: how are list thumbnails produced, given Free has no image transformation?
 - Options: the client uploads a second small file (for example 320 px) next to the original; the list downloads the resized original; upgrade to Pro for transformations
-- Recommendation: the list downloads the resized original, revisit if egress approaches the allowance
-- Reason: no second object to keep in sync, and the estimated volume is small; Pro is a paid plan for a feature this app does not yet need (the Pro monthly price was not collected for this doc; check it before deciding)
+- Recommendation: the list downloads the resized original, cached on the device under a key made from the photo id (`expo-image` `cacheKey`), revisit if egress approaches the allowance (changed: the cache key was added after review)
+- Reason: signed URLs change on every refresh, so without a stable cache key each refresh re-downloads every cover (20 rows of 300 KB are 6 MB, and about 1,000 such refreshes a month would reach the 5 GB egress allowance). With the cache key a cover is fetched once per device. There is no second object to keep in sync, and the estimated volume is small; Pro is a paid plan for a feature this app does not yet need (the Pro monthly price was not collected for this doc; check it before deciding)
 
 ### D-photo-limits. Size and count limits
 
@@ -251,7 +272,7 @@ sequenceDiagram
 - Question: how is the private bucket created on the hosted project and locally?
 - Options: `[storage.buckets.*]` in `supabase/config.toml` for local and a Storage API call (secret key) as a deploy step for hosted; a guarded SQL insert in a drizzle migration (skipped where no storage schema exists); the API creates it at boot if missing
 - Recommendation: `config.toml` for local plus a Storage API call as a deploy step for hosted (changed; the first revision recommended the SQL insert in the migration)
-- Reason: the Supabase docs show the SQL insert but do not say which role may run it, and a migration role without the privilege would fail the whole migration; the guard only tests that the storage schema exists. The deploy step uses the secret key the API already needs. The bucket definition stays in git through `config.toml` and a test that parses it. Boot-time creation gives the API a permission it should not need at runtime
+- Reason: the Supabase docs show the SQL insert but do not say which role may run it, and a migration role without the privilege would fail the whole migration; the guard only tests that the storage schema exists. The deploy step uses the secret key the API already needs. The bucket definition stays in git: one shared module holds the name, the 2 MiB size limit and the MIME type, a repo script (idempotent) creates or updates the hosted bucket from it, and tests compare `config.toml` and the script's result with it, so hosted and local cannot drift unnoticed (changed: the script and the shared module were added after review). Boot-time creation gives the API a permission it should not need at runtime
 
 ### D-photo-list-covers. How list rows get thumbnails (new)
 
@@ -266,6 +287,20 @@ sequenceDiagram
 - Options: client-generated `photoId` that becomes the row's primary key and the object's name; no key (a retry may create a duplicate)
 - Recommendation: client-generated `photoId`
 - Reason: upload retries after a timeout are the normal failure on a phone, and a duplicate uses up the per-item cap; the same pattern as `newStockId` in the split design
+
+### D-photo-exif. Location and other metadata in uploaded photos (new)
+
+- Question: how is EXIF metadata (GPS position, device) kept out of stored photos?
+- Options: verify on a device that the resize output has no EXIF and rely on it; strip metadata explicitly on the client before upload; strip it on the server
+- Recommendation: verify on a device with a geotagged test photo that the resize output has no EXIF, and add an explicit client-side strip if it does (the server does not re-encode, so it cannot strip)
+- Reason: the Expo image manipulator page does not say whether metadata survives (checked: no mention of EXIF or metadata), and a household photo with a GPS position is personal data that leaves the phone. Group members can view each other's photos, so the home location could be exposed. This is a manual verification step recorded in the implementation, not a CI test
+
+### D-photo-item-delete. What item delete does to its photos (new)
+
+- Question: what happens to an item's photos when the item is deleted?
+- Options: soft-delete the photos in the same transaction as the item and remove the objects after the commit; refuse the item delete while photos exist (like `ITEM_IN_USE` for stocks); leave the photos
+- Recommendation: soft-delete the photos with the item and remove the objects after the commit
+- Reason: refusing would force the user to delete photos one by one before deleting a product they already decided to delete; leaving them keeps reachable objects of a deleted item
 
 ### D-photo-capture-libs. Capture and resize libraries
 

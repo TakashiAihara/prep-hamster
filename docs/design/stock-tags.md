@@ -30,7 +30,7 @@ Proposed (names pending, see decisions):
 
 | Table | Columns | Notes |
 | --- | --- | --- |
-| tags | id uuid pk, group_id uuid fk groups, name text not null, created_at, updated_at, deleted_at | the common `timestamps` helper |
+| tags | id uuid pk, group_id uuid fk groups, name text not null, normalized_name text not null, created_at, updated_at, deleted_at | the common `timestamps` helper; `name` is kept as typed, `normalized_name` is computed by the API (see below) and carries the unique index |
 | item_tags | item_id uuid fk items, tag_id uuid fk tags, created_at | primary key (item_id, tag_id); no deleted_at |
 
 - `tags.normalized_name` is a plain `text not null` column that the API computes (one shared helper used by POST, PATCH rename, and the client's find-or-create match). It is not a generated column: Postgres has no NFKC normalization, `lower()` is not Unicode case folding, and a generated column needs an `IMMUTABLE` expression, so the normalization has to live in application code
@@ -63,10 +63,10 @@ Proposed routes (names pending). All under `/v1`, group access checked with `che
 
 | Status | Code (proposed) | When |
 | --- | --- | --- |
-| 404 | NOT_FOUND | tag or item missing or soft deleted |
+| 404 | NOT_FOUND | the item (PUT) or the tag (PATCH, DELETE) named in the URL is missing or soft deleted |
 | 422 | VALIDATION_ERROR | body fails the zod schema (name empty or over the length cap, more tag ids than the sanity bound, non-guid id) |
 | 422 | TAG_NAME_DUPLICATE | another active tag in the group has the same normalized name (mirrors `ITEM_BARCODE_DUPLICATE`, raised from the unique violation) |
-| 422 | TAG_GROUP_MISMATCH | a tag id belongs to another group or is deleted (mirrors `CATEGORY_GROUP_MISMATCH`) |
+| 422 | TAG_GROUP_MISMATCH | a tag id in the request body is missing, deleted, or belongs to another group: one code and one message for all three, so the answer does not reveal whether a UUID exists in another group (mirrors `CATEGORY_GROUP_MISMATCH`). A tag deleted concurrently with the PUT gets the same answer |
 | 422 | TAG_LIMIT_EXCEEDED | the resulting set would exceed the per-item cap |
 
 - POST `/tags` is find-or-create from the user's point of view in the mobile flow: the client first matches the typed name against the loaded tag list, and only calls POST when there is no match. A race that creates the same name twice is resolved by the unique index (the loser gets 422 TAG_NAME_DUPLICATE and re-reads the list)
@@ -89,10 +89,11 @@ Proposed routes (names pending). All under `/v1`, group access checked with `che
 
 Follows the pattern of #192 and PR #219 (rows are locked inside the transaction and the decision is made on the locked values; lock order is fixed to avoid deadlock).
 
-- Global lock order for features that touch items, stocks, locations and tags (the same text is in `stock-split.md` and `item-merge.md`): item rows (ascending id), then stock rows, then location rows, then tag rows (ascending id). A transaction takes a later kind only after the earlier kinds it needs
+- Lock order shared by the four designs (item, stock, location, photo and tag rows): item rows (ascending id), then stock rows, then location rows, then photo rows, then tag rows (ascending id). A transaction takes only the kinds it needs, in this order, and never returns to an earlier kind. Several rows of one kind are locked with one `SELECT ... FOR ...` statement per row after sorting the ids in application code. The one exception is a single `UPDATE` that touches many rows of one kind (merge's repoint of stocks and of photos). It is safe because no other transaction locks more than one row of that kind at a time (consume, discard, move, split and photo delete each lock one row), and two merges that could touch the same rows are serialized by the item locks. Writing to an item row that the transaction already holds the lock on is not a new lock.
 - Acquiring several rows in id order is done with one `SELECT ... FOR ...` statement per row, after sorting the ids in application code. The Postgres documentation (SELECT, "The Locking Clause", Caution) says that with `ORDER BY` and a locking clause "ORDER BY is applied first" and the command "might then block trying to obtain a lock on one or more of the rows", and it does not state the order in which rows are locked. Sorting in the application and locking one row per statement does not depend on that unstated behavior, and the cost is at most tens of statements (bounded by the caps)
 - PUT `/items/{id}/tags`: one transaction. Lock the item row with `FOR NO KEY UPDATE`; 0 rows (deleted meanwhile) means 404. Lock each requested tag row `FOR SHARE` in ascending id order and re-check `deleted_at IS NULL` and group; delete the item's current `item_tags`, insert the deduplicated set. The cap is counted on the locked item, so two concurrent PUTs for one item serialize
 - DELETE `/tags/{id}`: lock the tag row `FOR NO KEY UPDATE`, soft delete, delete its `item_tags`. `FOR SHARE` from a concurrent PUT conflicts with this lock (Postgres, Explicit Locking, Table 13.3: FOR SHARE conflicts with FOR NO KEY UPDATE), so a PUT either finishes first (its rows are then deleted by the tag delete) or sees the tag as deleted and returns 422 TAG_GROUP_MISMATCH. No cycle: tag delete takes no item lock
+- PATCH `/tags/{id}` (rename): one transaction. Lock the tag row `FOR NO KEY UPDATE`; no row or `deleted_at` set means 404. Compute `normalized_name` with the shared helper and update `name`, `normalized_name` and `updated_at`; a unique violation on the partial index is 422 TAG_NAME_DUPLICATE. It serializes with DELETE on the tag row (the loser sees the tag as deleted and answers 404) and two renames of one tag apply one after the other, last write wins
 - Item merge (#212) also writes `item_tags`; it follows the same order (items, then tags `FOR SHARE`) and skips deleted tags, so a tag delete cannot leave an `item_tags` row for a deleted tag (see `item-merge.md`)
 - Every reader of `item_tags` joins `tags.deleted_at IS NULL` as a second line of defense, so a stray row for a deleted tag would not be counted or shown
 - Create duplicates are decided by the unique index, not by a read-then-insert (the exact race class that #220 reports for location delete)
@@ -101,10 +102,10 @@ Follows the pattern of #192 and PR #219 (rows are locked inside the transaction 
 
 - API e2e (`apps/core/api/e2e/tags.test.ts`, concurrency in a `tags-concurrency.test.ts` using `lock-helper.ts`):
   1. create, rename, duplicate name 422, cross-group tag 422; POST and PATCH produce the same normalized name for the same input
-  2. list ordered by usage: fixtures give three tags different counts (for example 3, 1, 0) with names in the opposite alphabetical order, so a missing `ORDER BY count DESC` fails; `itemCount` excludes soft-deleted items
+  2. list ordered by usage: fixtures give four tags counts 3, 1, 1 and 0 with names in the opposite alphabetical order of the counts, so a missing `ORDER BY count DESC` fails and the two tags tied at 1 are listed in name order, so a missing secondary sort fails; `itemCount` excludes soft-deleted items
   3. PUT replaces the set; a second PUT with fewer tags removes the others; `[a, a]` equals `[a]`; over the cap returns 422 with code TAG_LIMIT_EXCEEDED (the test asserts the code, not only the status, so a schema-level VALIDATION_ERROR does not satisfy it)
   4. delete detaches from every item and the filters no longer return them; item soft delete removes its `item_tags`
-  5. race: PUT against tag delete (no `item_tags` row for a deleted tag remains); two PUTs against one item at the cap
+  5. race: PUT against tag delete (no `item_tags` row for a deleted tag remains); two PUTs against one item at the cap; rename against delete (the rename answers 404 or the tag is renamed and then deleted, never a revived tag); two renames to the same name (one succeeds, one 422 TAG_NAME_DUPLICATE); a PUT whose body names a deleted tag, a foreign-group tag and a nonexistent tag gets byte-identical 422 bodies
   6. stock and item list filter by `tagId`
 - RLS: the existing every-table-has-RLS check covers the new tables. A denial test connects as the `anon` and `authenticated` roles and expects `permission denied` on each new table. It needs a database that has those roles (the local Supabase DB does; plain Postgres does not). When the roles are missing the test reports an explicit skip, never a silent pass
 - Unit (`bun test src`): `tag-manage.ts` name matching and trimming, usage ordering of the list

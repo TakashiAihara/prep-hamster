@@ -51,7 +51,7 @@ Request:
 
 Response 201: `{ source: Stock, created: Stock, events: [StockEvent, StockEvent] }`.
 
-Replay: a request whose `newStockId` already exists as a stock created by a split of the same source with the same quantity returns 200 with `{ source, created, events }` read at replay time. `source` and `created` are the current rows (they may have changed since the first call), `events` are the two recorded events. The location, dates and note of the request are not compared on replay, because the stock may have been edited since. The replay check runs before the source lookup and before every quantity and location check (see Concurrency), so it is reachable after the source quantity, the source row or the target location changed.
+Replay: a request whose `newStockId` already exists as a stock created by a split of the same source with the same quantity returns 200 with `{ source, created, events }` read at replay time. `source` and `created` are the current rows (they may have changed since the first call), `events` are the two recorded events. The location, dates and note of the request are not compared on replay, because the stock may have been edited since. The replay check runs after the source row is read (including a soft-deleted one) and the caller's access to its group is checked, and before every quantity and location check (see Concurrency), so it is reachable after the source quantity, the source row or the target location changed, and it never looks outside the caller's group.
 
 - `quantity` must be greater than 0 and strictly less than the source's remaining quantity. Splitting off everything is a move, which already exists
 - Omitted `locationId`, `useByDate` and `bestBeforeDate` mean "copy from the source". A date sent as null clears the date on the new stock (same meaning as null in `updateStockBodyDtoSchema`). `note` is never copied: omitted or null both give a null note
@@ -88,12 +88,14 @@ Whether a distinct code is wanted for "split off everything" is a decision below
 
 ## Concurrency
 
-Pattern from #192 and PR #219: decisions are made on rows locked inside the transaction. Global lock order for features that touch items, stocks, locations and tags (the same text is in `stock-tags.md` and `item-merge.md`): item rows (ascending id), then stock rows, then location rows, then tag rows (ascending id). Rows of one kind are locked one `SELECT ... FOR ...` statement per row after sorting ids in application code.
+Pattern from #192 and PR #219: decisions are made on rows locked inside the transaction.
 
-- Every transaction that inserts a `stocks` row (stock create and split) holds `FOR SHARE` on the row of the item it attaches the stock to, before inserting. Merge (#212) holds `FOR NO KEY UPDATE` on the source and destination items for its whole transaction. Postgres, Explicit Locking, Table 13.3: FOR SHARE conflicts with FOR NO KEY UPDATE, so an inserter and a merge of that item cannot overlap. The foreign key check on `stocks.item_id` is not enough: it takes the weaker key-share lock, which per the same table does not conflict with FOR NO KEY UPDATE
-- Why that closes the race: merge takes its item locks first and runs the repoint `UPDATE stocks` as a later statement, which in READ COMMITTED takes a new snapshot. A split that committed before the merge's lock is visible to that statement and is repointed; a split that starts later waits at the item lock until the merge commits and then sees the item as soft deleted
-- Split reads the source stock without a lock to learn its `item_id`, then takes the item lock, then the stock lock. If the item row is missing or soft deleted at that point (a merge moved the stock meanwhile), the transaction is rolled back and the whole operation restarts from the source read. Each restart needs another committed merge in between, so it ends; as a safety bound it stops after 3 attempts with a conflict response (code name in the decisions). After the stock lock, the locked row's `item_id` must equal the locked item's id (checked, expected always true because a merge of that item cannot commit while the split holds the item lock)
-- Consume, discard and move take no item lock. A merge's repoint waits for their row locks and rewrites only `item_id`; they do not read the item. This is consistent with the global order (they use a suffix of it)
+Lock order shared by the four designs (item, stock, location, photo and tag rows): item rows (ascending id), then stock rows, then location rows, then photo rows, then tag rows (ascending id). A transaction takes only the kinds it needs, in this order, and never returns to an earlier kind. Several rows of one kind are locked with one `SELECT ... FOR ...` statement per row after sorting the ids in application code. The one exception is a single `UPDATE` that touches many rows of one kind (merge's repoint of stocks and of photos). It is safe because no other transaction locks more than one row of that kind at a time (consume, discard, move, split and photo delete each lock one row), and two merges that could touch the same rows are serialized by the item locks. Writing to an item row that the transaction already holds the lock on is not a new lock.
+
+- Every transaction that inserts a `stocks` row goes through one function that takes `FOR SHARE` on the row of the item it attaches the stock to and re-checks `deleted_at` after acquiring it (specified for stock create in `item-merge.md`, "Stock create's side of the lock"; split calls the same function for the new stock). Merge (#212) holds `FOR NO KEY UPDATE` on the source and destination items for its whole transaction. Postgres, Explicit Locking, Table 13.3: FOR SHARE conflicts with FOR NO KEY UPDATE, so an inserter and a merge of that item cannot overlap. The foreign key check on `stocks.item_id` is not enough: it takes the weaker key-share lock, which per the same table does not conflict with FOR NO KEY UPDATE
+- Why that closes the race: merge takes its item locks first and runs the repoint `UPDATE stocks` as a later statement, which in READ COMMITTED takes a new snapshot. A split that committed before the merge's lock is visible to that statement and is repointed; a split that starts later waits at the item lock until the merge commits and then finds the item soft deleted
+- Split reads the source stock without a lock to learn its `item_id`, takes the item lock, then the stock lock. After the item lock it tells two cases apart by re-reading the source stock: if the stock's `item_id` is no longer the one it locked (a merge moved the stock), the transaction is rolled back and the operation restarts from the source read; each restart needs another committed merge in between, so it ends, and as a safety bound it stops after 3 attempts with a conflict response (code name in the decisions). If the stock's `item_id` is unchanged but that item is soft deleted, no merge is involved (a merge repoints every stock of its source, so this is only the #220 shaped state of a stock left on a deleted item): that is terminal, not retryable, and answers 422 ITEM_GROUP_MISMATCH like stock create does for an item that is not active. After the stock lock, the locked row's `item_id` must equal the locked item's id (checked, expected always true because a merge of that item cannot commit while the split holds the item lock)
+- Consume, discard and move take no item lock. A merge's repoint waits for their row locks and rewrites only `item_id`; they do not read the item. They use a suffix of the shared order
 
 ```mermaid
 sequenceDiagram
@@ -101,28 +103,35 @@ sequenceDiagram
   participant A as API
   participant D as Postgres transaction
   C->>A: POST split (newStockId, quantity, locationId)
-  A->>D: replay probe: stock with id = newStockId?
+  A->>D: read source stock incl. soft deleted (no lock)
+  alt no row
+    A-->>C: 404
+  end
+  A->>D: access check on the source's group (EDITOR)
+  A->>D: replay probe: stock with id = newStockId in that group?
   alt exists
-    A->>D: access check, compare recorded event (source id, quantity)
+    A->>D: compare recorded creation event (source id, quantity)
     alt same source and quantity
       A-->>C: 200 recorded result
     else different
       A-->>C: 422 IDEMPOTENCY_KEY_REUSED
     end
   end
-  A->>D: read source stock (no lock) for item_id and group
-  alt no row
+  alt source soft deleted
     A-->>C: 404
   end
   A->>D: BEGIN, lock item FOR SHARE
-  alt item missing or soft deleted (merged meanwhile)
-    A->>D: ROLLBACK, restart from source read
+  alt item soft deleted, stock item_id unchanged
+    A-->>C: 422 ITEM_GROUP_MISMATCH
+  end
+  alt stock item_id changed (merged meanwhile)
+    A->>D: ROLLBACK, restart from the source read (max 3)
   end
   A->>D: lock source stock FOR NO KEY UPDATE
-  alt no row (deleted meanwhile)
+  alt no row or deleted meanwhile
     A-->>C: 404
   end
-  A->>D: lock target location FOR NO KEY UPDATE (active, same group)
+  A->>D: lock the effective target location FOR NO KEY UPDATE (active, same group)
   alt not valid
     A-->>C: 422 LOCATION_GROUP_MISMATCH
   end
@@ -139,7 +148,9 @@ sequenceDiagram
 ```
 
 - The quantity check uses the locked row's value, not the value read before the transaction (consume and discard use a conditional UPDATE for the same effect; split needs the value to build the response and the new row, so it locks first, like move)
-- Idempotency: `newStockId` is the new stock's primary key. The replay probe runs first, before any state-dependent check, so a retry of a completed split answers 200 even though the source now holds less than the split quantity, was consumed or deleted, or the target location was deleted. The probe compares the source id and the quantity recorded on the new stock's creation event, in the database (same reason as `findRecordedDeltaEvent`: `real` columns do not round-trip through JS). The access check uses the group of the existing new stock. A `newStockId` that exists but was not created by a split of this source with this quantity returns 422 IDEMPOTENCY_KEY_REUSED. The primary key violation inside the transaction (recognized by the existing `isUniqueViolation`) is only the backstop for two identical requests running at once: it rolls back and runs the probe again. No second `eventId` is needed because the events are created together with the stock
+- The location check applies to the effective location: the requested `locationId`, or the source's own location when the request omits it (`stocks.location_id` is `not null`, so there is always one). If the source's location was soft deleted, an omitted `locationId` fails with 422 LOCATION_GROUP_MISMATCH and the client asks the user to pick a place, rather than copying a deleted location onto a new stock
+- Idempotency: `newStockId` is the new stock's primary key. The replay probe runs before any state-dependent check, so a retry of a completed split answers 200 even though the source now holds less than the split quantity, was consumed or soft deleted, or the target location was deleted. To avoid a cross-group existence oracle, the probe is scoped to the source's group, which is read (including a soft-deleted source) and access-checked first. A `newStockId` that exists in another group, or exists in this group but was not created by a split of this source with this quantity, gets the same answer, 422 IDEMPOTENCY_KEY_REUSED, from the probe or from the primary key violation at insert. That reveals that the id is taken but neither where nor by what, which is inherent in a client-chosen primary key and not exploitable for random UUIDs. The probe compares the source id and the quantity recorded on the new stock's creation event, in the database (same reason as `findRecordedDeltaEvent`: `real` columns do not round-trip through JS). If the new stock was soft deleted afterwards, the replay still answers 200 with the stock as it is (its `deletedAt` set). The primary key violation inside the transaction (recognized by the existing `isUniqueViolation`) is only the backstop for two identical requests running at once: it rolls back and runs the probe again. No second `eventId` is needed because the events are created together with the stock
+- What identifies "the same request": the source id and the quantity. The location, dates and note are not compared, because the new stock may have been edited since. So the client must generate a new `newStockId` whenever the user changes any field and presses the button again; it reuses the id only for automatic retries of one button press (that is what "attempt" means in the mobile section). Photos compare a different, stricter-or-looser set (item id, group, byte size) because the identity of an upload is its item and size; each design compares what defines the operation
 - Concurrent consume or discard on the source: it either commits before the split's lock (the split sees the smaller quantity) or waits for it. The split never reads a stale quantity
 - Concurrent location delete: the target lock `FOR NO KEY UPDATE` is the same lock PR #219 takes for move. #220 (location delete checks references outside the transaction) is a related open race on the delete side; split does not make it worse and does not depend on it, but the fix for #220 should cover split as another writer of `stocks.location_id`
 - Concurrent delete of the source: the source lock finds the row soft-deleted or gone, and the response is 404
@@ -153,7 +164,9 @@ sequenceDiagram
   4. wrong-group location 422; VIEWER 403; deleted source 404
   5. replay: split 3 of 5 (remaining 2, below the split quantity), then the identical request again: 200 with one new stock and no second event. Repeat after the source is consumed to 0, after the source is soft deleted, and after the target location is soft deleted: each answers 200. The same `newStockId` with quantity 1: 422 IDEMPOTENCY_KEY_REUSED. A `newStockId` that belongs to a stock created by POST: 422
   6. races: split against delete of the source (404, no orphan new stock); two splits of 3 against a stock of 5 (exactly one succeeds); split against a consume that leaves too little; two identical requests at once (one 201, one 200, one new stock)
-  7. split against merge (with `item-merge.md`): hold the merge's item locks in an open transaction, start the split, release the merge; at the end no active stock references a soft-deleted item, and the split either landed on the destination item or answered 404. Run both orders of arrival
+  7. split against merge (with `item-merge.md`): hold the merge's item locks in an open transaction, start the split against a stock of the source item, release the merge; the split must answer 201 with the new stock on the destination item (a 404 here fails the test, because the stock was not deleted), and no active stock references a soft-deleted item. Run both orders of arrival (merge first, split first: then the new stock is repointed by the merge). A second case with the stock soft deleted answers 404, and a third with the item soft deleted and the stock left on it answers 422 ITEM_GROUP_MISMATCH without retrying
+  8. replay across groups: a `newStockId` that belongs to a stock of another group gets 422 IDEMPOTENCY_KEY_REUSED with the same body as an id used by an unrelated stock of this group, never 403 or 404
+  9. omitted `locationId` with a soft-deleted source location: 422 LOCATION_GROUP_MISMATCH
 - Unit: `split` input validation (strictly less than remaining), result handling for uncertain outcomes
 - Maestro: `stock-detail-split.yaml` modeled on `stock-detail-move.yaml` (split 1 of a unique stock, assert two rows with the product name, assert quantities)
 - Negative control per branch: strictly-less check, location check, replay-versus-conflict decision, replay probe moved after the validations (test 5 must fail), removal of the item `FOR SHARE` (test 7 must fail), lock removal on the source stock (the race tests must fail)
@@ -174,9 +187,9 @@ sequenceDiagram
   1. Two new enum values (a split-out event on the source, a split-in event on the new stock)
   2. One new enum value used on both rows with the sign of `quantity_delta` telling the side
   3. No new type: DISCARD on the source and ADD (existing, never written) on the new stock
-  4. ADD (existing, never written until now) on the new stock and one new enum value on the source
+  4. ADD (existing, never written until now) on the new stock and one new enum value on the source (proposed name `SPLIT`)
 - Recommendation: option 4 (changed in the second revision; the first recommended option 2)
-- Reason: option 3 corrupts waste statistics. Option 2 makes the new stock's creation event a non-ADD type, which a report filtering on ADD would miss, and gives split-created stocks event sums that differ in meaning from other stocks without saying so. Option 4 keeps ADD meaning "stock received a quantity" and needs one new value instead of two. The remaining asymmetry (only split-created stocks have an ADD event today) is documented in the data model section
+- Reason: option 3 corrupts waste statistics. ADD is the existing value for "this stock received a quantity", and option 4 needs one new value instead of two. A report that filters on ADD would today see only split-created stocks, since creation by POST writes no ADD event; that is why the asymmetry is stated in the data model section and why a later change that writes ADD on every creation would make the two kinds consistent. The argument that a report would miss a non-ADD creation event under option 2 is hypothetical (no report exists), so the choice rests on reusing the existing meaning and the smaller enum change
 
 ### D-split-link. Linking the two stocks
 
@@ -202,8 +215,8 @@ sequenceDiagram
 
 - Question: which status and code does a split return if it restarted 3 times because the source stock's item was merged away each time?
 - Options: 409 with a new code; 503 with a new code; reuse NOT_FOUND
-- Recommendation: 409 with a new code (name to be chosen with the other new codes)
-- Reason: the request is valid and can be retried by the client; NOT_FOUND would tell the user the stock is gone, which is false
+- Recommendation: 409 with a new code (proposed name `CONFLICT_RETRY`; the only new error code of this doc, and the same code is proposed for the photo upload's "object exists, row not committed yet" answer in `item-photos.md`)
+- Reason: the request is valid and can be retried by the client; NOT_FOUND would tell the user the stock is gone, which is false. The restart applies only when the stock's item changed; an item that is deleted while the stock still points at it is a terminal 422 ITEM_GROUP_MISMATCH, not a retry (changed in the third revision)
 
 ### D-split-route. Route and request key names
 
