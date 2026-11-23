@@ -567,7 +567,6 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
     // updatedAt を見るクライアントから論理削除を検知できるようにするため。
     // 行を押さえてから外す。並行する PUT /items/{id}/tags は同じ行を FOR NO KEY UPDATE で
     // 取るので、削除済みの item に tag が付き直ることはない。
-    const now = new Date()
     // 写真は item と同じ transaction で soft delete する (削除済みの item に写真を残さない)
     const removedPhotos = await db.transaction(async (tx) => {
       const [locked] = await tx
@@ -576,12 +575,13 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
         .where(and(eq(items.id, id), isNull(items.deletedAt)))
         .for("no key update")
       if (!locked) return []
-      // 写真の時刻は sweep が読む時計 (photoClock) で、item の lock を取った後に読む。DB の時計と混ぜると、止まった行の判定が 2 つに分かれる。
-      // lock の待ちの前に読むと、待った分だけ削除時刻が古くなり、late-upload の窓の起点がずれる
-      const photoAt = new Date(c.get("photoClock")())
-      await tx.update(items).set({ deletedAt: now, updatedAt: now }).where(eq(items.id, id))
+      // 削除の時刻は sweep が読む時計 (photoClock) で、item の lock を取った後に 1 度だけ読み、item と写真に同じ値を使う。
+      // DB の時計と混ぜると、止まった行の判定が 2 つに分かれる。lock の待ちの前に読むと、待った分だけ削除時刻が古くなり、
+      // late-upload の窓の起点がずれる
+      const at = new Date(c.get("photoClock")())
+      await tx.update(items).set({ deletedAt: at, updatedAt: at }).where(eq(items.id, id))
       // lock の順は item → photo → tag (設計 doc の Concurrency)
-      const photos = await softDeletePhotosOfItem(tx, id, photoAt)
+      const photos = await softDeletePhotosOfItem(tx, id, at)
       await tx.delete(itemTags).where(eq(itemTags.itemId, id))
       return photos
     })

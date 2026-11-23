@@ -689,6 +689,9 @@ test("deleting an item stamps its photos with the clock read after the item lock
 
   expect(result[0]?.status === "fulfilled" && (result[0].value as Response).status).toBe(204)
   expect((await rowOf(photoId))?.deletedAt?.getTime()).toBe(t + 60 * MIN)
+  const [item] = await testDb.select().from(itemsTable).where(eq(itemsTable.id, itemId))
+  expect(item?.deletedAt?.getTime()).toBe(t + 60 * MIN)
+  expect(item?.updatedAt.getTime()).toBe(t + 60 * MIN)
 })
 
 test("removeObjectsOf makes one Storage call per 100 rows, and a failed call fails only its rows", async () => {

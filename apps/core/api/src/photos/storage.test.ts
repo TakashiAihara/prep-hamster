@@ -113,3 +113,58 @@ test("createPhotoStorageFromEnv names the variable whose value is not a URL", ()
     }),
   ).toThrow("SUPABASE_PUBLIC_URL is not a valid URL")
 })
+
+const withPublic = (publicUrl: string) =>
+  createPhotoStorageFromEnv({
+    SUPABASE_URL: "https://p.supabase.co",
+    SUPABASE_SECRET_KEY: "k",
+    SUPABASE_PUBLIC_URL: publicUrl,
+  })
+
+test("SUPABASE_URL is trimmed like the other variables, and SUPABASE_PUBLIC_URL must be http or https", async () => {
+  expect(make(" https://p.supabase.co \n")).not.toBeNull()
+  const base = `http://127.0.0.1:${signing.port}`
+  const padded = createPhotoStorageFromEnv({
+    SUPABASE_URL: ` ${base}/ \n`,
+    SUPABASE_SECRET_KEY: "k",
+    SUPABASE_PUBLIC_URL: "https://photos.example",
+  })
+  // the rewrite compares against the connection URL, so an untrimmed one would leave the origin as it was
+  expect((await padded?.signUrls(["a.jpg"], 60))?.get("a.jpg")).toBe(
+    "https://photos.example/storage/v1/object/sign/item-photos/a.jpg?token=t",
+  )
+  expect(() => make(" http://project.supabase.co ")).toThrow("SUPABASE_URL must be https")
+  expect(() => withPublic("ftp://photos.example")).toThrow(
+    "SUPABASE_PUBLIC_URL must be http or https",
+  )
+  expect(() => withPublic("javascript:alert(1)")).toThrow(
+    "SUPABASE_PUBLIC_URL must be http or https",
+  )
+  expect(withPublic("http://192.168.0.5:54321")).not.toBeNull()
+})
+
+test("a signed URL that cannot be rewritten is returned unchanged with one warning", async () => {
+  const warnings: unknown[][] = []
+  const original = console.warn
+  console.warn = (...args: unknown[]) => void warnings.push(args)
+  try {
+    // supabase-js percent-encodes the URL it builds (and uses another host for hosted projects), so a signed URL
+    // need not start with the URL the client was given; a space in the path makes that happen without a real hosted project
+    const storage = createSupabasePhotoStorage(
+      `http://127.0.0.1:${signing.port}/a b`,
+      "k",
+      1000,
+      "https://photos.example",
+    )
+
+    const first = await storage.signUrls(["a.jpg"], 60)
+    const second = await storage.signUrls(["a.jpg"], 60)
+
+    expect(first.get("a.jpg")).toStartWith(`http://127.0.0.1:${signing.port}/a%`)
+    expect(second.get("a.jpg")).toBe(first.get("a.jpg"))
+    expect(warnings).toHaveLength(1)
+    expect(String(warnings[0]?.[0])).toContain("SUPABASE_PUBLIC_URL was not applied")
+  } finally {
+    console.warn = original
+  }
+})

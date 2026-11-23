@@ -45,8 +45,19 @@ export function createSupabasePhotoStorage(
   })
   const bucket = () => client.storage.from(PHOTO_BUCKET.name)
   // API が Storage に繋ぐ URL と、端末が署名 URL を取りに行く URL が違うとき (API が container の中にいる等) に、署名 URL の origin だけを差し替える
-  const toPublic = (signed: string) =>
-    publicUrl && signed.startsWith(url) ? publicUrl + signed.slice(url.length) : signed
+  // 署名 URL が接続先で始まらない (差し替えられない) ときは、黙って元の URL を返さず、1 度だけ警告する
+  let warned = false
+  const toPublic = (signed: string) => {
+    if (!publicUrl) return signed
+    if (signed.startsWith(url)) return publicUrl + signed.slice(url.length)
+    if (!warned) {
+      warned = true
+      console.warn(
+        "[photo-storage] a signed URL does not start with SUPABASE_URL, so SUPABASE_PUBLIC_URL was not applied to it",
+      )
+    }
+    return signed
+  }
 
   return {
     async upload(path, bytes, contentType) {
@@ -89,7 +100,7 @@ const parsedUrl = (name: string, value: string): URL => {
 export function createPhotoStorageFromEnv(
   env: Record<string, string | undefined> = process.env,
 ): PhotoStorage | null {
-  const url = env["SUPABASE_URL"]?.replace(/\/+$/, "")
+  const url = env["SUPABASE_URL"]?.trim().replace(/\/+$/, "")
   const key = env["SUPABASE_SECRET_KEY"]?.trim()
   if (!url || !key) return null
   const parsed = parsedUrl("SUPABASE_URL", url)
@@ -97,6 +108,11 @@ export function createPhotoStorageFromEnv(
     throw new Error("SUPABASE_URL must be https (plain http is accepted only for a local Supabase)")
   }
   const publicUrl = env["SUPABASE_PUBLIC_URL"]?.trim().replace(/\/+$/, "")
-  if (publicUrl) parsedUrl("SUPABASE_PUBLIC_URL", publicUrl)
+  if (
+    publicUrl &&
+    !["http:", "https:"].includes(parsedUrl("SUPABASE_PUBLIC_URL", publicUrl).protocol)
+  ) {
+    throw new Error("SUPABASE_PUBLIC_URL must be http or https")
+  }
   return createSupabasePhotoStorage(url, key, STORAGE_TIMEOUT_MS, publicUrl || undefined)
 }

@@ -64,6 +64,11 @@ export function PhotoSection({ itemId }: { itemId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [viewing, setViewing] = useState<PhotoDto | null>(null)
+  // 拡大表示の中にも同じ error を出すので、開くとき・閉じるときに前の操作の error を持ち越さない
+  const showViewer = (photo: PhotoDto | null) => {
+    setError(null)
+    setViewing(photo)
+  }
   // 送信に失敗して結果が分からない写真。縮小した file も同じものを使う (作り直すと大きさが変わり、同じ photoId が拒否される)
   const [pending, setPending] = useState<Prepared | null>(null)
   // 最初の一覧の取得に失敗したときの再試行で進める
@@ -204,7 +209,7 @@ export function PhotoSection({ itemId }: { itemId: string }) {
             testID={`detail-photo-${p.id}`}
             accessibilityRole="button"
             accessibilityLabel="写真を大きく表示する"
-            onPress={() => setViewing(p)}
+            onPress={() => showViewer(p)}
           >
             {p.url ? (
               <Image
@@ -262,7 +267,7 @@ export function PhotoSection({ itemId }: { itemId: string }) {
         visible={viewing !== null}
         transparent
         animationType="fade"
-        onRequestClose={() => setViewing(null)}
+        onRequestClose={() => showViewer(null)}
       >
         <View style={styles.viewer}>
           {viewing?.url ? (
@@ -291,7 +296,7 @@ export function PhotoSection({ itemId }: { itemId: string }) {
             <Pressable
               testID="detail-photo-close"
               accessibilityRole="button"
-              onPress={() => setViewing(null)}
+              onPress={() => showViewer(null)}
               style={styles.action}
             >
               <Text style={styles.closeLabel}>閉じる</Text>

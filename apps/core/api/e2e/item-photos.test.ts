@@ -769,14 +769,23 @@ test("every photo route declares the unconfigured-Storage 503 next to the auth-s
     paths: Record<string, Record<string, { responses: Record<string, { description?: string }> }>>
   }
 
-  const operations = [
-    ["/v1/items/photos", "get"],
-    ["/v1/items/{id}/photos", "get"],
-    ["/v1/items/{id}/photos", "post"],
-    ["/v1/items/{id}/photos/{photoId}", "delete"],
-  ] as const
-  for (const [path, method] of operations) {
-    const description = spec.paths[path]?.[method]?.responses["503"]?.description ?? ""
+  // derived from the spec, so a photo route added later without the 503 fails here
+  const operations = Object.entries(spec.paths)
+    .filter(([path]) => path.includes("/photos"))
+    .flatMap(([path, methods]) =>
+      Object.entries(methods).map(([method, op]) => ({
+        name: `${method.toUpperCase()} ${path}`,
+        op,
+      })),
+    )
+  expect(operations.map((o) => o.name).toSorted()).toEqual([
+    "DELETE /v1/items/{id}/photos/{photoId}",
+    "GET /v1/items/photos",
+    "GET /v1/items/{id}/photos",
+    "POST /v1/items/{id}/photos",
+  ])
+  for (const { op } of operations) {
+    const description = op.responses["503"]?.description ?? ""
     expect(description).toContain("PHOTO_STORAGE_NOT_CONFIGURED")
     expect(description).toContain("認証サーバ")
   }
