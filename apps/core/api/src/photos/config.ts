@@ -34,9 +34,9 @@ export const SWEEP_BATCH = 500
 export const STORAGE_TIMEOUT_MS = 30 * 1000
 
 // 削除済みの行に、遅れた upload が object を置きうる期間 (削除の時刻から)。
-// upload を続ける要求は行が pending のときの claim で始まり (同じ photoId の別の要求が先に ready にした行でも、後から始めた要求は upload しない)、
-// その寿命は PENDING_STALE_AFTER_MS を超えず、最後の呼び出しの上限が STORAGE_TIMEOUT_MS。削除は claim より後なので、削除から数えて足りる。
-// この後に置かれる object は無いので、この後の削除の記録が最終になる
+// upload を続ける要求の claim は削除より前で、要求は Storage の HTTP 上限 (STORAGE_TIMEOUT_MS) の数回分で終わる。
+// 窓はその実測ではなく、PENDING_STALE_AFTER_MS + STORAGE_TIMEOUT_MS を取った余裕のある上限。この後に置かれる object は無いので、この後の削除の記録が最終になる。
+// 代償として、削除した写真ごとに、削除の約 20 分後に remove の呼び出しが 1 回増える
 export const LATE_UPLOAD_WINDOW_MS = PENDING_STALE_AFTER_MS + STORAGE_TIMEOUT_MS
 
 export const photoPath = (groupId: string, photoId: string): string =>

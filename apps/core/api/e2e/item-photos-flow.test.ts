@@ -1170,6 +1170,9 @@ test("the sweep never calls Storage inside a database transaction", async () => 
 test("the sweep job fails only on failures: nothing to do is exit 0", () => {
   expect(exitCodeFor({ staleClaimed: 3, removed: 3, requeued: 0, failed: 0 })).toBe(0)
   expect(exitCodeFor({ staleClaimed: 0, removed: 0, requeued: 0, failed: 1 })).toBe(1)
+  // a requeued row is retried by the next run and is not a failure
+  expect(exitCodeFor({ staleClaimed: 0, removed: 0, requeued: 2, failed: 0 })).toBe(0)
+  expect(exitCodeFor({ staleClaimed: 0, removed: 0, requeued: 2, failed: 1 })).toBe(1)
 })
 
 test("a row the sweep took cannot be marked ready afterwards", async () => {

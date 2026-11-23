@@ -2,9 +2,9 @@ import { and, asc, count, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { itemPhotos, items, type Db } from "@prep-hamster/db"
 import { PHOTO_CONTENT_TYPE, PHOTOS_PER_ITEM_MAX } from "@prep-hamster/schema"
 import {
+  LATE_UPLOAD_WINDOW_MS,
   PENDING_STALE_AFTER_MS,
   REMOVAL_RETRY_AFTER_MS,
-  LATE_UPLOAD_WINDOW_MS,
   SIGN_CHUNK,
   SIGNED_URL_TTL_SECONDS,
   SWEEP_BATCH,
@@ -176,7 +176,7 @@ export async function discardUploaded(
         })
         .where(eq(itemPhotos.id, row.id))
     } catch {
-      // sweep が拾えない場合は、object が残る
+      // 削除待ちに戻せなければ、object を置いた要求の後始末が出来ていない。削除から LATE_UPLOAD_WINDOW_MS 後の late sweep が、記録済みの行の object をもう 1 度消す
     }
   }
 }
