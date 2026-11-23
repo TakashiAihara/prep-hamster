@@ -746,3 +746,38 @@ test("the photo row records who took it and the stored path", async () => {
   expect(row?.storagePath).toBe(`${groupId}/${photoId}.jpg`)
   expect(row?.contentType).toBe("image/jpeg")
 })
+
+test("responses that carry signed URLs are not stored by HTTP caches", async () => {
+  const { owner, upload, itemId, groupId } = await setupPhotos()
+
+  const up = await upload(itemId, { photoId: crypto.randomUUID() })
+  const list = await owner.req("GET", `/v1/items/${itemId}/photos`)
+  const covers = await owner.req("GET", `/v1/items/photos?groupId=${groupId}`)
+
+  expect(up.status).toBe(201)
+  expect(list.status).toBe(200)
+  expect(covers.status).toBe(200)
+  expect((await json(covers)).covers).toHaveLength(1)
+  for (const res of [up, list, covers]) {
+    expect(res.headers.get("cache-control")).toBe("no-store")
+  }
+})
+
+test("every photo route declares the unconfigured-Storage 503 next to the auth-server 503 in /openapi.json", async () => {
+  const { app } = await setupPhotos()
+  const spec = (await (await app.request("/openapi.json")).json()) as {
+    paths: Record<string, Record<string, { responses: Record<string, { description?: string }> }>>
+  }
+
+  const operations = [
+    ["/v1/items/photos", "get"],
+    ["/v1/items/{id}/photos", "get"],
+    ["/v1/items/{id}/photos", "post"],
+    ["/v1/items/{id}/photos/{photoId}", "delete"],
+  ] as const
+  for (const [path, method] of operations) {
+    const description = spec.paths[path]?.[method]?.responses["503"]?.description ?? ""
+    expect(description).toContain("PHOTO_STORAGE_NOT_CONFIGURED")
+    expect(description).toContain("認証サーバ")
+  }
+})

@@ -134,17 +134,13 @@ export function PhotoSection({ itemId }: { itemId: string }) {
 
   const add = (source: "camera" | "library") =>
     run(async () => {
-      const permission =
-        source === "camera"
-          ? await ImagePicker.requestCameraPermissionsAsync()
-          : await ImagePicker.requestMediaLibraryPermissionsAsync()
-      if (!permission.granted) {
-        setError(
-          source === "camera"
-            ? "カメラの権限がありません。端末の設定から許可してください"
-            : "写真ライブラリの権限がありません。端末の設定から許可してください",
-        )
-        return
+      // 選択はシステムの写真選択 UI (iOS は PHPicker、Android は photo picker) で、ライブラリ全体の権限は要らない。権限が要るのはカメラだけ
+      if (source === "camera") {
+        const permission = await ImagePicker.requestCameraPermissionsAsync()
+        if (!permission.granted) {
+          setError("カメラの権限がありません。端末の設定から許可してください")
+          return
+        }
       }
       const options: ImagePicker.ImagePickerOptions = {
         mediaTypes: ["images"],
@@ -277,6 +273,11 @@ export function PhotoSection({ itemId }: { itemId: string }) {
               contentFit="contain"
             />
           ) : null}
+          {error ? (
+            <Text style={styles.viewerError} testID="detail-photo-viewer-error">
+              {error}
+            </Text>
+          ) : null}
           <View style={styles.actions}>
             <Pressable
               testID="detail-photo-delete"
@@ -322,6 +323,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   large: { width: "100%", height: "70%" },
+  viewerError: { color: "#ff8a7a", fontSize: 14 },
   deleteLabel: { color: "#ff6b5b", fontSize: 15, fontWeight: "600" },
   closeLabel: { color: "#fff", fontSize: 15, fontWeight: "600" },
 })

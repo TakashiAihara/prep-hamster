@@ -82,6 +82,9 @@ const coversRoute = createRoute({
   request: { query: ListQuerySchema },
   responses: {
     ...authErrorResponses,
+    503: errorContent(
+      "認証サーバ (Supabase) の署名鍵を取得できない、または写真の保存先が未設定 (PHOTO_STORAGE_NOT_CONFIGURED。SUPABASE_URL と SUPABASE_SECRET_KEY)",
+    ),
     200: {
       description: "item ごとの先頭 1 枚",
       content: { "application/json": { schema: z.object({ covers: z.array(coverDtoSchema) }) } },
@@ -101,6 +104,9 @@ const listRoute = createRoute({
   request: { params: IdParamSchema },
   responses: {
     ...authErrorResponses,
+    503: errorContent(
+      "認証サーバ (Supabase) の署名鍵を取得できない、または写真の保存先が未設定 (PHOTO_STORAGE_NOT_CONFIGURED。SUPABASE_URL と SUPABASE_SECRET_KEY)",
+    ),
     200: {
       description: "一覧 (古い順)",
       content: { "application/json": { schema: z.object({ photos: z.array(photoDtoSchema) }) } },
@@ -124,6 +130,9 @@ const uploadRoute = createRoute({
   },
   responses: {
     ...authErrorResponses,
+    503: errorContent(
+      "認証サーバ (Supabase) の署名鍵を取得できない、または写真の保存先が未設定 (PHOTO_STORAGE_NOT_CONFIGURED。SUPABASE_URL と SUPABASE_SECRET_KEY)",
+    ),
     200: {
       description: "同じ photoId の再送 (記録済みの写真)",
       content: { "application/json": { schema: z.object({ photo: photoDtoSchema }) } },
@@ -151,6 +160,9 @@ const deleteRoute = createRoute({
   request: { params: PhotoParamSchema },
   responses: {
     ...authErrorResponses,
+    503: errorContent(
+      "認証サーバ (Supabase) の署名鍵を取得できない、または写真の保存先が未設定 (PHOTO_STORAGE_NOT_CONFIGURED。SUPABASE_URL と SUPABASE_SECRET_KEY)",
+    ),
     204: { description: "削除成功" },
     401: errorContent("未認証"),
     403: errorContent("未参加 / role 不足"),
@@ -212,6 +224,8 @@ export const itemPhotosRouter = new OpenAPIHono<AppEnv>()
   .openapi(coversRoute, async (c) => {
     const storage = c.get("photoStorage")
     if (!storage) return c.json(NOT_CONFIGURED, 503)
+    // 署名 URL を含む応答は、HTTP キャッシュに残さない (端末でアカウントを切り替えても、所属の確認を通らない古い応答を返さない)
+    c.header("Cache-Control", "no-store")
     const { groupId } = c.req.valid("query")
     const covers = await listCovers(c.get("db"), groupId)
     let urls: Map<string, string>
@@ -236,6 +250,7 @@ export const itemPhotosRouter = new OpenAPIHono<AppEnv>()
   .openapi(listRoute, async (c) => {
     const storage = c.get("photoStorage")
     if (!storage) return c.json(NOT_CONFIGURED, 503)
+    c.header("Cache-Control", "no-store")
     const { id } = c.req.valid("param")
     const db = c.get("db")
     const item = await activeItem(db, id)
@@ -258,6 +273,7 @@ export const itemPhotosRouter = new OpenAPIHono<AppEnv>()
   .openapi(uploadRoute, async (c) => {
     const storage = c.get("photoStorage")
     if (!storage) return c.json(NOT_CONFIGURED, 503)
+    c.header("Cache-Control", "no-store")
     const { id: itemId } = c.req.valid("param")
     const form = c.req.valid("form")
     const photoId = form.photoId.toLowerCase()

@@ -271,12 +271,15 @@ export async function removeObjectsOf(
     // 完了の記録は、読んだときの updated_at の行にだけ書く。その間に discardUploaded が行を削除待ちに戻した
     // (object を置き直された) なら、その行の記録は何も更新せず、行は削除待ちのまま残る
     try {
+      // 記録する時刻は削除を始める前に読む。応答が遅れて窓の後に戻っても、削除の効果が窓の中で起きたなら記録は窓の前になり、
+      // late sweep が拾う (応答の後の時刻だと、窓の前の削除が最終として記録される)
+      const startedAt = new Date(now())
       // oxlint-disable-next-line no-await-in-loop
       await storage.remove(chunk.map((r) => r.storagePath))
       // oxlint-disable-next-line no-await-in-loop
       const marked = await db
         .update(itemPhotos)
-        .set({ storageDeletedAt: new Date(now()) })
+        .set({ storageDeletedAt: startedAt })
         .where(
           or(
             ...chunk.map((r) =>

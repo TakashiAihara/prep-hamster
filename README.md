@@ -130,7 +130,8 @@ PREP_HAMSTER_ACCESS_TOKEN=<access token> \
 
 設計は `docs/design/item-photos.md`。写真は private bucket `item-photos` に置き、API だけが secret key で触る。
 
-- API の runtime env に `SUPABASE_SECRET_KEY` を渡す (本番は Infisical の prep-hamster/prod の `PREP_HAMSTER_SUPABASE_SECRET_KEY`、手元は `bunx supabase status` の secret key)。値は repo に書かない。無いと `/v1/items/**/photos` だけが 503 `PHOTO_STORAGE_NOT_CONFIGURED` になり、起動時に警告が出る
+- API の runtime env に `SUPABASE_URL` と `SUPABASE_SECRET_KEY` を渡す (本番は Infisical の prep-hamster/prod の `PREP_HAMSTER_SUPABASE_SECRET_KEY`、手元は `bunx supabase status` の secret key)。値は repo に書かない。`SUPABASE_URL` は secret key を送る先なので https にする (手元の `localhost` / `127.0.0.1` / `host.docker.internal` だけ http でよく、それ以外の http は起動時にエラーで止まる)。無いと写真の一覧・アップロード・単体削除・カバー取得 (`/v1/items/**/photos` と `/v1/items/photos`) だけが 503 `PHOTO_STORAGE_NOT_CONFIGURED` になり、起動時に警告。item 自体の削除は Storage が無くても通る
+- API が container の中にいて Storage に `host.docker.internal` で繋ぐ (compose) ときは、署名 URL の origin もそのホスト名になり、端末から開けない。`SUPABASE_PUBLIC_URL` に端末から届く origin (例: `http://<LAN の IP>:54321`) を渡すと、署名 URL の origin だけをそれに差し替える。API が Storage に繋ぐ先は変わらず、Auth の issuer にも触れないが出る
 - 手元の bucket は `supabase/config.toml` の `[storage.buckets.item-photos]` が `bunx supabase start` で作る。名前・2 MiB・`image/jpeg` の定義は `apps/core/api/src/photos/config.ts` が出所で、`bun test src/photos` が `config.toml` との一致を見る
 - 本番の bucket は migration では作らず、deploy の手順として 1 回流す (冪等。定義が変われば同じ手順で更新される):
 
@@ -140,4 +141,4 @@ inf-run --only SUPABASE_SECRET_KEY -- env SUPABASE_URL="https://YOUR_PROJECT_REF
 
 - `YOUR_PROJECT_REF` は本番の Supabase project の ref に置き換える (手元の URL ではない)
 - 本物の Storage に対する確認は opt-in の e2e (`apps/core/api/e2e/photo-storage-real.test.ts`)。偽物の Storage が応答の形で分岐を押さえているので、その形が本物と同じことを見る。Storage を持つ Supabase (`bunx supabase start`。auth などは `-x` で外してよい) を立て、`PHOTO_STORAGE_TEST_URL` / `PHOTO_STORAGE_TEST_SECRET_KEY` (公開鍵での拒否も見るなら `PHOTO_STORAGE_TEST_ANON_KEY`) を渡して `bun run --filter @prep-hamster/api test:e2e` を流す。env が無ければ skip する
-- 止まった upload の行 (pending のまま 20 分動きが無いもの) と、削除待ちの写真の object は定期ジョブが片付ける (冪等)。`DATABASE_URL` / `SUPABASE_URL` / `SUPABASE_SECRET_KEY` を渡して `bun run --filter @prep-hamster/api job:photo-sweep`。10 分ごとに回す (止まった pending の行は sweep が取るまで item の枚数の上限の枠を塞ぐので、1 日 1 回だと失敗した upload の枠が最大 1 日残る)
+- 止まった upload の行 (pending のまま 20 分動きが無いもの) と、削除待ちの写真の object は定期ジョブが片付ける (冪等)。`DATABASE_URL` / `SUPABASE_URL` / `SUPABASE_SECRET_KEY` を渡して `bun run --filter @prep-hamster/api job:photo-sweep`。10 分ごとに回す (止まった pending の行は sweep が取るまで item の枚数の上限の枠を塞ぐので、1 日 1 回だと、失敗から 20 分の待機を過ぎた後の次の実行まで枠が残り、1 回の上限を超える件数があればさらに遅れる)

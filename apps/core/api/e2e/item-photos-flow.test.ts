@@ -316,7 +316,7 @@ test("an item deleted during the upload: 404, and the object that was just put i
 
   expect(res.status).toBe(404)
   expect((await json(res)).error.message).toBe("写真が見つかりません")
-  expect((await rowOf(photoId))?.deletedAt).not.toBeNull()
+  expect((await rowOf(photoId))?.deletedAt).toBeInstanceOf(Date)
   expect(fake.objects.has(path)).toBe(false)
   expect(await testDb.select().from(itemPhotos).where(eq(itemPhotos.status, "ready"))).toEqual([])
 })
@@ -339,7 +339,7 @@ test("a stale-pending sweep during a slow upload takes the row: the upload ends 
   expect(res.status).toBe(404)
   expect(fake.objects.has(path)).toBe(false)
   expect((await rowOf(photoId))?.status).toBe("pending")
-  expect((await rowOf(photoId))?.deletedAt).not.toBeNull()
+  expect((await rowOf(photoId))?.deletedAt).toBeInstanceOf(Date)
 })
 
 test("when the object of a deleted row cannot be removed, the row goes back to pending removal for the sweep", async () => {
@@ -615,16 +615,80 @@ test("deleting an item takes its photo rows before its tag rows, so a writer hol
   })
   await locked.promise
   const deleting = Promise.resolve(owner.req("DELETE", `/v1/items/${itemId}`))
+  let settled: PromiseSettledResult<unknown>[] = []
   try {
     await waitForLockWait(`update "item_photos"`)
   } finally {
     held.resolve()
+    settled = await Promise.allSettled([other, deleting])
   }
 
-  const [otherResult, deleteResult] = await Promise.allSettled([other, deleting])
+  const [otherResult, deleteResult] = settled as [
+    PromiseSettledResult<void>,
+    PromiseSettledResult<Response>,
+  ]
 
   expect(otherResult.status).toBe("fulfilled")
   expect(deleteResult.status === "fulfilled" && deleteResult.value.status).toBe(204)
+})
+
+test("the removal is recorded with the time it started, so a response that returns after the late-upload window does not make it final", async () => {
+  const t = Date.parse("2026-11-22T00:00:00Z")
+  const { fake, itemId, groupId, ownerId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  await insertPhotoRow(testDb, { id: photoId, groupId, itemId, userId: ownerId, size: 10 })
+  await testDb
+    .update(itemPhotos)
+    .set({ deletedAt: new Date(t), updatedAt: new Date(t) })
+    .where(eq(itemPhotos.id, photoId))
+  const path = photoPath(groupId, photoId)
+  fake.put(path)
+  const startedAt = t + LATE_UPLOAD_WINDOW_MS - 1000
+  let clock = startedAt
+  // the removal call itself takes longer than what is left of the window
+  fake.control.beforeCall = () => {
+    clock = t + LATE_UPLOAD_WINDOW_MS + 5000
+  }
+
+  const first = await sweepPhotos(testDb, fake.storage, () => clock)
+
+  expect(first.removed).toBe(1)
+  expect((await rowOf(photoId))?.storageDeletedAt?.getTime()).toBe(startedAt)
+  // an upload that was still in flight puts its object after the removal took effect
+  fake.put(path)
+  fake.control.beforeCall = null
+  const second = await sweepPhotos(testDb, fake.storage, () => clock)
+  expect(second.removed).toBe(1)
+  expect(fake.objects.has(path)).toBe(false)
+})
+
+test("deleting an item stamps its photos with the clock read after the item lock was taken", async () => {
+  const t = Date.parse("2026-11-22T00:00:00Z")
+  let clock = t
+  const { upload, owner, itemId } = await setupPhotos({ now: () => clock })
+  const photoId = crypto.randomUUID()
+  expect((await upload(itemId, { photoId })).status).toBe(201)
+  const held = Promise.withResolvers<void>()
+  const locked = Promise.withResolvers<void>()
+  const other = testDb.transaction(async (tx) => {
+    await tx.execute(sql`select 1 from items where id = ${itemId} for update`)
+    locked.resolve()
+    await held.promise
+  })
+  await locked.promise
+  const deleting = Promise.resolve(owner.req("DELETE", `/v1/items/${itemId}`))
+  let result: PromiseSettledResult<unknown>[] = []
+  try {
+    await waitForLockWait(`select "id" from "items"`)
+    // time passes while the delete waits for the lock
+    clock = t + 60 * MIN
+  } finally {
+    held.resolve()
+    result = await Promise.allSettled([deleting, other])
+  }
+
+  expect(result[0]?.status === "fulfilled" && (result[0].value as Response).status).toBe(204)
+  expect((await rowOf(photoId))?.deletedAt?.getTime()).toBe(t + 60 * MIN)
 })
 
 test("removeObjectsOf makes one Storage call per 100 rows, and a failed call fails only its rows", async () => {
@@ -972,7 +1036,7 @@ test("deleting an item soft-deletes its pending rows as well", async () => {
 
   await owner.req("DELETE", `/v1/items/${itemId}`)
 
-  expect((await rowOf(photoId))?.deletedAt).not.toBeNull()
+  expect((await rowOf(photoId))?.deletedAt).toBeInstanceOf(Date)
 })
 
 test("signing is split into chunks of 100 paths", async () => {
