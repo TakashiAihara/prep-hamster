@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, expect, test } from "bun:test"
 import { eq, sql } from "drizzle-orm"
-import { createDb, itemPhotos, items as itemsTable } from "@prep-hamster/db"
+import { createDb, itemPhotos, itemTags, items as itemsTable } from "@prep-hamster/db"
 import { PHOTOS_PER_ITEM_MAX } from "@prep-hamster/schema"
 import { exitCodeFor } from "../src/jobs/photo-sweep"
-import { photoPath } from "../src/photos/config"
+import { LATE_UPLOAD_WINDOW_MS, photoPath } from "../src/photos/config"
 import {
   claimPhoto,
   discardUploaded,
@@ -16,7 +16,7 @@ import {
 import { bearer } from "./auth-helper"
 import type { FakePhotoStorage } from "./fake-photo-storage"
 import { insertPhotoRow, jpeg, setupPhotos } from "./photo-helper"
-import { seedGroupWithMembership, seedItem, seedUser } from "./seed"
+import { attachTags, seedGroupWithMembership, seedItem, seedTag, seedUser } from "./seed"
 import { ensureMigrated, TEST_DB_URL, testDb, truncateAll } from "./setup"
 
 beforeAll(async () => {
@@ -55,6 +55,24 @@ const openTransactions = async () => {
         where state like 'idle in transaction%' and datname = current_database()`,
   )) as unknown as Array<{ n: number }>
   return rows[0]?.n ?? 0
+}
+
+// 別の接続が行を押さえている間、prefix で始まる文が lock の待ちに入るのを待つ。入らなければ失敗にする
+// (待ちを見ないまま lock を離すと、競合を作れておらず、壊しても通るテストになる)
+async function waitForLockWait(prefix: string, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    // oxlint-disable-next-line no-await-in-loop
+    const rows = (await testDb.execute(
+      sql`select count(*)::int as n from pg_stat_activity
+          where wait_event_type = 'Lock' and datname = current_database()
+            and query ilike ${`${prefix}%`}`,
+    )) as unknown as Array<{ n: number }>
+    if ((rows[0]?.n ?? 0) >= 1) return
+    // oxlint-disable-next-line no-await-in-loop
+    await sleep(50)
+  }
+  throw new Error(`no statement starting with ${prefix} waited on a lock within ${timeoutMs} ms`)
 }
 
 // ---- the order of the flow: row first, then the object, then ready ----
@@ -104,18 +122,22 @@ test("no connection is held across the upload: with a single database connection
   const gate = gateUploads(fake, 1)
 
   const pending = upload(itemId)
-  await gate.reached
-  const put = await Promise.race([
-    Promise.resolve(
-      app.request(`/v1/items/${itemId}/tags`, {
-        method: "PUT",
-        headers: { "content-type": "application/json", authorization: await bearer(ownerId) },
-        body: JSON.stringify({ tagIds: [] }),
-      }),
-    ).then((r) => r.status),
-    sleep(3000).then(() => "blocked" as const),
-  ])
-  gate.release()
+  let put: number | "blocked"
+  try {
+    await gate.reached
+    put = await Promise.race([
+      Promise.resolve(
+        app.request(`/v1/items/${itemId}/tags`, {
+          method: "PUT",
+          headers: { "content-type": "application/json", authorization: await bearer(ownerId) },
+          body: JSON.stringify({ tagIds: [] }),
+        }),
+      ).then((r) => r.status),
+      sleep(3000).then(() => "blocked" as const),
+    ])
+  } finally {
+    gate.release()
+  }
   const res = await pending
 
   expect(put).toBe(200)
@@ -182,6 +204,32 @@ test("a retry of a pending row with another size or for another item is 422 and 
   }
   const row = await rowOf(photoId)
   expect(row).toMatchObject({ status: "pending", itemId, byteSize: 300 })
+})
+
+test("a retry with other dimensions is 422 IDEMPOTENCY_KEY_REUSED, for a pending row and for a ready row", async () => {
+  const { fake, upload, itemId } = await setupPhotos()
+  const pending = crypto.randomUUID()
+  const ready = crypto.randomUUID()
+  fake.control.failUpload = true
+  await upload(itemId, { photoId: pending, width: "100", height: "200" })
+  fake.control.failUpload = false
+  await upload(itemId, { photoId: ready, bytes: jpeg(1000, 2), width: "100", height: "200" })
+
+  const results = [
+    await upload(itemId, { photoId: pending, width: "101", height: "200" }),
+    await upload(itemId, { photoId: pending, width: "100", height: "201" }),
+    await upload(itemId, { photoId: pending, width: "100" }),
+    await upload(itemId, { photoId: ready, bytes: jpeg(1000, 2), width: "100", height: "201" }),
+  ]
+
+  for (const res of results) {
+    expect(res.status).toBe(422)
+    // oxlint-disable-next-line no-await-in-loop
+    expect((await json(res)).error.code).toBe("IDEMPOTENCY_KEY_REUSED")
+  }
+  expect(await upload(itemId, { photoId: pending, width: "100", height: "200" })).toMatchObject({
+    status: 200,
+  })
 })
 
 test("pending rows count toward the cap, and a full item uploads nothing", async () => {
@@ -380,10 +428,36 @@ test("a late removal result does not overwrite a row that went back to pending r
 
   const r = await removeObjectOf(testDb, fake.storage, seen, () => Date.now())
 
-  expect(r).toBe("removed")
+  expect(r).toBe("requeued")
   const row = await rowOf(photoId)
   expect(row?.storageDeletedAt).toBeNull()
   expect(row!.updatedAt.getTime()).toBeGreaterThan(seen.updatedAt.getTime())
+})
+
+test("removeObjectsOf counts a row that went back to pending removal as requeued, not removed", async () => {
+  const { fake, itemId, groupId, ownerId } = await setupPhotos()
+  const [requeuedId, doneId] = [crypto.randomUUID(), crypto.randomUUID()]
+  for (const id of [requeuedId, doneId]) {
+    // oxlint-disable-next-line no-await-in-loop
+    await insertPhotoRow(testDb, { id, groupId, itemId, userId: ownerId, size: 10 })
+  }
+  await testDb
+    .update(itemPhotos)
+    .set({ deletedAt: new Date(), updatedAt: new Date("2026-11-22T00:00:00Z") })
+  const rows = await testDb.select().from(itemPhotos)
+  fake.control.beforeCall = async () => {
+    fake.control.beforeCall = null
+    await testDb
+      .update(itemPhotos)
+      .set({ updatedAt: new Date("2026-11-22T00:00:01Z") })
+      .where(eq(itemPhotos.id, requeuedId))
+  }
+
+  const r = await removeObjectsOf(testDb, fake.storage, rows, () => Date.now())
+
+  expect(r).toEqual({ removed: 1, requeued: 1, failed: 0 })
+  expect((await rowOf(requeuedId))?.storageDeletedAt).toBeNull()
+  expect((await rowOf(doneId))?.storageDeletedAt).not.toBeNull()
 })
 
 test("the same new photoId used at once on two items: one wins, the other is 422 IDEMPOTENCY_KEY_REUSED", async () => {
@@ -408,19 +482,12 @@ test("the same new photoId used at once on two items: one wins, the other is 422
   await inserted.promise
   const mine = upload(itemId, { photoId })
   // こちらの INSERT が主キーの待ちに入るのを待つ
-  for (let i = 0; i < 60; i++) {
-    // oxlint-disable-next-line no-await-in-loop
-    const rows = (await testDb.execute(
-      sql`select count(*)::int as n from pg_stat_activity
-          where wait_event_type = 'Lock' and datname = current_database()
-            and query ilike 'insert into "item_photos"%'`,
-    )) as unknown as Array<{ n: number }>
-    if ((rows[0]?.n ?? 0) >= 1) break
-    // oxlint-disable-next-line no-await-in-loop
-    await sleep(50)
+  try {
+    await waitForLockWait(`insert into "item_photos"`)
+  } finally {
+    held.resolve()
+    await Promise.allSettled([other, mine])
   }
-  held.resolve()
-  await other
 
   const res = await mine
 
@@ -464,19 +531,12 @@ test("a retry whose pending row became ready between the probe and the touch is 
     },
     () => Date.now(),
   )
-  for (let i = 0; i < 60; i++) {
-    // oxlint-disable-next-line no-await-in-loop
-    const rows = (await testDb.execute(
-      sql`select count(*)::int as n from pg_stat_activity
-          where wait_event_type = 'Lock' and datname = current_database()
-            and query ilike 'update "item_photos"%'`,
-    )) as unknown as Array<{ n: number }>
-    if ((rows[0]?.n ?? 0) >= 1) break
-    // oxlint-disable-next-line no-await-in-loop
-    await sleep(50)
+  try {
+    await waitForLockWait(`update "item_photos"`)
+  } finally {
+    held.resolve()
+    await Promise.allSettled([other, claiming])
   }
-  held.resolve()
-  await other
 
   const claim = await claiming
   expect(claim.kind).toBe("existing")
@@ -517,21 +577,54 @@ test("a retry whose row is soft-deleted between the probe and the touch is not r
     },
     () => Date.now(),
   )
-  for (let i = 0; i < 60; i++) {
-    // oxlint-disable-next-line no-await-in-loop
-    const rows = (await testDb.execute(
-      sql`select count(*)::int as n from pg_stat_activity
-          where wait_event_type = 'Lock' and datname = current_database()
-            and query ilike 'update "item_photos"%'`,
-    )) as unknown as Array<{ n: number }>
-    if ((rows[0]?.n ?? 0) >= 1) break
-    // oxlint-disable-next-line no-await-in-loop
-    await sleep(50)
+  try {
+    await waitForLockWait(`update "item_photos"`)
+  } finally {
+    held.resolve()
+    await Promise.allSettled([deleter, claiming])
   }
-  held.resolve()
-  await deleter
 
   expect((await claiming).kind).toBe("reused")
+})
+
+test("deleting an item stamps its photos with the photo clock", async () => {
+  const t = Date.parse("2026-11-22T00:00:00Z")
+  const { upload, owner, itemId } = await setupPhotos({ now: () => t })
+  const photoId = crypto.randomUUID()
+  expect((await upload(itemId, { photoId })).status).toBe(201)
+
+  expect((await owner.req("DELETE", `/v1/items/${itemId}`)).status).toBe(204)
+
+  const row = await rowOf(photoId)
+  expect(row?.deletedAt?.getTime()).toBe(t)
+  expect(row?.updatedAt.getTime()).toBe(t)
+})
+
+test("deleting an item takes its photo rows before its tag rows, so a writer holding a photo and wanting the tags does not deadlock with it", async () => {
+  const { upload, owner, itemId, groupId } = await setupPhotos()
+  await attachTags(itemId, [await seedTag(groupId, "t")])
+  const photoId = crypto.randomUUID()
+  expect((await upload(itemId, { photoId })).status).toBe(201)
+  const held = Promise.withResolvers<void>()
+  const locked = Promise.withResolvers<void>()
+  const other = testDb.transaction(async (tx) => {
+    await tx.execute(sql`select 1 from item_photos where id = ${photoId} for update`)
+    locked.resolve()
+    await held.promise
+    await tx.delete(itemTags).where(eq(itemTags.itemId, itemId))
+  })
+  await locked.promise
+  const deleting = Promise.resolve(owner.req("DELETE", `/v1/items/${itemId}`))
+  try {
+    await waitForLockWait(`update "item_photos"`)
+  } finally {
+    held.resolve()
+  }
+
+  const [otherResult, deleteResult] = await Promise.allSettled([other, deleting])
+
+  expect(otherResult.status).toBe("fulfilled")
+  expect(deleteResult.status === "fulfilled" && deleteResult.value.status).toBe(204)
 })
 
 test("removeObjectsOf makes one Storage call per 100 rows, and a failed call fails only its rows", async () => {
@@ -554,7 +647,7 @@ test("removeObjectsOf makes one Storage call per 100 rows, and a failed call fai
 
   const r = await removeObjectsOf(testDb, fake.storage, rows, () => Date.now())
 
-  expect(r).toEqual({ removed: 100, failed: 1 })
+  expect(r).toEqual({ removed: 100, requeued: 0, failed: 1 })
   expect(call).toBe(2)
   const done = await testDb
     .select()
@@ -603,19 +696,12 @@ async function sweepWhileRowHeld(change: Partial<typeof itemPhotos.$inferInsert>
   await touched.promise
 
   const sweeping = sweepPhotos(testDb, fake.storage, () => t)
-  for (let i = 0; i < 60; i++) {
-    // oxlint-disable-next-line no-await-in-loop
-    const rows = (await testDb.execute(
-      sql`select count(*)::int as n from pg_stat_activity
-          where wait_event_type = 'Lock' and datname = current_database()
-            and query ilike 'update "item_photos"%'`,
-    )) as unknown as Array<{ n: number }>
-    if ((rows[0]?.n ?? 0) >= 1) break
-    // oxlint-disable-next-line no-await-in-loop
-    await sleep(50)
+  try {
+    await waitForLockWait(`update "item_photos"`)
+  } finally {
+    held.resolve()
+    await Promise.allSettled([writer, sweeping])
   }
-  held.resolve()
-  await writer
   const result = await sweeping
   return { result, row: await rowOf(photoId), fake }
 }
@@ -789,8 +875,8 @@ test("sweep takes at most 500 stale pending rows per run", async () => {
   const first = await sweepPhotos(testDb, fake.storage, () => t)
   const second = await sweepPhotos(testDb, fake.storage, () => t)
 
-  expect(first).toEqual({ staleClaimed: 500, removed: 500, failed: 0 })
-  expect(second).toEqual({ staleClaimed: 1, removed: 1, failed: 0 })
+  expect(first).toEqual({ staleClaimed: 500, removed: 500, requeued: 0, failed: 0 })
+  expect(second).toEqual({ staleClaimed: 1, removed: 1, requeued: 0, failed: 0 })
 })
 
 test("markReady is a no-op for a row that is already ready, deleted, or missing", async () => {
@@ -938,7 +1024,7 @@ test("sweep takes a pending row that has been quiet for 20 minutes, removes its 
 
   const result = await sweepPhotos(testDb, fake.storage, () => t)
 
-  expect(result).toEqual({ staleClaimed: 1, removed: 1, failed: 0 })
+  expect(result).toEqual({ staleClaimed: 1, removed: 1, requeued: 0, failed: 0 })
   const row = await rowOf(photoId)
   expect(row?.deletedAt?.getTime()).toBe(t)
   expect(row?.storageDeletedAt?.getTime()).toBe(t)
@@ -959,7 +1045,7 @@ test("sweep leaves a pending row quiet for less than 20 minutes, and ready rows 
 
   const result = await sweepPhotos(testDb, fake.storage, () => t)
 
-  expect(result).toEqual({ staleClaimed: 0, removed: 0, failed: 0 })
+  expect(result).toEqual({ staleClaimed: 0, removed: 0, requeued: 0, failed: 0 })
   expect((await rowOf(fresh))?.deletedAt).toBeNull()
   expect((await rowOf(ready))?.deletedAt).toBeNull()
 })
@@ -978,11 +1064,11 @@ test("a removal that failed is retried, and a deleted row younger than 5 minutes
     .where(eq(itemPhotos.id, photoId))
 
   const early = await sweepPhotos(testDb, fake.storage, () => t)
-  expect(early).toEqual({ staleClaimed: 0, removed: 0, failed: 0 })
+  expect(early).toEqual({ staleClaimed: 0, removed: 0, requeued: 0, failed: 0 })
   expect(fake.objects.has(photoPath(groupId, photoId))).toBe(true)
 
   const later = await sweepPhotos(testDb, fake.storage, () => t + 2 * MIN)
-  expect(later).toEqual({ staleClaimed: 0, removed: 1, failed: 0 })
+  expect(later).toEqual({ staleClaimed: 0, removed: 1, requeued: 0, failed: 0 })
   expect((await rowOf(photoId))?.storageDeletedAt).not.toBeNull()
   expect(fake.objects.size).toBe(0)
 
@@ -990,9 +1076,60 @@ test("a removal that failed is retried, and a deleted row younger than 5 minutes
   expect(await sweepPhotos(testDb, fake.storage, () => t + 3 * MIN)).toEqual({
     staleClaimed: 0,
     removed: 0,
+    requeued: 0,
     failed: 0,
   })
   expect(fake.callsOf("remove")).toHaveLength(removesBefore)
+})
+
+// ---- the late object of a request that never got to clean up ----
+
+const lateRow = async (status: "pending" | "ready", t: number) => {
+  const { fake, itemId, groupId, ownerId } = await setupPhotos()
+  const photoId = crypto.randomUUID()
+  await insertPhotoRow(testDb, { id: photoId, groupId, itemId, userId: ownerId, size: 10, status })
+  // deleted at t, its object removed 1 s later; then a request that was still in flight put its object
+  await testDb
+    .update(itemPhotos)
+    .set({
+      deletedAt: new Date(t),
+      updatedAt: new Date(t),
+      storageDeletedAt: new Date(t + 1000),
+    })
+    .where(eq(itemPhotos.id, photoId))
+  const path = photoPath(groupId, photoId)
+  fake.put(path)
+  return { fake, photoId, path }
+}
+
+test("a deleted pending row gets its object removed again once the late-upload window has passed, and not before", async () => {
+  const t = Date.parse("2026-11-22T00:00:00Z")
+  const { fake, photoId, path } = await lateRow("pending", t)
+
+  const before = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS - 1000)
+  expect(before).toEqual({ staleClaimed: 0, removed: 0, requeued: 0, failed: 0 })
+  expect(fake.objects.has(path)).toBe(true)
+
+  const after = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS + 1000)
+  expect(after).toEqual({ staleClaimed: 0, removed: 1, requeued: 0, failed: 0 })
+  expect(fake.objects.has(path)).toBe(false)
+  expect((await rowOf(photoId))?.storageDeletedAt?.getTime()).toBe(t + LATE_UPLOAD_WINDOW_MS + 1000)
+
+  // the record made after the window is final
+  fake.put(path)
+  const again = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS + 5000)
+  expect(again).toEqual({ staleClaimed: 0, removed: 0, requeued: 0, failed: 0 })
+  expect(fake.objects.has(path)).toBe(true)
+})
+
+test("a deleted ready row is final once its object was removed: no late upload can reach it", async () => {
+  const t = Date.parse("2026-11-22T00:00:00Z")
+  const { fake, path } = await lateRow("ready", t)
+
+  const result = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS + 1000)
+
+  expect(result).toEqual({ staleClaimed: 0, removed: 0, requeued: 0, failed: 0 })
+  expect(fake.objects.has(path)).toBe(true)
 })
 
 test("a failing Storage removal is counted as failed, keeps the row pending removal, and makes the job exit non-zero", async () => {
@@ -1006,13 +1143,13 @@ test("a failing Storage removal is counted as failed, keeps the row pending remo
 
   const failing = await sweepPhotos(testDb, fake.storage, () => t)
 
-  expect(failing).toEqual({ staleClaimed: 1, removed: 0, failed: 1 })
+  expect(failing).toEqual({ staleClaimed: 1, removed: 0, requeued: 0, failed: 1 })
   expect(exitCodeFor(failing)).toBe(1)
   expect((await rowOf(photoId))?.storageDeletedAt).toBeNull()
 
   fake.control.failRemove = false
   const working = await sweepPhotos(testDb, fake.storage, () => t + 6 * MIN)
-  expect(working).toEqual({ staleClaimed: 0, removed: 1, failed: 0 })
+  expect(working).toEqual({ staleClaimed: 0, removed: 1, requeued: 0, failed: 0 })
   expect(exitCodeFor(working)).toBe(0)
 })
 
@@ -1035,8 +1172,8 @@ test("the sweep never calls Storage inside a database transaction", async () => 
 })
 
 test("the sweep job fails only on failures: nothing to do is exit 0", () => {
-  expect(exitCodeFor({ staleClaimed: 3, removed: 3, failed: 0 })).toBe(0)
-  expect(exitCodeFor({ staleClaimed: 0, removed: 0, failed: 1 })).toBe(1)
+  expect(exitCodeFor({ staleClaimed: 3, removed: 3, requeued: 0, failed: 0 })).toBe(0)
+  expect(exitCodeFor({ staleClaimed: 0, removed: 0, requeued: 0, failed: 1 })).toBe(1)
 })
 
 test("a row the sweep took cannot be marked ready afterwards", async () => {

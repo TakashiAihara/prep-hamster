@@ -66,6 +66,8 @@ export function PhotoSection({ itemId }: { itemId: string }) {
   const [viewing, setViewing] = useState<PhotoDto | null>(null)
   // 送信に失敗して結果が分からない写真。縮小した file も同じものを使う (作り直すと大きさが変わり、同じ photoId が拒否される)
   const [pending, setPending] = useState<Prepared | null>(null)
+  // 最初の一覧の取得に失敗したときの再試行で進める
+  const [reloadKey, setReloadKey] = useState(0)
   const busyRef = useRef(false)
   // 追加・削除が成功するたびに進める。取得の途中で進んだら、遅れて届いた一覧 (古い) は捨てる
   const generationRef = useRef(0)
@@ -87,7 +89,7 @@ export function PhotoSection({ itemId }: { itemId: string }) {
       return () => {
         cancelled = true
       }
-    }, [itemId]),
+    }, [itemId, reloadKey]),
   )
 
   async function send(prepared: Prepared) {
@@ -172,9 +174,22 @@ export function PhotoSection({ itemId }: { itemId: string }) {
 
   if (photos === null) {
     return error ? (
-      <Text style={styles.error} testID="detail-photos-error">
-        {error}
-      </Text>
+      <View style={styles.section}>
+        <Text style={styles.error} testID="detail-photos-error">
+          {error}
+        </Text>
+        <Pressable
+          testID="detail-photos-retry"
+          accessibilityRole="button"
+          style={styles.action}
+          onPress={() => {
+            setError(null)
+            setReloadKey((n) => n + 1)
+          }}
+        >
+          <Text style={styles.actionLabel}>再試行</Text>
+        </Pressable>
+      </View>
     ) : (
       <ActivityIndicator />
     )

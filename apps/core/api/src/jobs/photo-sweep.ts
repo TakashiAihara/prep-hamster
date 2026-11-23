@@ -19,7 +19,7 @@ if (import.meta.main) {
   try {
     const r = await sweepPhotos(createDb(databaseUrl), storage)
     console.log(
-      `[photo-sweep] stale pending claimed ${r.staleClaimed}, objects removed ${r.removed}, failed ${r.failed}`,
+      `[photo-sweep] stale pending claimed ${r.staleClaimed}, objects removed ${r.removed}, requeued ${r.requeued}, failed ${r.failed}`,
     )
     process.exit(exitCodeFor(r))
   } catch (err) {

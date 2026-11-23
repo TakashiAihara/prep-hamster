@@ -33,5 +33,10 @@ export const SWEEP_BATCH = 500
 // Storage の 1 回の HTTP 呼び出しの上限
 export const STORAGE_TIMEOUT_MS = 30 * 1000
 
+// 削除済みの pending の行に、遅れた upload が object を置きうる期間 (削除の時刻から)。
+// 要求は pending の間だけ upload でき、pending の要求の寿命は PENDING_STALE_AFTER_MS を超えず、最後の呼び出しの上限が STORAGE_TIMEOUT_MS。
+// この後に置かれる object は無いので、この後の削除の記録が最終になる
+export const LATE_UPLOAD_WINDOW_MS = PENDING_STALE_AFTER_MS + STORAGE_TIMEOUT_MS
+
 export const photoPath = (groupId: string, photoId: string): string =>
   `${groupId.toLowerCase()}/${photoId.toLowerCase()}.jpg`

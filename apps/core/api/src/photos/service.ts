@@ -4,6 +4,7 @@ import { PHOTO_CONTENT_TYPE, PHOTOS_PER_ITEM_MAX } from "@prep-hamster/schema"
 import {
   PENDING_STALE_AFTER_MS,
   REMOVAL_RETRY_AFTER_MS,
+  LATE_UPLOAD_WINDOW_MS,
   SIGN_CHUNK,
   SIGNED_URL_TTL_SECONDS,
   SWEEP_BATCH,
@@ -74,6 +75,8 @@ export async function claimPhoto(
         row.groupId === input.groupId &&
         row.itemId === input.itemId &&
         row.byteSize === input.byteSize &&
+        row.width === input.width &&
+        row.height === input.height &&
         row.deletedAt === null
       if (!same) return { kind: "reused" }
       if (row.status === "ready") return { kind: "existing", row }
@@ -237,16 +240,20 @@ export async function softDeletePhotosOfItem(
 }
 
 // soft delete 済みの行の object を消し、済んだら storage_deleted_at を立てる。失敗は握らず "failed" で返し、
-// 行を削除待ちのまま残す (sweep が再試行する)。
+// 行を削除待ちのまま残す (sweep が再試行する)。"requeued" は、消している間に discardUploaded が行を削除待ちに戻した
+// (記録を書かなかった) 場合
 export async function removeObjectOf(
   db: Db,
   storage: PhotoStorage,
   row: Pick<PhotoRow, "id" | "storagePath" | "updatedAt">,
   now: Clock,
-): Promise<"removed" | "failed"> {
+): Promise<"removed" | "requeued" | "failed"> {
   const r = await removeObjectsOf(db, storage, [row], now)
-  return r.failed > 0 ? "failed" : "removed"
+  if (r.failed > 0) return "failed"
+  return r.removed > 0 ? "removed" : "requeued"
 }
+
+export type RemovalResult = { removed: number; requeued: number; failed: number }
 
 // 1 回の Storage 呼び出しで消す path の数。1 item の写真 (上限 5) は 1 回で済み、sweep の 1 回 (SWEEP_BATCH) は数回で済む
 export const REMOVAL_CHUNK = 100
@@ -256,8 +263,8 @@ export async function removeObjectsOf(
   storage: PhotoStorage,
   rows: Pick<PhotoRow, "id" | "storagePath" | "updatedAt">[],
   now: Clock,
-): Promise<{ removed: number; failed: number }> {
-  const total = { removed: 0, failed: 0 }
+): Promise<RemovalResult> {
+  const total: RemovalResult = { removed: 0, requeued: 0, failed: 0 }
   for (let i = 0; i < rows.length; i += REMOVAL_CHUNK) {
     const chunk = rows.slice(i, i + REMOVAL_CHUNK)
     // object を消した後の行の更新が失敗しても、行は削除待ちのまま残るだけ (sweep が object の削除をやり直す。冪等)。
@@ -267,7 +274,7 @@ export async function removeObjectsOf(
       // oxlint-disable-next-line no-await-in-loop
       await storage.remove(chunk.map((r) => r.storagePath))
       // oxlint-disable-next-line no-await-in-loop
-      await db
+      const marked = await db
         .update(itemPhotos)
         .set({ storageDeletedAt: new Date(now()) })
         .where(
@@ -280,7 +287,9 @@ export async function removeObjectsOf(
             ),
           ),
         )
-      total.removed += chunk.length
+        .returning({ id: itemPhotos.id })
+      total.removed += marked.length
+      total.requeued += chunk.length - marked.length
     } catch {
       total.failed += chunk.length
     }
@@ -293,6 +302,8 @@ export type SweepResult = {
   staleClaimed: number
   // object を消して storage_deleted_at を立てた行
   removed: number
+  // object を消したが、その間に削除待ちに戻されて記録を書かなかった行 (次の回が拾う。失敗ではない)
+  requeued: number
   // object の削除か行の更新に失敗した行 (job は非 0 で終わり、次の回で再試行する)
   failed: number
 }
@@ -301,6 +312,8 @@ export type SweepResult = {
 //    ready にする UPDATE と同じ行を取り合うので、ready になった行は取られず、取られた行は ready にならない
 //    (遅れて来た要求は markReady が "gone" で、自分の object を消す)。object は取った後に消す
 // 2. 削除済みで storage_deleted_at が null の行 (1 で取った行を含む) の object を、Storage の外の transaction なしで消す
+// 3. 削除済みの pending の行は、削除から LATE_UPLOAD_WINDOW_MS の間は、止まらなかった要求が object を置きうる。
+//    その間に記録した削除は最終ではないので、窓が閉じた後にもう 1 度 object を消して記録し直す (ready だった行には遅れた upload が無い)
 export async function sweepPhotos(
   db: Db,
   storage: PhotoStorage,
@@ -346,7 +359,24 @@ export async function sweepPhotos(
     .orderBy(asc(itemPhotos.deletedAt))
     .limit(SWEEP_BATCH)
 
-  const removal = await removeObjectsOf(db, storage, [...claimed, ...waiting], now)
+  const late = await db
+    .select()
+    .from(itemPhotos)
+    .where(
+      and(
+        eq(itemPhotos.status, "pending"),
+        lt(itemPhotos.deletedAt, new Date(now() - LATE_UPLOAD_WINDOW_MS)),
+        // 窓が閉じる前に記録した削除だけ。窓の後の記録は最終。記録の無い行 (null) は比較が真にならず、上の waiting の担当
+        lt(
+          itemPhotos.storageDeletedAt,
+          sql`${itemPhotos.deletedAt} + ${LATE_UPLOAD_WINDOW_MS} * interval '1 millisecond'`,
+        ),
+      ),
+    )
+    .orderBy(asc(itemPhotos.deletedAt))
+    .limit(SWEEP_BATCH)
+
+  const removal = await removeObjectsOf(db, storage, [...claimed, ...waiting, ...late], now)
   return { staleClaimed: claimed.length, ...removal }
 }
 

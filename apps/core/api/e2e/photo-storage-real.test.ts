@@ -56,7 +56,9 @@ suite("real Supabase Storage", () => {
   })
 
   afterAll(async () => {
-    await admin.storage.from(PHOTO_BUCKET.name).remove(created)
+    const { error } = await admin.storage.from(PHOTO_BUCKET.name).remove(created)
+    // a failed cleanup would leave objects in the shared Storage and must not pass silently
+    if (error) throw new Error(`cleanup failed: ${error.message}`)
   })
 
   test("provisioning leaves a private bucket with the 2 MiB limit and image/jpeg only", async () => {
@@ -124,23 +126,30 @@ suite("real Supabase Storage", () => {
     await expect(big).rejects.toBeInstanceOf(StorageFailure)
   })
 
+  test("an object cannot be read without a key, through the public path or the authenticated path", async () => {
+    const path = newPath()
+    await storage.upload(path, jpeg(100), "image/jpeg")
+
+    const publicUrl = await fetch(`${base}/storage/v1/object/public/${PHOTO_BUCKET.name}/${path}`)
+    const authed = await fetch(`${base}/storage/v1/object/${PHOTO_BUCKET.name}/${path}`)
+
+    expect(publicUrl.status).not.toBe(200)
+    expect(authed.status).not.toBe(200)
+  })
+
   const denial = anonKey?.trim() ? test : test.skip
   denial("a publishable key can neither upload nor read an object", async () => {
     const path = newPath()
     await storage.upload(path, jpeg(100), "image/jpeg")
-    const anon = createClient(base, anonKey ?? "unset", { auth: { persistSession: false } })
+    const anon = createClient(base, anonKey?.trim() ?? "unset", { auth: { persistSession: false } })
 
     const up = await anon.storage
       .from(PHOTO_BUCKET.name)
       .upload(newPath(), jpeg(100), { contentType: "image/jpeg" })
     const down = await anon.storage.from(PHOTO_BUCKET.name).download(path)
-    const publicUrl = await fetch(`${base}/storage/v1/object/public/${PHOTO_BUCKET.name}/${path}`)
-    const authed = await fetch(`${base}/storage/v1/object/${PHOTO_BUCKET.name}/${path}`)
 
     expect(up.error).not.toBeNull()
     expect(down.error).not.toBeNull()
-    expect(publicUrl.status).not.toBe(200)
-    expect(authed.status).not.toBe(200)
   })
 
   describe("through the API", () => {
