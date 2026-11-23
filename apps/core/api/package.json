@@ -33,10 +33,10 @@
     "@prep-hamster/db": "workspace:*",
     "@prep-hamster/jan-api": "workspace:*",
     "@prep-hamster/schema": "workspace:*",
-    "@scalar/hono-api-reference": "^0.12.16",
-    "@supabase/supabase-js": "^2.118.0",
+    "@scalar/hono-api-reference": "^0.12.23",
+    "@supabase/supabase-js": "^2.119.2",
     "drizzle-orm": "^0.45.4",
-    "hono": "^4.13.14",
+    "hono": "^4.13.19",
     "zod": "^4.6.7"
   }
 }
