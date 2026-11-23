@@ -119,8 +119,14 @@ export async function uploadPhoto(
     return { ok: false, message: NETWORK_MESSAGE, retrySamePhotoId: true }
   }
   if (res.ok) {
-    const { photo } = (await res.json()) as { photo: PhotoDto }
-    return { ok: true, photo, replay: res.status === 200 }
+    // 2xx の後に本文を読めなかった・形が違うときは、サーバが保存したかどうか分からない。同じ photoId で送り直せば同じ写真が返る
+    try {
+      const body = (await res.json()) as { photo?: PhotoDto } | null
+      if (!body?.photo) throw new Error("response has no photo")
+      return { ok: true, photo: body.photo, replay: res.status === 200 }
+    } catch {
+      return { ok: false, message: NETWORK_MESSAGE, retrySamePhotoId: true }
+    }
   }
   const error = await readError(res)
   return {

@@ -1102,35 +1102,31 @@ const lateRow = async (status: "pending" | "ready", t: number) => {
   return { fake, photoId, path }
 }
 
-test("a deleted pending row gets its object removed again once the late-upload window has passed, and not before", async () => {
-  const t = Date.parse("2026-11-22T00:00:00Z")
-  const { fake, photoId, path } = await lateRow("pending", t)
+// a ready row is included: two requests with one photoId can both continue the upload, one marks the row ready, and the other puts its object after the photo was deleted
+test.each(["pending", "ready"] as const)(
+  "a row deleted while %s gets its object removed again once the late-upload window has passed, and not before",
+  async (status) => {
+    const t = Date.parse("2026-11-22T00:00:00Z")
+    const { fake, photoId, path } = await lateRow(status, t)
 
-  const before = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS - 1000)
-  expect(before).toEqual({ staleClaimed: 0, removed: 0, requeued: 0, failed: 0 })
-  expect(fake.objects.has(path)).toBe(true)
+    const before = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS - 1000)
+    expect(before).toEqual({ staleClaimed: 0, removed: 0, requeued: 0, failed: 0 })
+    expect(fake.objects.has(path)).toBe(true)
 
-  const after = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS + 1000)
-  expect(after).toEqual({ staleClaimed: 0, removed: 1, requeued: 0, failed: 0 })
-  expect(fake.objects.has(path)).toBe(false)
-  expect((await rowOf(photoId))?.storageDeletedAt?.getTime()).toBe(t + LATE_UPLOAD_WINDOW_MS + 1000)
+    const after = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS + 1000)
+    expect(after).toEqual({ staleClaimed: 0, removed: 1, requeued: 0, failed: 0 })
+    expect(fake.objects.has(path)).toBe(false)
+    expect((await rowOf(photoId))?.storageDeletedAt?.getTime()).toBe(
+      t + LATE_UPLOAD_WINDOW_MS + 1000,
+    )
 
-  // the record made after the window is final
-  fake.put(path)
-  const again = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS + 5000)
-  expect(again).toEqual({ staleClaimed: 0, removed: 0, requeued: 0, failed: 0 })
-  expect(fake.objects.has(path)).toBe(true)
-})
-
-test("a deleted ready row is final once its object was removed: no late upload can reach it", async () => {
-  const t = Date.parse("2026-11-22T00:00:00Z")
-  const { fake, path } = await lateRow("ready", t)
-
-  const result = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS + 1000)
-
-  expect(result).toEqual({ staleClaimed: 0, removed: 0, requeued: 0, failed: 0 })
-  expect(fake.objects.has(path)).toBe(true)
-})
+    // the record made after the window is final
+    fake.put(path)
+    const again = await sweepPhotos(testDb, fake.storage, () => t + LATE_UPLOAD_WINDOW_MS + 5000)
+    expect(again).toEqual({ staleClaimed: 0, removed: 0, requeued: 0, failed: 0 })
+    expect(fake.objects.has(path)).toBe(true)
+  },
+)
 
 test("a failing Storage removal is counted as failed, keeps the row pending removal, and makes the job exit non-zero", async () => {
   const t = Date.parse("2026-11-22T00:00:00Z")

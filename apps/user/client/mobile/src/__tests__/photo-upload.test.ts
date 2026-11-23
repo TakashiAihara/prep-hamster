@@ -135,6 +135,30 @@ test("uploadPhoto: a network failure keeps the photoId for a retry", async () =>
   })
 })
 
+test("uploadPhoto: a 2xx whose body cannot be read or has no photo keeps the photoId for a retry", async () => {
+  const bodies = [
+    new Response("<html>gateway</html>", { status: 201 }),
+    new Response("{}", { status: 200 }),
+    new Response("null", { status: 201 }),
+  ]
+  for (const body of bodies) {
+    // oxlint-disable-next-line no-await-in-loop
+    const result = await uploadPhoto(
+      { baseUrl: "http://x", fetch: async () => body },
+      PHOTO.itemId,
+      file,
+      { width: 1, height: 1 },
+      { photoId: PHOTO.id },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      message: "通信できませんでした。電波の良い場所で、もう一度同じ写真を送ってください",
+      retrySamePhotoId: true,
+    })
+  }
+})
+
 const rejectedWith = (status: number, code: string) =>
   uploadPhoto(
     {

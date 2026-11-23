@@ -312,8 +312,9 @@ export type SweepResult = {
 //    ready にする UPDATE と同じ行を取り合うので、ready になった行は取られず、取られた行は ready にならない
 //    (遅れて来た要求は markReady が "gone" で、自分の object を消す)。object は取った後に消す
 // 2. 削除済みで storage_deleted_at が null の行 (1 で取った行を含む) の object を、Storage の外の transaction なしで消す
-// 3. 削除済みの pending の行は、削除から LATE_UPLOAD_WINDOW_MS の間は、止まらなかった要求が object を置きうる。
-//    その間に記録した削除は最終ではないので、窓が閉じた後にもう 1 度 object を消して記録し直す (ready だった行には遅れた upload が無い)
+// 3. 削除済みの行は、削除から LATE_UPLOAD_WINDOW_MS の間は、止まらなかった要求が object を置きうる。
+//    pending の間に削除された行だけでなく、同じ photoId の 2 本の要求の一方が ready にした後に削除された行も (もう一方が upload を続けている)。
+//    その間に記録した削除は最終ではないので、窓が閉じた後にもう 1 度 object を消して記録し直す
 export async function sweepPhotos(
   db: Db,
   storage: PhotoStorage,
@@ -364,7 +365,6 @@ export async function sweepPhotos(
     .from(itemPhotos)
     .where(
       and(
-        eq(itemPhotos.status, "pending"),
         lt(itemPhotos.deletedAt, new Date(now() - LATE_UPLOAD_WINDOW_MS)),
         // 窓が閉じる前に記録した削除だけ。窓の後の記録は最終。記録の無い行 (null) は比較が真にならず、上の waiting の担当
         lt(

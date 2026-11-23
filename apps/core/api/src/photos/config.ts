@@ -33,8 +33,9 @@ export const SWEEP_BATCH = 500
 // Storage の 1 回の HTTP 呼び出しの上限
 export const STORAGE_TIMEOUT_MS = 30 * 1000
 
-// 削除済みの pending の行に、遅れた upload が object を置きうる期間 (削除の時刻から)。
-// 要求は pending の間だけ upload でき、pending の要求の寿命は PENDING_STALE_AFTER_MS を超えず、最後の呼び出しの上限が STORAGE_TIMEOUT_MS。
+// 削除済みの行に、遅れた upload が object を置きうる期間 (削除の時刻から)。
+// upload を続ける要求は行が pending のときの claim で始まり (同じ photoId の別の要求が先に ready にした行でも、後から始めた要求は upload しない)、
+// その寿命は PENDING_STALE_AFTER_MS を超えず、最後の呼び出しの上限が STORAGE_TIMEOUT_MS。削除は claim より後なので、削除から数えて足りる。
 // この後に置かれる object は無いので、この後の削除の記録が最終になる
 export const LATE_UPLOAD_WINDOW_MS = PENDING_STALE_AFTER_MS + STORAGE_TIMEOUT_MS
 
