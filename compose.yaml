@@ -17,6 +17,11 @@ services:
       SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
       # 手元の supabase start が発行する token の iss (supabase/config.toml の auth.jwt_issuer の既定)。
       SUPABASE_JWT_ISSUER: ${SUPABASE_JWT_ISSUER:-http://127.0.0.1:54321/auth/v1}
+      # 写真の保存先 (Supabase Storage) の secret key。空なら写真の route だけが 503 になる。値は shell の env から渡す
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      # 署名 URL の origin に使う、端末から届く Storage の URL (例: http://<LAN の IP>:54321)。空なら API が Storage に繋ぐ SUPABASE_URL のまま
+      # (host.docker.internal は端末から解決できないので、手元の端末で写真を見るなら設定する)
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     profiles: ["prod"]
@@ -40,6 +45,11 @@ services:
       SUPABASE_URL: ${SUPABASE_URL:-http://host.docker.internal:54321}
       # 手元の supabase start が発行する token の iss (supabase/config.toml の auth.jwt_issuer の既定)。
       SUPABASE_JWT_ISSUER: ${SUPABASE_JWT_ISSUER:-http://127.0.0.1:54321/auth/v1}
+      # 写真の保存先 (Supabase Storage) の secret key。空なら写真の route だけが 503 になる。値は shell の env から渡す
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      # 署名 URL の origin に使う、端末から届く Storage の URL (例: http://<LAN の IP>:54321)。空なら API が Storage に繋ぐ SUPABASE_URL のまま
+      # (host.docker.internal は端末から解決できないので、手元の端末で写真を見るなら設定する)
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

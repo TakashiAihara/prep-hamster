@@ -75,6 +75,11 @@ appId: com.example.prephamster
 - assertVisible:
     id: "detail-use-by-input"
     text: "2030-01-31"
+# 写真の欄が編集欄より上にあるので、備考欄は開き直した直後の画面の外にあることがある
+- scrollUntilVisible:
+    element:
+      id: "detail-note-input"
+    direction: DOWN
 - assertVisible:
     id: "detail-note-input"
     text: "maestro"

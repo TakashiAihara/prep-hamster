@@ -228,6 +228,48 @@ export const itemTags = pgTable(
   (t) => [primaryKey({ columns: [t.itemId, t.tagId] }), index("item_tags_tag_idx").on(t.tagId)],
 )
 
+export const itemPhotos = pgTable(
+  "item_photos",
+  {
+    id: uuid("id").primaryKey(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id),
+    storagePath: text("storage_path").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    // pending = 行だけで object はまだ (または途中)、ready = object が置かれて見えるようになった。名前は提案で、変更は schema とこの 1 列だけ
+    status: text("status").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    ...timestamps,
+    // object の削除が済んだ (または object が無かった) 時刻。deleted_at があって null のものが「削除待ち」
+    storageDeletedAt: tsCol("storage_deleted_at"),
+  },
+  (t) => [
+    check("item_photos_byte_size_positive", sql`${t.byteSize} > 0`),
+    check("item_photos_status_check", sql`${t.status} IN ('pending', 'ready')`),
+    index("item_photos_item_idx").on(t.itemId, t.createdAt, t.id),
+    // 一覧の先頭の写真 (group 内で item ごとの先頭 1 枚) を引く
+    index("item_photos_ready_cover_idx")
+      .on(t.groupId, t.itemId, t.createdAt, t.id)
+      .where(sql`${t.deletedAt} IS NULL AND ${t.status} = 'ready'`),
+    // 途中で止まった pending の行 (updated_at が古いもの) を sweep が引く
+    index("item_photos_stale_pending_idx")
+      .on(t.updatedAt)
+      .where(sql`${t.status} = 'pending' AND ${t.deletedAt} IS NULL`),
+    index("item_photos_pending_removal_idx")
+      .on(t.deletedAt)
+      .where(sql`${t.deletedAt} IS NOT NULL AND ${t.storageDeletedAt} IS NULL`),
+  ],
+)
+
 export const stocks = pgTable(
   "stocks",
   {
@@ -367,6 +409,7 @@ export const groupsRelations = relations(groups, ({ one, many }) => ({
   categories: many(categories),
   tags: many(tags),
   items: many(items),
+  itemPhotos: many(itemPhotos),
   stocks: many(stocks),
   stockEvents: many(stockEvents),
   requirementSetting: one(requirementSettings),
@@ -415,7 +458,14 @@ export const itemsRelations = relations(items, ({ one, many }) => ({
   category: one(categories, { fields: [items.categoryId], references: [categories.id] }),
   stocks: many(stocks),
   itemTags: many(itemTags),
+  photos: many(itemPhotos),
   shoppingListItems: many(shoppingListItems),
+}))
+
+export const itemPhotosRelations = relations(itemPhotos, ({ one }) => ({
+  group: one(groups, { fields: [itemPhotos.groupId], references: [groups.id] }),
+  item: one(items, { fields: [itemPhotos.itemId], references: [items.id] }),
+  creator: one(users, { fields: [itemPhotos.createdBy], references: [users.id] }),
 }))
 
 export const tagsRelations = relations(tags, ({ one, many }) => ({

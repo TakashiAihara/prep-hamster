@@ -12,6 +12,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./photo": {
+      "types": "./src/photo.ts",
+      "import": "./src/photo.ts",
+      "default": "./src/photo.ts"
+    },
     "./tag-name": {
       "types": "./src/tag-name.ts",
       "import": "./src/tag-name.ts",

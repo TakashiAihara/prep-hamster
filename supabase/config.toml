@@ -118,6 +118,13 @@ file_size_limit = "50MiB"
 # allowed_mime_types = ["image/png", "image/jpeg"]
 # objects_path = "./images"
 
+# 写真の bucket。定義 (名前 / 上限 / MIME) の出所は apps/core/api/src/photos/config.ts で、
+# 同じ値かどうかは apps/core/api/src/photos/bucket.test.ts が見る。policy は置かない (API だけが secret key で触る)。
+[storage.buckets.item-photos]
+public = false
+file_size_limit = "2MiB"
+allowed_mime_types = ["image/jpeg"]
+
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
 enabled = true

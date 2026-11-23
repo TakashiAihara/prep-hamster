@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path"
 import { createDb } from "@prep-hamster/db"
 import { installJaErrorMap } from "@prep-hamster/schema"
 
-const TEST_DB_URL =
+export const TEST_DB_URL =
   process.env["TEST_DATABASE_URL"] ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
 // createApp は error map を入れない (index.ts の起動時だけ)。e2e は全ファイルで同じ zod 設定にそろえる。
@@ -33,6 +33,7 @@ export async function truncateAll() {
     TRUNCATE TABLE
       stock_events,
       stocks,
+      item_photos,
       item_tags,
       tags,
       items,

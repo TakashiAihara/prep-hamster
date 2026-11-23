@@ -1,6 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
 import { categories, itemTags, items, productMasters, stocks } from "@prep-hamster/db"
+import { removeObjectsOf, softDeletePhotosOfItem } from "../photos/service"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
@@ -566,17 +567,29 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
     // updatedAt を見るクライアントから論理削除を検知できるようにするため。
     // 行を押さえてから外す。並行する PUT /items/{id}/tags は同じ行を FOR NO KEY UPDATE で
     // 取るので、削除済みの item に tag が付き直ることはない。
-    const now = new Date()
-    await db.transaction(async (tx) => {
+    // 写真は item と同じ transaction で soft delete する (削除済みの item に写真を残さない)
+    const removedPhotos = await db.transaction(async (tx) => {
       const [locked] = await tx
         .select({ id: items.id })
         .from(items)
         .where(and(eq(items.id, id), isNull(items.deletedAt)))
         .for("no key update")
-      if (!locked) return
-      await tx.update(items).set({ deletedAt: now, updatedAt: now }).where(eq(items.id, id))
+      if (!locked) return []
+      // 削除の時刻は sweep が読む時計 (photoClock) で、item の lock を取った後に 1 度だけ読み、item と写真に同じ値を使う。
+      // プロセスの時計 (new Date()) と混ぜると、止まった行の判定が 2 つの時計に分かれる。lock の待ちの前に読むと、待った分だけ削除時刻が古くなり、
+      // late-upload の窓の起点がずれる
+      const at = new Date(c.get("photoClock")())
+      await tx.update(items).set({ deletedAt: at, updatedAt: at }).where(eq(items.id, id))
+      // lock の順は item → photo → tag (設計 doc の Concurrency)
+      const photos = await softDeletePhotosOfItem(tx, id, at)
       await tx.delete(itemTags).where(eq(itemTags.itemId, id))
+      return photos
     })
+
+    // object の削除は commit の後。失敗した写真は削除待ちの行として残り、sweep が片付ける
+    // 1 item の写真は枚数の上限 (5) までなので、全部を並列に消しても同時の呼び出しは 5 件以内で、応答は 1 回分の遅さで済む
+    const storage = c.get("photoStorage")
+    if (storage) await removeObjectsOf(db, storage, removedPhotos, c.get("photoClock"))
 
     return c.body(null, 204)
   })
