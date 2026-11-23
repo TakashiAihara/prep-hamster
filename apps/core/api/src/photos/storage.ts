@@ -33,6 +33,46 @@ const fetchWithTimeout = (timeoutMs: number) =>
     return fetch(input, { ...init, signal })
   }) as typeof fetch
 
+// 署名 URL の origin (scheme / host / port) だけを公開 URL のものに替え、path と query はそのまま残す。
+// 署名 URL の origin が API の接続先と違う (差し替えてよいか分からない) とき・URL として読めないときは null
+export function toPublicUrl(
+  signed: string,
+  connectionUrl: string,
+  publicUrl: string,
+): string | null {
+  try {
+    const out = new URL(signed)
+    if (out.origin !== new URL(connectionUrl).origin) return null
+    const pub = new URL(publicUrl)
+    out.protocol = pub.protocol
+    out.hostname = pub.hostname
+    out.port = pub.port
+    return out.toString()
+  } catch {
+    return null
+  }
+}
+
+// 公開 URL が無ければ何もしない。差し替えられなかった署名 URL は黙って元のまま返さず、この rewriter ごとに 1 度だけ警告する
+export function createSignedUrlRewriter(
+  connectionUrl: string,
+  publicUrl?: string,
+): (signed: string) => string {
+  let warned = false
+  return (signed) => {
+    if (!publicUrl) return signed
+    const rewritten = toPublicUrl(signed, connectionUrl, publicUrl)
+    if (rewritten) return rewritten
+    if (!warned) {
+      warned = true
+      console.warn(
+        "[photo-storage] the origin of a signed URL is not the origin of SUPABASE_URL (or it is not a URL), so SUPABASE_PUBLIC_URL was not applied to it",
+      )
+    }
+    return signed
+  }
+}
+
 export function createSupabasePhotoStorage(
   url: string,
   secretKey: string,
@@ -45,19 +85,7 @@ export function createSupabasePhotoStorage(
   })
   const bucket = () => client.storage.from(PHOTO_BUCKET.name)
   // API が Storage に繋ぐ URL と、端末が署名 URL を取りに行く URL が違うとき (API が container の中にいる等) に、署名 URL の origin だけを差し替える
-  // 署名 URL が接続先で始まらない (差し替えられない) ときは、黙って元の URL を返さず、1 度だけ警告する
-  let warned = false
-  const toPublic = (signed: string) => {
-    if (!publicUrl) return signed
-    if (signed.startsWith(url)) return publicUrl + signed.slice(url.length)
-    if (!warned) {
-      warned = true
-      console.warn(
-        "[photo-storage] a signed URL does not start with SUPABASE_URL, so SUPABASE_PUBLIC_URL was not applied to it",
-      )
-    }
-    return signed
-  }
+  const toPublic = createSignedUrlRewriter(url, publicUrl)
 
   return {
     async upload(path, bytes, contentType) {
@@ -87,6 +115,10 @@ export function createSupabasePhotoStorage(
 // secret key は Storage の全 object を読み書きできるので、平文の HTTP には載せない。手元の supabase start と、その container からの別名だけが例外
 const PLAIN_HTTP_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "host.docker.internal"])
 
+// 前後の空白と、末尾の / と空白の並びを落とす (空白を落とした後に / が出る並びも含む)
+export const normalizedUrl = (value: string | undefined): string | undefined =>
+  value?.trim().replace(/[\s/]+$/, "")
+
 const parsedUrl = (name: string, value: string): URL => {
   try {
     return new URL(value)
@@ -100,19 +132,24 @@ const parsedUrl = (name: string, value: string): URL => {
 export function createPhotoStorageFromEnv(
   env: Record<string, string | undefined> = process.env,
 ): PhotoStorage | null {
-  const url = env["SUPABASE_URL"]?.trim().replace(/\/+$/, "")
+  const url = normalizedUrl(env["SUPABASE_URL"])
   const key = env["SUPABASE_SECRET_KEY"]?.trim()
   if (!url || !key) return null
   const parsed = parsedUrl("SUPABASE_URL", url)
-  if (parsed.protocol !== "https:" && !PLAIN_HTTP_HOSTS.has(parsed.hostname)) {
+  const localHttp = parsed.protocol === "http:" && PLAIN_HTTP_HOSTS.has(parsed.hostname)
+  if (parsed.protocol !== "https:" && !localHttp) {
     throw new Error("SUPABASE_URL must be https (plain http is accepted only for a local Supabase)")
   }
-  const publicUrl = env["SUPABASE_PUBLIC_URL"]?.trim().replace(/\/+$/, "")
-  if (
-    publicUrl &&
-    !["http:", "https:"].includes(parsedUrl("SUPABASE_PUBLIC_URL", publicUrl).protocol)
-  ) {
-    throw new Error("SUPABASE_PUBLIC_URL must be http or https")
+  const publicUrl = normalizedUrl(env["SUPABASE_PUBLIC_URL"])
+  if (publicUrl) {
+    const pub = parsedUrl("SUPABASE_PUBLIC_URL", publicUrl)
+    if (!["http:", "https:"].includes(pub.protocol)) {
+      throw new Error("SUPABASE_PUBLIC_URL must be http or https")
+    }
+    // path は使われない (署名 URL の path を残す) ので、path を書いた設定は黙って無視せず止める
+    if (pub.pathname !== "/" || pub.search || pub.hash) {
+      throw new Error("SUPABASE_PUBLIC_URL must be an origin without a path")
+    }
   }
   return createSupabasePhotoStorage(url, key, STORAGE_TIMEOUT_MS, publicUrl || undefined)
 }

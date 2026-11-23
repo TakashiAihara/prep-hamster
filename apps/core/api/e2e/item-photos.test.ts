@@ -21,6 +21,9 @@ const json = async (res: Response) => (await res.json()) as any
 
 const MIB = 1024 * 1024
 
+// keys of an OpenAPI path item that are not operations (parameters, summary, ...) are left out
+const HTTP_METHODS = new Set(["get", "put", "post", "delete", "patch", "head", "options"])
+
 test("upload then list returns the photo with a signed URL; delete removes it", async () => {
   const { fake, owner, upload, itemId, groupId, ownerId } = await setupPhotos()
   const photoId = crypto.randomUUID()
@@ -769,14 +772,17 @@ test("every photo route declares the unconfigured-Storage 503 next to the auth-s
     paths: Record<string, Record<string, { responses: Record<string, { description?: string }> }>>
   }
 
-  // derived from the spec, so a photo route added later without the 503 fails here
+  // The operations come from the spec and the exact set is pinned: a new photo operation makes this test fail
+  // until it is added to the list below, and it must then declare the 503 like the others
   const operations = Object.entries(spec.paths)
     .filter(([path]) => path.includes("/photos"))
     .flatMap(([path, methods]) =>
-      Object.entries(methods).map(([method, op]) => ({
-        name: `${method.toUpperCase()} ${path}`,
-        op,
-      })),
+      Object.entries(methods)
+        .filter(([method]) => HTTP_METHODS.has(method))
+        .map(([method, op]) => ({
+          name: `${method.toUpperCase()} ${path}`,
+          op,
+        })),
     )
   expect(operations.map((o) => o.name).toSorted()).toEqual([
     "DELETE /v1/items/{id}/photos/{photoId}",

@@ -1,5 +1,12 @@
 import { afterAll, expect, test } from "bun:test"
-import { createPhotoStorageFromEnv, createSupabasePhotoStorage, StorageFailure } from "./storage"
+import {
+  createPhotoStorageFromEnv,
+  createSignedUrlRewriter,
+  createSupabasePhotoStorage,
+  normalizedUrl,
+  StorageFailure,
+  toPublicUrl,
+} from "./storage"
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -143,28 +150,85 @@ test("SUPABASE_URL is trimmed like the other variables, and SUPABASE_PUBLIC_URL 
   expect(withPublic("http://192.168.0.5:54321")).not.toBeNull()
 })
 
-test("a signed URL that cannot be rewritten is returned unchanged with one warning", async () => {
+test("only the origin of a signed URL is replaced: scheme, host and port change, path and query stay", () => {
+  const signed = "http://127.0.0.1:54321/storage/v1/object/sign/item-photos/a%20b.jpg?token=abc.def"
+
+  expect(toPublicUrl(signed, "http://127.0.0.1:54321", "https://photos.example")).toBe(
+    "https://photos.example/storage/v1/object/sign/item-photos/a%20b.jpg?token=abc.def",
+  )
+  expect(toPublicUrl(signed, "http://127.0.0.1:54321", "http://192.168.0.5:8000")).toBe(
+    "http://192.168.0.5:8000/storage/v1/object/sign/item-photos/a%20b.jpg?token=abc.def",
+  )
+  // a connection URL with a path still has the same origin
+  expect(toPublicUrl(signed, "http://127.0.0.1:54321/x", "https://photos.example")).toBe(
+    "https://photos.example/storage/v1/object/sign/item-photos/a%20b.jpg?token=abc.def",
+  )
+})
+
+test("a signed URL from another origin, or one that is not a URL, is not rewritten", () => {
+  expect(
+    toPublicUrl(
+      "https://other.example/storage/v1/x?token=t",
+      "http://127.0.0.1:54321",
+      "https://p.example",
+    ),
+  ).toBeNull()
+  expect(toPublicUrl("not a url", "http://127.0.0.1:54321", "https://p.example")).toBeNull()
+})
+
+test("the rewriter returns an unrewritable URL unchanged and warns once", () => {
   const warnings: unknown[][] = []
   const original = console.warn
   console.warn = (...args: unknown[]) => void warnings.push(args)
   try {
-    // supabase-js percent-encodes the URL it builds (and uses another host for hosted projects), so a signed URL
-    // need not start with the URL the client was given; a space in the path makes that happen without a real hosted project
-    const storage = createSupabasePhotoStorage(
-      `http://127.0.0.1:${signing.port}/a b`,
-      "k",
-      1000,
-      "https://photos.example",
-    )
+    const rewrite = createSignedUrlRewriter("http://127.0.0.1:54321", "https://photos.example")
 
-    const first = await storage.signUrls(["a.jpg"], 60)
-    const second = await storage.signUrls(["a.jpg"], 60)
+    const first = rewrite("https://other.example/storage/v1/x?token=t")
+    const second = rewrite("https://other.example/storage/v1/y?token=t")
+    const fine = rewrite("http://127.0.0.1:54321/storage/v1/z?token=t")
 
-    expect(first.get("a.jpg")).toStartWith(`http://127.0.0.1:${signing.port}/a%`)
-    expect(second.get("a.jpg")).toBe(first.get("a.jpg"))
+    expect(first).toBe("https://other.example/storage/v1/x?token=t")
+    expect(second).toBe("https://other.example/storage/v1/y?token=t")
+    expect(fine).toBe("https://photos.example/storage/v1/z?token=t")
     expect(warnings).toHaveLength(1)
     expect(String(warnings[0]?.[0])).toContain("SUPABASE_PUBLIC_URL was not applied")
+    expect(createSignedUrlRewriter("http://127.0.0.1:54321")("anything")).toBe("anything")
+    expect(warnings).toHaveLength(1)
   } finally {
     console.warn = original
   }
+})
+
+test("a local host is accepted only over http or https, and a public URL must be an origin", () => {
+  expect(() => make("ftp://localhost:54321")).toThrow("SUPABASE_URL must be https")
+  expect(() => make("ws://127.0.0.1:54321")).toThrow("SUPABASE_URL must be https")
+  expect(() => withPublic("https://photos.example/storage")).toThrow(
+    "SUPABASE_PUBLIC_URL must be an origin without a path",
+  )
+  expect(() => withPublic("https://photos.example?x=1")).toThrow(
+    "SUPABASE_PUBLIC_URL must be an origin without a path",
+  )
+  expect(withPublic("https://photos.example:8443")).not.toBeNull()
+})
+
+test("normalizedUrl strips surrounding whitespace and any run of trailing slashes and spaces", () => {
+  expect(normalizedUrl(" https://p.supabase.co/ / \n")).toBe("https://p.supabase.co")
+  expect(normalizedUrl("https://p.supabase.co/ /")).toBe("https://p.supabase.co")
+  expect(normalizedUrl("https://p.supabase.co//")).toBe("https://p.supabase.co")
+  expect(normalizedUrl("https://p.supabase.co/path/")).toBe("https://p.supabase.co/path")
+  expect(normalizedUrl(undefined)).toBeUndefined()
+})
+
+test("trailing slashes and whitespace are stripped in any order from both URLs", async () => {
+  const base = `http://127.0.0.1:${signing.port}`
+
+  const storage = createPhotoStorageFromEnv({
+    SUPABASE_URL: ` ${base}/ / \n`,
+    SUPABASE_SECRET_KEY: "k",
+    SUPABASE_PUBLIC_URL: " https://photos.example / \n",
+  })
+
+  expect((await storage?.signUrls(["a.jpg"], 60))?.get("a.jpg")).toBe(
+    "https://photos.example/storage/v1/object/sign/item-photos/a.jpg?token=t",
+  )
 })

@@ -576,7 +576,7 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
         .for("no key update")
       if (!locked) return []
       // 削除の時刻は sweep が読む時計 (photoClock) で、item の lock を取った後に 1 度だけ読み、item と写真に同じ値を使う。
-      // DB の時計と混ぜると、止まった行の判定が 2 つに分かれる。lock の待ちの前に読むと、待った分だけ削除時刻が古くなり、
+      // プロセスの時計 (new Date()) と混ぜると、止まった行の判定が 2 つの時計に分かれる。lock の待ちの前に読むと、待った分だけ削除時刻が古くなり、
       // late-upload の窓の起点がずれる
       const at = new Date(c.get("photoClock")())
       await tx.update(items).set({ deletedAt: at, updatedAt: at }).where(eq(items.id, id))
