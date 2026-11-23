@@ -29,7 +29,7 @@
         "expo-image-picker",
         {
           "photosPermission": "商品に付ける写真を選ぶために写真ライブラリを使用します",
-          "cameraPermission": "商品の写真を撮影するためにカメラを使用します",
+          "cameraPermission": "JAN コードの読み取りと、商品の写真の撮影にカメラを使用します",
           "microphonePermission": false
         }
       ],

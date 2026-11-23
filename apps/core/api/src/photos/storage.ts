@@ -7,8 +7,8 @@ export type PhotoStorage = {
   // 同じ path に object が既にあっても成功 (path は photoId の行が持つので、あるのは同じ写真の前の試行の object)。
   // それ以外の失敗は throw
   upload(path: string, bytes: Uint8Array, contentType: string): Promise<void>
-  // object が無くても成功。失敗は throw
-  remove(path: string): Promise<void>
+  // object が無くても成功。1 回の呼び出しで複数の path を消す。失敗は throw
+  remove(paths: string[]): Promise<void>
   // 署名できなかった path は結果に含めない。全体の失敗は throw
   signUrls(paths: string[], expiresIn: number): Promise<Map<string, string>>
 }
@@ -51,9 +51,9 @@ export function createSupabasePhotoStorage(
         throw new StorageFailure(`upload failed: ${error.message}`)
     },
 
-    async remove(path) {
+    async remove(paths) {
       // 無い path の remove は error にならず空の結果を返す (実 Storage で確認済み)
-      const { error } = await bucket().remove([path])
+      const { error } = await bucket().remove(paths)
       if (error) throw new StorageFailure(`remove failed: ${error.message}`)
     },
 

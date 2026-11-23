@@ -16,18 +16,26 @@ import { ensureMigrated, testDb, truncateAll } from "./setup"
 const url = process.env["PHOTO_STORAGE_TEST_URL"]
 const secretKey = process.env["PHOTO_STORAGE_TEST_SECRET_KEY"]
 const anonKey = process.env["PHOTO_STORAGE_TEST_ANON_KEY"]
-const enabled = Boolean(url && secretKey)
+const validUrl = (u: string | undefined): boolean => {
+  try {
+    return ["http:", "https:"].includes(new URL(u ?? "").protocol)
+  } catch {
+    return false
+  }
+}
+const enabled = validUrl(url) && Boolean(secretKey?.trim())
 
 const suite = enabled ? describe : describe.skip
 if (!enabled) {
-  console.warn("skipped: PHOTO_STORAGE_TEST_URL / PHOTO_STORAGE_TEST_SECRET_KEY are not set")
+  console.warn(
+    "skipped: PHOTO_STORAGE_TEST_URL / PHOTO_STORAGE_TEST_SECRET_KEY are not set or not valid",
+  )
 }
 
+// SDK は空の key で投げるので、有効な suite の beforeAll の中でだけ作る (読み込み時に作ると、env が無効な実行が skip でなく失敗になる)
 const base = (url ?? "").replace(/\/+$/, "")
-const admin = createClient(base || "http://unset.invalid", secretKey ?? "unset", {
-  auth: { persistSession: false, autoRefreshToken: false },
-})
-const storage = createSupabasePhotoStorage(base || "http://unset.invalid", secretKey ?? "unset")
+let admin!: ReturnType<typeof createClient>
+let storage!: ReturnType<typeof createSupabasePhotoStorage>
 
 const group = crypto.randomUUID()
 const created: string[] = []
@@ -40,6 +48,10 @@ const infoOf = (path: string) => admin.storage.from(PHOTO_BUCKET.name).info(path
 
 suite("real Supabase Storage", () => {
   beforeAll(async () => {
+    admin = createClient(base, secretKey!.trim(), {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+    storage = createSupabasePhotoStorage(base, secretKey!.trim())
     await provisionPhotoBucket(admin.storage)
   })
 
@@ -90,8 +102,8 @@ suite("real Supabase Storage", () => {
     const path = newPath()
     await storage.upload(path, jpeg(100), "image/jpeg")
 
-    await storage.remove(path)
-    await storage.remove(path)
+    await storage.remove([path])
+    await storage.remove([path])
 
     const info = await infoOf(path)
     expect(info.data).toBeNull()
@@ -101,7 +113,7 @@ suite("real Supabase Storage", () => {
   test("a refused request (wrong key) is a StorageFailure for remove, not a silent success", async () => {
     const wrong = createSupabasePhotoStorage(base, "not-a-key")
 
-    await expect(wrong.remove(newPath())).rejects.toBeInstanceOf(StorageFailure)
+    await expect(wrong.remove([newPath()])).rejects.toBeInstanceOf(StorageFailure)
   })
 
   test("upload of another content type or over 2 MiB is a failure, not a success", async () => {
@@ -112,7 +124,7 @@ suite("real Supabase Storage", () => {
     await expect(big).rejects.toBeInstanceOf(StorageFailure)
   })
 
-  const denial = anonKey ? test : test.skip
+  const denial = anonKey?.trim() ? test : test.skip
   denial("a publishable key can neither upload nor read an object", async () => {
     const path = newPath()
     await storage.upload(path, jpeg(100), "image/jpeg")

@@ -7,6 +7,7 @@ import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import { photoPath } from "../photos/config"
 import {
   claimPhoto,
+  discardIfDeleted,
   discardUploaded,
   listCovers,
   listItemPhotos,
@@ -16,6 +17,7 @@ import {
   softDeletePhoto,
   type PhotoRow,
 } from "../photos/service"
+import { isUniqueViolation } from "./items"
 import { authErrorResponses, errorResponseSchema } from "./schemas"
 
 const IdParamSchema = z.object({
@@ -275,21 +277,28 @@ export const itemPhotosRouter = new OpenAPIHono<AppEnv>()
 
     // 1. 行を先に作る (pending)。送り直し・上限・別内容での photoId の再利用は、この短い transaction が決める
     const path = photoPath(item.groupId, photoId)
-    const claim = await claimPhoto(
-      db,
-      {
-        // 比べる itemId は DB の値 (小文字の標準形)。path の大文字の itemId のままだと、同じ写真の再送が別物になる
-        groupId: item.groupId,
-        itemId: item.id,
-        byteSize: bytes.length,
-        photoId,
-        userId: c.get("userId"),
-        storagePath: path,
-        width: form.width ?? null,
-        height: form.height ?? null,
-      },
-      now,
-    )
+    let claim: Awaited<ReturnType<typeof claimPhoto>>
+    try {
+      claim = await claimPhoto(
+        db,
+        {
+          // 比べる itemId は DB の値 (小文字の標準形)。path の大文字の itemId のままだと、同じ写真の再送が別物になる
+          groupId: item.groupId,
+          itemId: item.id,
+          byteSize: bytes.length,
+          photoId,
+          userId: c.get("userId"),
+          storagePath: path,
+          width: form.width ?? null,
+          height: form.height ?? null,
+        },
+        now,
+      )
+    } catch (err) {
+      // 別の item に同じ photoId を同時に初めて使った要求の負け。item ごとの lock では直列にならず、主キーが止める
+      if (isUniqueViolation(err)) return c.json(REUSED, 422)
+      throw err
+    }
     if (claim.kind === "gone") return c.json(ITEM_NOT_FOUND, 404)
     if (claim.kind === "reused") return c.json(REUSED, 422)
     if (claim.kind === "limit") return c.json(LIMIT, 422)
@@ -302,13 +311,15 @@ export const itemPhotosRouter = new OpenAPIHono<AppEnv>()
     try {
       await storage.upload(path, bytes, PHOTO_CONTENT_TYPE)
     } catch {
+      // Storage は object を置いてから失敗を返すことがある。その間に行が削除されていたら、object を片付ける
+      await discardIfDeleted(db, storage, { id: photoId, storagePath: path }, now)
       return c.json(STORAGE_DOWN, 502)
     }
 
     // 3. 行を ready にする。この間に行が削除された (item・写真の削除 / 止まった行として sweep) なら、置いた object を消す
     const ready = await markReady(db, photoId, now)
     if (ready.kind === "gone") {
-      await discardUploaded(db, storage, { id: photoId, storagePath: path })
+      await discardUploaded(db, storage, { id: photoId, storagePath: path }, now)
       return c.json(PHOTO_NOT_FOUND, 404)
     }
     return c.json({ photo: await dtoOf(storage, ready.row) }, claim.kind === "created" ? 201 : 200)

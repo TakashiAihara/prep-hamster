@@ -16,7 +16,7 @@ test("a Storage call that never answers fails after the timeout instead of waiti
   const storage = createSupabasePhotoStorage(`http://127.0.0.1:${stalled.port}`, "k", 200)
   const started = Date.now()
 
-  await expect(storage.remove("g/p.jpg")).rejects.toBeInstanceOf(StorageFailure)
+  await expect(storage.remove(["g/p.jpg"])).rejects.toBeInstanceOf(StorageFailure)
 
   expect(Date.now() - started).toBeLessThan(3000)
 })

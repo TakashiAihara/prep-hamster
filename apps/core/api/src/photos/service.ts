@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull, lt } from "drizzle-orm"
+import { and, asc, count, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { itemPhotos, items, type Db } from "@prep-hamster/db"
 import { PHOTO_CONTENT_TYPE, PHOTOS_PER_ITEM_MAX } from "@prep-hamster/schema"
 import {
@@ -77,13 +77,25 @@ export async function claimPhoto(
         row.deletedAt === null
       if (!same) return { kind: "reused" }
       if (row.status === "ready") return { kind: "existing", row }
-      // 送り直しは pending の行の最後の動きとして数える (sweep が、いま続けている upload の行を止まった行と取り違えない)
+      // 送り直しは pending の行の最後の動きとして数える (sweep が、いま続けている upload の行を止まった行と取り違えない)。
+      // 読んでからこの UPDATE までの間に行が削除された (sweep・item の削除) なら、1 行も更新されず、削除済みの photoId として扱う
       const [touched] = await tx
         .update(itemPhotos)
         .set({ updatedAt: new Date(now()) })
-        .where(eq(itemPhotos.id, row.id))
+        .where(
+          and(
+            eq(itemPhotos.id, row.id),
+            eq(itemPhotos.status, "pending"),
+            isNull(itemPhotos.deletedAt),
+          ),
+        )
         .returning()
-      return { kind: "existing", row: touched ?? row }
+      if (touched) return { kind: "existing", row: touched }
+      // 更新できなかった: 読んだ後に ready になった (同じ photoId の別の要求が終えた) ならその行で続け、削除されたなら別物
+      const [fresh] = await tx.select().from(itemPhotos).where(eq(itemPhotos.id, row.id)).limit(1)
+      return fresh && !fresh.deletedAt && fresh.status === "ready"
+        ? { kind: "existing", row: fresh }
+        : { kind: "reused" }
     }
 
     if ((await countActive(tx, input.itemId)) >= max) return { kind: "limit" }
@@ -141,20 +153,49 @@ export async function markReady(
 
 // 自分が置いた object の行が、upload の間に削除されていた (item・写真の削除 / sweep)。object を消す。
 // 消せなければ、行を削除待ちに戻して sweep に任せる (行の側の削除が先に済んで storage_deleted_at が立っていても、
-// その後に置いた object は残っている)
+// その後に置いた object は残っている)。戻すときは updated_at を進める: 先に始まっていた removeObjectOf の完了の記録は
+// 始めたときの updated_at が条件なので、この戻しを後から上書きできない
 export async function discardUploaded(
   db: Db,
   storage: PhotoStorage,
   row: Pick<PhotoRow, "id" | "storagePath">,
+  now: Clock,
 ): Promise<void> {
   try {
-    await storage.remove(row.storagePath)
+    await storage.remove([row.storagePath])
   } catch {
     try {
-      await db.update(itemPhotos).set({ storageDeletedAt: null }).where(eq(itemPhotos.id, row.id))
+      await db
+        .update(itemPhotos)
+        .set({
+          storageDeletedAt: null,
+          updatedAt: sql`greatest(${new Date(now()).toISOString()}::timestamptz, ${itemPhotos.updatedAt} + interval '1 millisecond')`,
+        })
+        .where(eq(itemPhotos.id, row.id))
     } catch {
       // sweep が拾えない場合は、object が残る
     }
+  }
+}
+
+// upload が例外で終わった後の確認。Storage は object を置いてから失敗を返すことがある (timeout など) ので、
+// その間に行が削除されていたら、その行の object を片付ける (行が生きていれば、同じ photoId の送り直しが続けるので触らない)。
+// 削除済みの行の path にある object は、同じ photoId の別の要求のものでも持ち主が無い
+export async function discardIfDeleted(
+  db: Db,
+  storage: PhotoStorage,
+  row: Pick<PhotoRow, "id" | "storagePath">,
+  now: Clock,
+): Promise<void> {
+  try {
+    const [current] = await db
+      .select({ deletedAt: itemPhotos.deletedAt })
+      .from(itemPhotos)
+      .where(eq(itemPhotos.id, row.id))
+      .limit(1)
+    if (current?.deletedAt) await discardUploaded(db, storage, row, now)
+  } catch {
+    // 確認できなければ、行が削除済みなら sweep が拾い、生きていれば送り直しが続ける
   }
 }
 
@@ -200,20 +241,51 @@ export async function softDeletePhotosOfItem(
 export async function removeObjectOf(
   db: Db,
   storage: PhotoStorage,
-  row: Pick<PhotoRow, "id" | "storagePath">,
+  row: Pick<PhotoRow, "id" | "storagePath" | "updatedAt">,
   now: Clock,
 ): Promise<"removed" | "failed"> {
-  // object を消した後の行の更新が失敗しても、行は削除待ちのまま残るだけ (sweep が object の削除をやり直す。冪等)
-  try {
-    await storage.remove(row.storagePath)
-    await db
-      .update(itemPhotos)
-      .set({ storageDeletedAt: new Date(now()) })
-      .where(eq(itemPhotos.id, row.id))
-  } catch {
-    return "failed"
+  const r = await removeObjectsOf(db, storage, [row], now)
+  return r.failed > 0 ? "failed" : "removed"
+}
+
+// 1 回の Storage 呼び出しで消す path の数。1 item の写真 (上限 5) は 1 回で済み、sweep の 1 回 (SWEEP_BATCH) は数回で済む
+export const REMOVAL_CHUNK = 100
+
+export async function removeObjectsOf(
+  db: Db,
+  storage: PhotoStorage,
+  rows: Pick<PhotoRow, "id" | "storagePath" | "updatedAt">[],
+  now: Clock,
+): Promise<{ removed: number; failed: number }> {
+  const total = { removed: 0, failed: 0 }
+  for (let i = 0; i < rows.length; i += REMOVAL_CHUNK) {
+    const chunk = rows.slice(i, i + REMOVAL_CHUNK)
+    // object を消した後の行の更新が失敗しても、行は削除待ちのまま残るだけ (sweep が object の削除をやり直す。冪等)。
+    // 完了の記録は、読んだときの updated_at の行にだけ書く。その間に discardUploaded が行を削除待ちに戻した
+    // (object を置き直された) なら、その行の記録は何も更新せず、行は削除待ちのまま残る
+    try {
+      // oxlint-disable-next-line no-await-in-loop
+      await storage.remove(chunk.map((r) => r.storagePath))
+      // oxlint-disable-next-line no-await-in-loop
+      await db
+        .update(itemPhotos)
+        .set({ storageDeletedAt: new Date(now()) })
+        .where(
+          or(
+            ...chunk.map((r) =>
+              and(
+                eq(itemPhotos.id, r.id),
+                sql`date_trunc('milliseconds', ${itemPhotos.updatedAt}) = ${r.updatedAt.toISOString()}::timestamptz`,
+              ),
+            ),
+          ),
+        )
+      total.removed += chunk.length
+    } catch {
+      total.failed += chunk.length
+    }
   }
-  return "removed"
+  return total
 }
 
 export type SweepResult = {
@@ -255,6 +327,9 @@ export async function sweepPhotos(
         inArray(itemPhotos.id, stale),
         eq(itemPhotos.status, "pending"),
         isNull(itemPhotos.deletedAt),
+        // 副問い合わせの結果は文の開始時点のまま。行の lock を待っている間に送り直しが updated_at を進めたなら、
+        // この条件の再検査で外れる (READ COMMITTED は更新後の行に外側の条件を当て直す)
+        lt(itemPhotos.updatedAt, new Date(now() - PENDING_STALE_AFTER_MS)),
       ),
     )
     .returning()
@@ -271,14 +346,8 @@ export async function sweepPhotos(
     .orderBy(asc(itemPhotos.deletedAt))
     .limit(SWEEP_BATCH)
 
-  const result: SweepResult = { staleClaimed: claimed.length, removed: 0, failed: 0 }
-  for (const row of [...claimed, ...waiting]) {
-    // oxlint-disable-next-line no-await-in-loop
-    const r = await removeObjectOf(db, storage, row, now)
-    if (r === "removed") result.removed++
-    else result.failed++
-  }
-  return result
+  const removal = await removeObjectsOf(db, storage, [...claimed, ...waiting], now)
+  return { staleClaimed: claimed.length, ...removal }
 }
 
 export type CoverRow = { itemId: string; photoId: string; path: string }

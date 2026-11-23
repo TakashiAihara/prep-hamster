@@ -2,7 +2,7 @@ import type { PhotoStorage } from "../src/photos/storage"
 
 export type StorageCall =
   | { op: "upload"; path: string; contentType: string; size: number }
-  | { op: "remove"; path: string }
+  | { op: "remove"; paths: string[] }
   | { op: "sign"; paths: string[]; expiresIn: number }
 
 // Storage の偽物。受け取った呼び出しを records に残し、テストは応答だけでなく
@@ -36,11 +36,11 @@ export function createFakePhotoStorage() {
       if (!objects.has(path)) objects.set(path, { size: bytes.length, contentType })
       await control.afterUploadStored?.()
     },
-    async remove(path) {
-      calls.push({ op: "remove", path })
+    async remove(paths) {
+      calls.push({ op: "remove", paths })
       await control.beforeCall?.("remove")
       if (control.failRemove) throw new Error("storage down")
-      objects.delete(path)
+      for (const p of paths) objects.delete(p)
     },
     async signUrls(paths, expiresIn) {
       calls.push({ op: "sign", paths, expiresIn })

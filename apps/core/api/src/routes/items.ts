@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi"
 import { and, asc, eq, inArray, isNull } from "drizzle-orm"
 import { categories, itemTags, items, productMasters, stocks } from "@prep-hamster/db"
-import { removeObjectOf, softDeletePhotosOfItem } from "../photos/service"
+import { removeObjectsOf, softDeletePhotosOfItem } from "../photos/service"
 import type { AppEnv } from "../app"
 import { checkGroupAccess, withGroupAccess } from "../middleware/group-access"
 import {
@@ -582,13 +582,9 @@ export const itemsRouter = new OpenAPIHono<AppEnv>()
     })
 
     // object の削除は commit の後。失敗した写真は削除待ちの行として残り、sweep が片付ける
+    // 1 item の写真は枚数の上限 (5) までなので、全部を並列に消しても同時の呼び出しは 5 件以内で、応答は 1 回分の遅さで済む
     const storage = c.get("photoStorage")
-    if (storage) {
-      for (const photo of removedPhotos) {
-        // oxlint-disable-next-line no-await-in-loop
-        await removeObjectOf(db, storage, photo, c.get("photoClock"))
-      }
-    }
+    if (storage) await removeObjectsOf(db, storage, removedPhotos, c.get("photoClock"))
 
     return c.body(null, 204)
   })
