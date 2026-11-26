@@ -1,7 +1,17 @@
 import { defineCommand } from "citty"
 import { createInterface } from "node:readline"
-import { createAuthClient, currentConnection, sessionFile } from "../auth"
-import { codeFromCallback, writeConnection, type CallbackResult } from "../session-store"
+import type { SupabaseClient } from "@supabase/supabase-js"
+import { createAuthClient, pickConnection, sessionFileOrExit } from "../auth"
+import {
+  codeFromCallback,
+  fileStorage,
+  keepingPkceVerifiers,
+  purgePkceVerifiers,
+  readConnection,
+  writeConnection,
+  type CallbackResult,
+  type Connection,
+} from "../session-store"
 
 const CALLBACK_PATH = "/callback"
 
@@ -21,31 +31,70 @@ function openBrowser(url: string): void {
   }
 }
 
+type LoginContext = { file: string; connection: Connection; supabase: SupabaseClient }
+
+// 接続先と auth client を用意する。セッションファイルの場所が決められない・
+// env も保存した接続先も無い・接続先が壊れているときは CLI エラーとして終わる
+function loginContext(): LoginContext {
+  const file = sessionFileOrExit(2)
+  let connection: Connection | null
+  let supabase: SupabaseClient | null
+  try {
+    connection = pickConnection(process.env, readConnection(file))
+    supabase = connection ? createAuthClient(keepingPkceVerifiers(fileStorage(file))) : null
+  } catch (e) {
+    console.error(`Error: ${e instanceof Error ? e.message : String(e)}`)
+    process.exit(2)
+  }
+  if (!supabase || !connection) {
+    console.error(
+      "Error: PREP_HAMSTER_SUPABASE_URL / PREP_HAMSTER_SUPABASE_PUBLISHABLE_KEY を設定してください",
+    )
+    process.exit(2)
+  }
+  return { file, connection, supabase }
+}
+
+// code をセッションに交換し、接続先を残す。
+// 交換できた時点でサインインは成立なので、接続先を保存できなくても失敗にはせず警告にする
+export async function exchangeLoginCode(
+  supabase: SupabaseClient,
+  code: string,
+  file: string,
+  connection: Connection,
+): Promise<string> {
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+  if (error) throw error
+  try {
+    writeConnection(file, connection)
+  } catch (e) {
+    console.error(
+      `警告: 接続先を保存できませんでした: ${printable(e instanceof Error ? e.message : String(e))}`,
+    )
+  }
+  return data.user?.email ?? ""
+}
+
 export const loginCommand = defineCommand({
   meta: {
     name: "login",
     description: "Google でサインインしてセッションを保存する",
   },
   async run() {
-    const connection = currentConnection()
-    const supabase = createAuthClient()
-    if (!supabase || !connection) {
-      console.error(
-        "Error: PREP_HAMSTER_SUPABASE_URL / PREP_HAMSTER_SUPABASE_PUBLISHABLE_KEY を設定してください",
-      )
-      process.exit(2)
-    }
+    const { file, connection, supabase } = loginContext()
 
-    // 同じ code は 1 回しか交換できないので、ブラウザと貼り付けのどちらが先でも交換は同時に 1 本にする。
+    // 同じ code は 1 回しか交換できないので、交換は同時に 1 本にする。
+    // in-flight の試行が終わるまで次の code は順番待ちにして、
+    // 偽の試行の最中に届いた本物の戻りを呑み込まない。
     // 確定するのは交換に成功したときだけ。127.0.0.1 の口は同じホストの誰でも叩けるので、
     // 失敗 (error 付きの戻り・交換の失敗) では終わらず、本物の戻りを待ち続ける
-    let inFlight: Promise<string> | undefined
+    let settled = false
+    let chain: Promise<unknown> = Promise.resolve()
     let signedIn!: (email: string) => void
     const started = new Promise<string>((resolve) => {
       signedIn = resolve
     })
     const handle = (result: CallbackResult): Promise<string> => {
-      if (inFlight) return inFlight
       if ("error" in result) {
         const message = printable(result.error)
         console.error(
@@ -53,19 +102,20 @@ export const loginCommand = defineCommand({
         )
         return Promise.reject(new Error(message))
       }
-      const attempt = (async () => {
-        const { data, error } = await supabase.auth.exchangeCodeForSession(result.code)
-        if (error) throw error
-        // 以降のコマンドが env 無しでも同じ project に繋がるよう、接続先も残す
-        writeConnection(sessionFile(), connection)
-        return data.user?.email ?? ""
+      const attempt = chain.then(() =>
+        settled ? "" : exchangeLoginCode(supabase, result.code, file, connection),
+      )
+      chain = attempt.catch(() => {})
+      void (async () => {
+        try {
+          const email = await attempt
+          settled = true
+          signedIn(email)
+        } catch (e) {
+          const message = printable(e instanceof Error ? e.message : String(e))
+          console.error(`code を交換できませんでした: ${message} (待ち続けます。やめるなら Ctrl-C)`)
+        }
       })()
-      inFlight = attempt
-      attempt.then(signedIn, (e: unknown) => {
-        inFlight = undefined
-        const message = printable(e instanceof Error ? e.message : String(e))
-        console.error(`code を交換できませんでした: ${message} (待ち続けます。やめるなら Ctrl-C)`)
-      })
       return attempt
     }
 
@@ -123,6 +173,11 @@ export const loginCommand = defineCommand({
       clearTimeout(timer)
       rl.close()
       await server.stop()
+      try {
+        purgePkceVerifiers(file)
+      } catch {
+        // verifier は対応する code が無いと使えないので、消せなくても実害は無い
+      }
     }
   },
 })
