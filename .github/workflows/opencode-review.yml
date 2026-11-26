@@ -25,14 +25,15 @@ jobs:
 
   # A second free Zen model: in two replays of a PR with two known bugs it found 3 of 4,
   # glm-5.3-flash-free (then used by the job above, withdrawn 2026-11-18) 1 of 4, and the two
-  # together all 4 (2026-11-10).
-  opencode-inkling:
+  # together all 4 (2026-11-10). inkling-2-small-free was withdrawn 2026-11-20; flint-40b-free
+  # is the current pick, chosen for a different model family than deepseek.
+  opencode-flint:
     permissions:
       contents: read
       pull-requests: write
       issues: write
     uses: TakashiAihara/opencode-review/.github/workflows/review.yml@main
     with:
-      model: opencode/inkling-2-small-free
+      model: opencode/flint-40b-free
     secrets:
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
