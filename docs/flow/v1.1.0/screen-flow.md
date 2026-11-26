@@ -66,6 +66,7 @@ flowchart TD
     Scan -. "照合失敗: 再スキャン" .-> Scan
     Manual -. "照合失敗: 入力画面に留まる" .-> Manual
     Lookup -- "existing / hit / miss" --> Details["/add/details<br/>M-06 詳細入力"]
+    Details -- "場所をその場で追加" --> Details
     Details -- "保存成功 replace" --> Stocks
     Details -. "保存失敗: エラー表示" .-> Details
 
@@ -122,7 +123,7 @@ flowchart TD
 - グループ作成・招待は計画では Web 管理画面（W-03 / W-05）の操作だったが、モバイルでもできる
 - 場所の管理: rename / delete は計画では Web 管理画面（W-07 カテゴリ・場所管理）の領分だったが、モバイルの `/locations` modal で実装した。決定は `docs/design/mobile-locations.md`。新規作成は `/add/details` の保管場所欄からその場で行う
 - 保存後の遷移: 計画は在庫一覧（M-04）へ戻る。実装も `/(tabs)` へ replace し、タブ復帰で一覧を取り直す
-- 保存の入力項目: 場所・数量 / 単位・使用期限 / 賞味期限・メモ。品名は照会が miss のときだけ編集でき、保存前に品目を PATCH する
+- 保存の入力項目: 場所・数量 / 単位・使用期限 / 賞味期限・メモ。場所は一覧から選ぶか、その場で名前を入れて追加する (POST /v1/locations、作った場所はそのまま選択される)。品名は照会が miss のときだけ編集でき、保存前に品目を PATCH する
 
 ### 4. フローに置けなかったもの
 
