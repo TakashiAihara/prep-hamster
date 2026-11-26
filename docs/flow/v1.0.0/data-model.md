@@ -16,6 +16,8 @@
 
 ## 2. ER 図
 
+> この ER 図は v1.0.0 の設計時点のもので、現行スキーマとは一致しない。最新の ER 図とテーブル定義はスキーマから生成した [`docs/reference/data-model.md`](../../reference/data-model.md) を参照。
+
 ```mermaid
 erDiagram
     User ||--o{ Membership : "has"
