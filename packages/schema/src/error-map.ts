@@ -87,10 +87,14 @@ export const jaErrorMap: z.core.$ZodErrorMap = (issue) => {
   return undefined
 }
 
-// zod 4 は issue.received を持たないので、typeLabel が名前を持つ null / 配列 / Date だけ
-// typeof から分ける (zod 3 の nan / map / set / promise は区別しない)。
-const receivedType = (v: unknown): string =>
-  v === null ? "null" : Array.isArray(v) ? "array" : v instanceof Date ? "date" : typeof v
+// zod 4 は信頼できる issue.received を持たないので、typeLabel が名前を持つ null / 配列 /
+// Date と、typeof では区別できない NaN / Invalid Date を入力値から分ける
+// (zod 3 の map / set / promise は区別しない)。
+const receivedType = (v: unknown): string => {
+  if (typeof v === "number" && Number.isNaN(v)) return "nan"
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? "invalid_date" : "date"
+  return v === null ? "null" : Array.isArray(v) ? "array" : typeof v
+}
 
 const typeLabel = (t: string): string => {
   switch (t) {
@@ -112,6 +116,10 @@ const typeLabel = (t: string): string => {
       return "undefined"
     case "date":
       return "日付"
+    case "nan":
+      return "非数"
+    case "invalid_date":
+      return "不正な日付"
     default:
       return t
   }

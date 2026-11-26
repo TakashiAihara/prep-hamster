@@ -19,35 +19,37 @@ export type SeedFixture = {
   locationId: string
 }
 
-export async function seedUser(displayName = "E2E User"): Promise<string> {
-  const userId = crypto.randomUUID()
+export async function seedUser(
+  displayName = "E2E User",
+  id = crypto.randomUUID(),
+): Promise<string> {
   await testDb.insert(users).values({
-    id: userId,
-    email: `e2e-${userId}@example.test`,
+    id,
+    email: `e2e-${id}@example.test`,
     displayName,
     locale: "ja-JP",
   })
-  return userId
+  return id
 }
 
 export async function seedGroupWithMembership(
   ownerUserId: string,
   name = "E2E Group",
+  id = crypto.randomUUID(),
 ): Promise<string> {
-  const groupId = crypto.randomUUID()
   await testDb.insert(groups).values({
-    id: groupId,
+    id,
     name,
     createdBy: ownerUserId,
   })
   await testDb.insert(memberships).values({
     id: crypto.randomUUID(),
     userId: ownerUserId,
-    groupId,
+    groupId: id,
     role: "OWNER",
     joinedAt: new Date(),
   })
-  return groupId
+  return id
 }
 
 export async function seedMembership(

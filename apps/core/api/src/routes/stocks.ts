@@ -35,7 +35,7 @@ const ListQuerySchema = z.object({
   categoryId: z.string().guid().optional(),
   tagId: z.string().guid().optional(),
   locationId: z.string().guid().optional(),
-  expiringBefore: z.string().date().optional(),
+  expiringBefore: z.iso.date().optional(),
   includeExpired: booleanQuery.optional(),
   includeEmpty: booleanQuery.optional().openapi({
     description: "true で使い切った在庫 (小数第 6 位で丸めて 0 以下) も含める。既定は含めない",
