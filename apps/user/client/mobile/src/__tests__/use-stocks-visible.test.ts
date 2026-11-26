@@ -28,9 +28,19 @@ const stockDto = (id: string, quantity: number) => ({
 })
 
 function fakeListClient(
-  over: { stocks?: () => Response; items?: () => Response; locations?: () => Response } = {},
+  over: {
+    stocks?: () => Response
+    items?: () => Response
+    locations?: () => Response
+    categories?: () => Response
+  } = {},
 ) {
-  const queries: { stocks?: unknown; items?: unknown; locations?: unknown } = {}
+  const queries: {
+    stocks?: unknown
+    items?: unknown
+    locations?: unknown
+    categories?: unknown
+  } = {}
   const client = {
     v1: {
       stocks: {
@@ -45,13 +55,19 @@ function fakeListClient(
       items: {
         $get: async (args: { query: unknown }) => {
           queries.items = args.query
-          return over.items?.() ?? json({ items: [{ id: "i1", name: "Tomato" }] })
+          return over.items?.() ?? json({ items: [{ id: "i1", name: "Tomato", categoryId: "c1" }] })
         },
       },
       locations: {
         $get: async (args: { query: unknown }) => {
           queries.locations = args.query
           return over.locations?.() ?? json({ locations: [{ id: "l1", name: "Pantry" }] })
+        },
+      },
+      categories: {
+        $get: async (args: { query: unknown }) => {
+          queries.categories = args.query
+          return over.categories?.() ?? json({ categories: [{ id: "c1", name: "野菜" }] })
         },
       },
     },
@@ -67,8 +83,11 @@ test("loadStockRows asks for expired stocks too and shows the rows the API retur
   expect(queries.stocks).toEqual({ groupId: GROUP, includeExpired: "true" })
   expect(queries.items).toEqual({ groupId: GROUP })
   expect(queries.locations).toEqual({ groupId: GROUP })
+  expect(queries.categories).toEqual({ groupId: GROUP })
   expect(r.ok && r.rows.map((x) => x.id)).toEqual(["alive", "used-up", "expired"])
   expect(r.ok && r.rows[0]?.itemName).toBe("Tomato")
+  expect(r.ok && r.rows[0]?.categoryId).toBe("c1")
+  expect(r.ok && r.rows[0]?.categoryName).toBe("野菜")
 })
 
 test("loadStockRows reports which request failed", async () => {
@@ -80,5 +99,10 @@ test("loadStockRows reports which request failed", async () => {
   expect(await loadStockRows(locs.client, GROUP)).toEqual({
     ok: false,
     message: "locations HTTP 503",
+  })
+  const cats = fakeListClient({ categories: () => new Response("x", { status: 504 }) })
+  expect(await loadStockRows(cats.client, GROUP)).toEqual({
+    ok: false,
+    message: "categories HTTP 504",
   })
 })
