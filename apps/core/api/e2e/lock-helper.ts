@@ -20,17 +20,17 @@ export async function holdStockRow(stockId: string) {
   }
 }
 
-export async function waitForLockWaiters(count: number) {
+export async function waitForLockWaiters(count: number, table: "stocks" | "locations" = "stocks") {
   // 待ちの数が揃うまで順に見に行くポーリングなので、ループの中で待つ
   // bun のテスト timeout (5 秒) より先に諦め、finally でロックを放せるよう 3 秒で打ち切る
   for (let i = 0; i < 60; i++) {
     // oxlint-disable-next-line no-await-in-loop
     const rows = (await testDb.execute(
-      // 共有の Postgres なので、この DB で在庫の行を更新するか押さえようとして待っている要求だけを数える
+      // 共有の Postgres なので、この DB で table の行を更新するか押さえようとして待っている要求だけを数える
       sql`select count(*)::int as n from pg_stat_activity
           where wait_event_type = 'Lock' and datname = current_database()
-            and (query ilike 'update "stocks"%'
-              or (query ilike 'select %from "stocks"%'
+            and (query ilike ${`update "${table}"%`}
+              or (query ilike ${`select %from "${table}"%`}
                 and (query ilike '% for update' or query ilike '% for no key update')))`,
     )) as unknown as Array<{ n: number }>
     if ((rows[0]?.n ?? 0) >= count) return

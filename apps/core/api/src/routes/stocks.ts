@@ -139,6 +139,11 @@ class StockMoveNotApplied extends Error {}
 class StockMoveNoop extends Error {}
 // delete の transaction 内で対象行を取れなかった (= 並行して削除された) ときの印。
 class StockDeleteNotApplied extends Error {}
+// PATCH の transaction 内で対象行を取れなかった (= 並行して削除された) ときの印。
+class StockPatchNotApplied extends Error {}
+// PATCH / move の transaction 内で、変更先の location が同じ group の active な
+// ものでなかったときの印。
+class LocationGroupMismatch extends Error {}
 
 const listStocksRoute = createRoute({
   method: "get",
@@ -540,14 +545,58 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
 
     // locationId 変更を PATCH で許容するが、move エンドポイントとは違い stock_events への
     // MOVE 記録は行わない (PATCH は属性訂正系。物理移動は /move を使うこと)。
-    // ただし group をまたいだ location は弾く。
-    if (body.locationId && body.locationId !== existing.locationId) {
-      const [toLoc] = await db
-        .select({ groupId: locations.groupId })
-        .from(locations)
-        .where(and(eq(locations.id, body.locationId), isNull(locations.deletedAt)))
-        .limit(1)
-      if (!toLoc || toLoc.groupId !== existing.groupId) {
+    try {
+      const result = await db.transaction(async (tx) => {
+        // 事前の読み取りと UPDATE の間に削除や移動が commit されうるため、
+        // move と同じく行を FOR NO KEY UPDATE で押さえてから更新する。
+        const [locked] = await tx
+          .select()
+          .from(stocks)
+          .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+          .for("no key update")
+        if (!locked) {
+          throw new StockPatchNotApplied()
+        }
+        // group をまたいだ location は弾く。確認も transaction の中で行を押さえて
+        // 行い、確認と更新の間に移動先が削除される競合を防ぐ (move と同じ基準)。
+        if (body.locationId && body.locationId !== locked.locationId) {
+          const [toLoc] = await tx
+            .select({ groupId: locations.groupId })
+            .from(locations)
+            .where(and(eq(locations.id, body.locationId), isNull(locations.deletedAt)))
+            .limit(1)
+            .for("no key update")
+          if (!toLoc || toLoc.groupId !== locked.groupId) {
+            throw new LocationGroupMismatch()
+          }
+        }
+
+        const now = new Date()
+        const [updated] = await tx
+          .update(stocks)
+          .set({
+            ...(body.locationId !== undefined && { locationId: body.locationId }),
+            ...(body.unit !== undefined && { unit: body.unit }),
+            ...(body.useByDate !== undefined && { useByDate: body.useByDate }),
+            ...(body.bestBeforeDate !== undefined && { bestBeforeDate: body.bestBeforeDate }),
+            ...(body.openedAt !== undefined && { openedAt: body.openedAt }),
+            ...(body.note !== undefined && { note: body.note }),
+            updatedAt: now,
+          })
+          .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
+          .returning()
+        if (!updated) {
+          throw new Error("stock update returned no row")
+        }
+        return { stock: updated }
+      })
+
+      return c.json({ stock: toStockDto(result.stock) }, 200)
+    } catch (err) {
+      if (err instanceof StockPatchNotApplied) {
+        return c.json({ error: { code: "NOT_FOUND", message: "stock が見つかりません" } }, 404)
+      }
+      if (err instanceof LocationGroupMismatch) {
         return c.json(
           {
             error: {
@@ -558,27 +607,8 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
           422,
         )
       }
+      throw err
     }
-
-    const now = new Date()
-    const [updated] = await db
-      .update(stocks)
-      .set({
-        ...(body.locationId !== undefined && { locationId: body.locationId }),
-        ...(body.unit !== undefined && { unit: body.unit }),
-        ...(body.useByDate !== undefined && { useByDate: body.useByDate }),
-        ...(body.bestBeforeDate !== undefined && { bestBeforeDate: body.bestBeforeDate }),
-        ...(body.openedAt !== undefined && { openedAt: body.openedAt }),
-        ...(body.note !== undefined && { note: body.note }),
-        updatedAt: now,
-      })
-      .where(and(eq(stocks.id, id), isNull(stocks.deletedAt)))
-      .returning()
-    if (!updated) {
-      throw new Error("stock update returned no row")
-    }
-
-    return c.json({ stock: toStockDto(updated) }, 200)
   })
   .openapi(createStockRoute, async (c) => {
     const body = c.req.valid("json")
@@ -939,25 +969,6 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
       )
     }
 
-    // 移動先 location が同じ group に属することを検証する。
-    // location が deletedAt なら移動先として不正なので除外。
-    const [toLoc] = await db
-      .select({ groupId: locations.groupId })
-      .from(locations)
-      .where(and(eq(locations.id, body.toLocationId), isNull(locations.deletedAt)))
-      .limit(1)
-    if (!toLoc || toLoc.groupId !== existing.groupId) {
-      return c.json(
-        {
-          error: {
-            code: "LOCATION_GROUP_MISMATCH",
-            message: "toLocationId が同じ group の active な location ではありません",
-          },
-        },
-        422,
-      )
-    }
-
     try {
       const result = await db.transaction(async (tx) => {
         const now = new Date()
@@ -974,6 +985,19 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
         }
         if (locked.locationId === body.toLocationId) {
           throw new StockMoveNoop()
+        }
+        // 移動先 location が同じ group の active なものであることを、行を押さえた
+        // transaction の中で確かめる。確認が transaction の外だと、その間に
+        // 移動先が削除されても気付けず、削除済みの置き場所へ在庫が移る。
+        // location が deletedAt なら移動先として不正なので除外。
+        const [toLoc] = await tx
+          .select({ groupId: locations.groupId })
+          .from(locations)
+          .where(and(eq(locations.id, body.toLocationId), isNull(locations.deletedAt)))
+          .limit(1)
+          .for("no key update")
+        if (!toLoc || toLoc.groupId !== existing.groupId) {
+          throw new LocationGroupMismatch()
         }
         const [updated] = await tx
           .update(stocks)
@@ -1016,6 +1040,17 @@ export const stocksRouter = new OpenAPIHono<AppEnv>()
             error: {
               code: "MOVE_NOOP",
               message: "移動先が現在の locationId と同じです",
+            },
+          },
+          422,
+        )
+      }
+      if (err instanceof LocationGroupMismatch) {
+        return c.json(
+          {
+            error: {
+              code: "LOCATION_GROUP_MISMATCH",
+              message: "toLocationId が同じ group の active な location ではありません",
             },
           },
           422,
